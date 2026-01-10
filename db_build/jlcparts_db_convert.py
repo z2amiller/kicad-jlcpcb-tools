@@ -155,7 +155,7 @@ class Generate:
         self.skip_cleanup = skip_cleanup
 
     @staticmethod
-    def fix_description(row -> sqlite3.Row) -> str:
+    def fix_description(row: sqlite3.Row) -> str:
         """Fix description field."""
         description = row['description']
         if row['extra']:
@@ -166,7 +166,6 @@ class Generate:
             except Exception:
                 pass
         return description
-
 
     def create_tables(self):
         """Create the tables in the output database."""
