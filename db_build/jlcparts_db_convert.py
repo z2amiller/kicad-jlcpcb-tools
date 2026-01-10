@@ -15,7 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from typing import Optional
+from typing import Any, Optional
 import urllib.request
 import zipfile
 from zipfile import ZipFile
