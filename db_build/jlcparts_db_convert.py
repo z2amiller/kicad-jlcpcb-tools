@@ -565,7 +565,7 @@ class JlcpcbFTS5(Generate):
         description = description.strip()
 
         row = {
-            'LCSC Part': f"C{c[0]}",
+            'LCSC Part': f"C{c['lcsc']}",
             'First Category': self.categories[c['category_id']][0],
             'Second Category': self.categories[c['category_id']][1],
             'MFR.Part': c['mfr'],
