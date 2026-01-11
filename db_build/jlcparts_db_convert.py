@@ -600,7 +600,7 @@ class JlcpcbFTS5(Generate):
         print("Done optimizing fts5 parts table")
 
     def post_build(self):
-        self.populate_categories
+        self.populate_categories()
         self.optimize()
 
 
