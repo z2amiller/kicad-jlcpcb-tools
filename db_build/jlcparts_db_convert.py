@@ -344,7 +344,7 @@ class Jlcpcb(Generate):
     def __init__(self, output_db: Path, skip_cleanup: bool = False):
         chunk_num = Path("chunk_num.txt")
         self.skip_cleanup = skip_cleanup
-        super().__init__(output_db, chunk_num)
+        super().__init__(output_db, chunk_num, skip_cleanup)
 
     def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
         """Translate a row from the jlcparts db into the plugin db format."""
@@ -445,7 +445,7 @@ class JlcpcbFTS5(Generate):
     def __init__(self, output_db: Path, skip_cleanup: bool = False):
         chunk_num = Path("chunk_num_fts5.txt")
         self.skip_cleanup = skip_cleanup
-        super().__init__(output_db, chunk_num)
+        super().__init__(output_db, chunk_num, skip_cleanup)
         self.stats = {
             "price_entries_total": 0,
             "price_entries_deleted_total": 0,
