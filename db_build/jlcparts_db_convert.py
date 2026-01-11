@@ -15,7 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from typing import Any, Optional
+from typing import Any
 import urllib.request
 import zipfile
 from zipfile import ZipFile
@@ -27,9 +27,7 @@ import humanize
 class PriceEntry:
     """Price for a quantity range."""
 
-    def __init__(
-        self, min_quantity: int, max_quantity: Optional[int], price_dollars: str
-    ):
+    def __init__(self, min_quantity: int, max_quantity: int | None, price_dollars: str):
         self.min_quantity = min_quantity
         self.max_quantity = max_quantity
         self.price_dollars_str = price_dollars
@@ -53,7 +51,7 @@ class PriceEntry:
         return f"{self.min_quantity}-{self.max_quantity if self.max_quantity is not None else ''}:{self.price_dollars_str}"
 
     min_quantity: int
-    max_quantity: Optional[int]
+    max_quantity: int | None
     price_dollars_str: str  # to avoid rounding due to float conversion
     price_dollars: float
 
@@ -117,7 +115,7 @@ class Price:
         if len(entries) > 1:
             first = 0
             second = 1
-            f: Optional[PriceEntry] = None
+            f: PriceEntry | None = None
             while True:
                 if f is None:
                     f = copy.deepcopy(entries[first])
@@ -147,7 +145,13 @@ class Price:
 class Generate:
     """Base class for database generation."""
 
-    def __init__(self, output_db: Path, chunk_num: Path, skip_cleanup: bool = False):
+    def __init__(
+        self,
+        output_db: Path,
+        chunk_num: Path,
+        obsolete_parts_threshold_days: int = 0,
+        skip_cleanup: bool = False,
+    ):
         self.output_db = output_db
         self.jlcparts_db_name = "cache.sqlite3"
         self.compressed_output_db = f"{self.output_db}.zip"
@@ -189,6 +193,17 @@ class Generate:
         # connection to the plugin db we want to write
         self.conn = sqlite3.connect(self.output_db)
 
+    def component_where_clause(self) -> str:
+        """Return the WHERE clause for filtering components."""
+        if self.obsolete_parts_threshold_days > 0:
+            # filter out parts that have been obsolete for longer than the threshold
+            filter_seconds = (
+                int(time.time()) - self.obsolete_parts_threshold_days * 24 * 60 * 60
+            )
+            return f" WHERE NOT (stock = 0 AND last_on_stock < {filter_seconds})"
+        else:
+            return ""
+
     def load_categories(self):
         """Load categories from jlcparts db into memory."""
         res = self.conn_jp.execute("SELECT * FROM categories")
@@ -202,7 +217,9 @@ class Generate:
     def load_components(self):
         """Load the input data into the output database."""
 
-        res = self.conn_jp.execute("select count(*) from components")
+        res = self.conn_jp.execute(
+            f"select count(*) from components {self.component_where_clause()}"
+        )
         results = res.fetchone()
         print(f"{humanize.intcomma(results[0])} parts to import")
 
@@ -210,9 +227,20 @@ class Generate:
         self.conn_jp.row_factory = sqlite3.Row
         self.conn.row_factory = sqlite3.Row
         print("Reading components")
-        res = self.conn_jp.execute(
-            "SELECT lcsc, category_id, mfr, package, joints, manufacturer_id, basic, description, datasheet, stock, price, extra FROM components"
-        )
+        res = self.conn_jp.execute(f"""
+            SELECT
+                lcsc,
+                category_id,
+                mfr,
+                package,
+                joints,
+                manufacturer_id,
+                basic,
+                description,
+                datasheet,
+                stock,
+                price,
+                extra FROM components {self.component_where_clause()}""")
         with click.progressbar(length=results[0], label="Importing parts") as bar:
             while True:
                 comps = res.fetchmany(size=100000)
@@ -231,9 +259,9 @@ class Generate:
 
                 # The column names have spaces, so map them to placeholders without spaces
                 data = rows[0]
-                columns = ", ".join([f'"{k}"' for k in data.keys()])
+                columns = ", ".join([f'"{k}"' for k in data])
                 placeholders = ", ".join(
-                    [f":{k.replace(' ', '_').replace('.', '_')}" for k in data.keys()]
+                    [f":{k.replace(' ', '_').replace('.', '_')}" for k in data]
                 )
                 newrows = [
                     {k.replace(" ", "_").replace(".", "_"): v for k, v in row.items()}
@@ -348,10 +376,17 @@ class Generate:
 class Jlcpcb(Generate):
     """Sqlite parts database generator."""
 
-    def __init__(self, output_db: Path, skip_cleanup: bool = False):
+    def __init__(
+        self,
+        output_db: Path,
+        skip_cleanup: bool = False,
+        obsolete_parts_threshold_days: int = 0,
+    ):
         chunk_num = Path("chunk_num.txt")
         self.skip_cleanup = skip_cleanup
-        super().__init__(output_db, chunk_num, skip_cleanup)
+        super().__init__(
+            output_db, chunk_num, obsolete_parts_threshold_days, skip_cleanup
+        )
 
     def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
         """Translate a row from the jlcparts db into the plugin db format."""
@@ -450,10 +485,17 @@ class Jlcpcb(Generate):
 class JlcpcbFTS5(Generate):
     """FTS5 specific database generation."""
 
-    def __init__(self, output_db: Path, skip_cleanup: bool = False):
+    def __init__(
+        self,
+        output_db: Path,
+        skip_cleanup: bool = False,
+        obsolete_parts_threshold_days: int = 0,
+    ):
         chunk_num = Path("chunk_num_fts5.txt")
         self.skip_cleanup = skip_cleanup
-        super().__init__(output_db, chunk_num, skip_cleanup)
+        super().__init__(
+            output_db, chunk_num, obsolete_parts_threshold_days, skip_cleanup
+        )
         self.stats = {
             "price_entries_total": 0,
             "price_entries_deleted_total": 0,
@@ -519,6 +561,7 @@ class JlcpcbFTS5(Generate):
         )
 
     def price_entry_to_str(self, price: Price) -> str:
+        """Convert Price object into the string format used in the parts db."""
         price_entries = Price.reduce_precision(price.price_entries)
         self.stats["price_entries_total"] += len(price_entries)
         price_str: str = ""
@@ -552,6 +595,7 @@ class JlcpcbFTS5(Generate):
         return price_str
 
     def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
+        """Translate a row from the jlcparts db into the plugin db format."""
         price_str = self.price_entry_to_str(Price(json.loads(c["price"])))
         # default to 'description', override it with the 'description' property from
         # 'extra' if it exists
@@ -595,6 +639,7 @@ class JlcpcbFTS5(Generate):
         return row
 
     def display_stats(self):
+        """Display stats specific to FTS5 generation."""
         price_entries_total = self.stats["price_entries_total"]
         price_entries_deleted_total = self.stats["price_entries_deleted_total"]
         price_entries_duplicates_deleted_total = self.stats[
@@ -618,6 +663,7 @@ class JlcpcbFTS5(Generate):
         print("Done optimizing fts5 parts table")
 
     def post_build(self):
+        """Post build steps."""
         self.populate_categories()
         self.optimize()
 
@@ -738,7 +784,22 @@ def test_price_duplicate_price_filter():
     default=False,
     help="Skip the DB generation phase",
 )
-def main(skip_cleanup: bool, fetch_parts_db: bool, skip_generate: bool):
+@click.option(
+    "--obsolete-parts-threshold-days",
+    show_default=True,
+    default=0,
+    type=int,
+    help="""
+        Setting this to > 0 will filter out parts that have a stock level of zero
+        in the source parts database for at least this many days.
+    """,
+)
+def main(
+    skip_cleanup: bool,
+    fetch_parts_db: bool,
+    skip_generate: bool,
+    obsolete_parts_threshold_days: int,
+):
     """Perform the database steps."""
 
     output_directory = "db_working"
