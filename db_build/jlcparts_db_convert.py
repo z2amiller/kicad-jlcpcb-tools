@@ -835,7 +835,7 @@ def main(skip_cleanup: bool, fetch_parts_db: bool, skip_generate: bool):
 
         print(f"Generating {output_name} in {output_directory} directory")
         generator = Jlcpcb(partsdb, skip_cleanup)
-        # generator.build()
+        generator.build()
 
         end = datetime.now()
         deltatime = end - start
