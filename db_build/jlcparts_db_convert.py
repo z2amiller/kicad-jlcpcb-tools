@@ -167,6 +167,15 @@ class Generate:
                 pass
         return description
 
+    @staticmethod
+    def library_type(row: sqlite3.Row) -> str:
+        """Return library type string."""
+        if row["basic"]:
+            return "Basic"
+        if row["preferred"]:
+            return "Preferred"
+        return "Extended"
+
     def create_tables(self):
         """Create the tables in the output database."""
         raise NotImplementedError("Subclasses must implement create_tables method")
@@ -211,7 +220,7 @@ class Generate:
         self.conn.row_factory = sqlite3.Row
         print("Reading components")
         res = self.conn_jp.execute(
-            "SELECT lcsc, category_id, mfr, package, joints, manufacturer_id, basic, description, datasheet, stock, price, extra FROM components"
+            "SELECT lcsc, category_id, mfr, package, joints, manufacturer_id, basic, preferred, description, datasheet, stock, price, extra FROM components"
         )
         with click.progressbar(length=results[0], label="Importing parts") as bar:
             while True:
@@ -388,7 +397,7 @@ class Jlcpcb(Generate):
             "Package": c["package"],  # Package
             "Solder Joint": int(c["joints"]),  # Solder Joint
             "Manufacturer": self.manufacturers[c["manufacturer_id"]],  # Manufacturer
-            "Library Type": "Basic" if c["basic"] else "Extended",  # Library Type
+            "Library Type": self.library_type(c),  # Library Type
             "Description": description,  # Description
             "Datasheet": c["datasheet"],  # Datasheet
             "Price": price_str,  # Price
@@ -586,7 +595,7 @@ class JlcpcbFTS5(Generate):
             "Package": package,
             "Solder Joint": int(c["joints"]),
             "Manufacturer": self.manufacturers[c["manufacturer_id"]],
-            "Library Type": "Basic" if c["basic"] else "Extended",
+            "Library Type": self.library_type(c),
             "Description": description,
             "Datasheet": c["datasheet"],
             "Price": price_str,
