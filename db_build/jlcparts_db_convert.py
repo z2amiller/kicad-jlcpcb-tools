@@ -226,31 +226,15 @@ class Generate:
 
                 rows = []
                 for c in comps:
-                    price = json.loads(c['price'])
-                    price_str = ",".join(
-                        [
-                            f"{entry.get('qFrom')}-{entry.get('qTo') if entry.get('qTo') is not None else ''}:{entry.get('price')}"
-                            for entry in price
-                        ]
-                    )
-
-                    # default to 'description', override it with the 'description' property from
-                    # 'extra' if it exists
-                    description = c['description']
-                    if c['extra']:
-                        try:
-                            extra = json.loads(c['extra'])
-                            if "description" in extra:
-                                description = extra["description"]
-                        except Exception:
-                            pass
-
                     row = self.translate_row(c)
                     rows.append(row)
 
-                self.conn.executemany(
-                    "INSERT INTO parts VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
-                )
+                # The column names have spaces, so map them to placeholders without spaces
+                data = rows[0]
+                columns = ', '.join([f'"{k}"' for k in data.keys()])
+                placeholders = ', '.join([f':{k.replace(" ", "_").replace(".", "_")}' for k in data.keys()])
+                newrows = [{k.replace(" ", "_").replace(".", "_"): v for k, v in row.items()} for row in rows]
+                self.conn.executemany( f"INSERT INTO parts ({columns}) VALUES ({placeholders})", newrows)
                 self.conn.commit()
 
         print("Done importing parts")
@@ -390,7 +374,7 @@ class Jlcpcb(Generate):
                 pass
 
         row = {
-            'LSSC Part':  f"C{c['lcsc']}",  # LCSC Part
+            'LCSC Part':  f"C{c['lcsc']}",  # LCSC Part
             'First Category': self.categories[c['category_id']][0],  # First Category
             'Second Category': self.categories[c['category_id']][1],  # Second Category
             'MFR.Part': c['mfr'],  # MFR.Part
@@ -528,12 +512,12 @@ class JlcpcbFTS5(Generate):
 
     def price_entry_to_str(self, price: Price) -> str:
         price_entries = Price.reduce_precision(price.price_entries)
-        price_entries_total += len(price_entries)
+        self.stats['price_entries_total'] += len(price_entries)
         price_str: str = ""
 
         # filter parts priced below the cutoff value
         price_entries_cutoff = Price.filter_below_cutoff(price_entries, 0.01)
-        price_entries_deleted_total += len(price_entries) - len( price_entries_cutoff)
+        self.stats['price_entries_deleted_total'] += len(price_entries) - len(price_entries_cutoff)
 
         # alias the variable for the next step
         price_entries = price_entries_cutoff
@@ -554,7 +538,7 @@ class JlcpcbFTS5(Generate):
         return price_str
 
     def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
-        price_str = self.price_entry_to_str(json.loads(c['price']))
+        price_str = self.price_entry_to_str(Price(json.loads(c['price'])))
         # default to 'description', override it with the 'description' property from
         # 'extra' if it exists
         description = self.fix_description(c)
@@ -851,7 +835,7 @@ def main(skip_cleanup: bool, fetch_parts_db: bool, skip_generate: bool):
 
         print(f"Generating {output_name} in {output_directory} directory")
         generator = Jlcpcb(partsdb, skip_cleanup)
-        generator.build()
+        # generator.build()
 
         end = datetime.now()
         deltatime = end - start
