@@ -157,6 +157,7 @@ class Generate:
         self.compressed_output_db = f"{self.output_db}.zip"
         self.chunk_num = chunk_num
         self.skip_cleanup = skip_cleanup
+        self.obsolete_parts_threshold_days = obsolete_parts_threshold_days
 
     @staticmethod
     def fix_description(row: sqlite3.Row) -> str:
@@ -385,7 +386,10 @@ class Jlcpcb(Generate):
         chunk_num = Path("chunk_num.txt")
         self.skip_cleanup = skip_cleanup
         super().__init__(
-            output_db, chunk_num, obsolete_parts_threshold_days, skip_cleanup
+            output_db=output_db,
+            chunk_num=chunk_num,
+            obsolete_parts_threshold_days=obsolete_parts_threshold_days,
+            skip_cleanup=skip_cleanup,
         )
 
     def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
@@ -494,7 +498,10 @@ class JlcpcbFTS5(Generate):
         chunk_num = Path("chunk_num_fts5.txt")
         self.skip_cleanup = skip_cleanup
         super().__init__(
-            output_db, chunk_num, obsolete_parts_threshold_days, skip_cleanup
+            output_db=output_db,
+            chunk_num=chunk_num,
+            obsolete_parts_threshold_days=obsolete_parts_threshold_days,
+            skip_cleanup=skip_cleanup,
         )
         self.stats = {
             "price_entries_total": 0,
@@ -913,7 +920,11 @@ def main(
         partsdb = Path(output_name)
 
         print(f"Generating {output_name} in {output_directory} directory")
-        generator = Jlcpcb(partsdb, skip_cleanup)
+        generator = Jlcpcb(
+            output_db=partsdb,
+            skip_cleanup=skip_cleanup,
+            obsolete_parts_threshold_days=obsolete_parts_threshold_days,
+        )
         generator.build()
 
         end = datetime.now()
@@ -928,7 +939,11 @@ def main(
         partsdb = Path(output_name)
 
         print(f"Generating {output_name} in {output_directory} directory")
-        generator = JlcpcbFTS5(partsdb, skip_cleanup)
+        generator = JlcpcbFTS5(
+            output_db=partsdb,
+            skip_cleanup=skip_cleanup,
+            obsolete_parts_threshold_days=obsolete_parts_threshold_days,
+        )
         generator.build()
 
         end = datetime.now()
