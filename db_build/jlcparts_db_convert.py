@@ -157,10 +157,10 @@ class Generate:
     @staticmethod
     def fix_description(row: sqlite3.Row) -> str:
         """Fix description field."""
-        description = row['description']
-        if row['extra']:
+        description = row["description"]
+        if row["extra"]:
             try:
-                extra = json.loads(row['extra'])
+                extra = json.loads(row["extra"])
                 if "description" in extra:
                     description = extra["description"]
             except Exception:
@@ -174,7 +174,7 @@ class Generate:
     def translate_row(self, c: sqlite3.Row) -> dict[str, any]:
         """Translate a row from the jlcparts db into the plugin db format."""
         raise NotImplementedError("Subclasses must implement translate_row method")
-    
+
     def remove_original(self):
         """Remove the original output database."""
         if self.output_db.exists():
@@ -231,10 +231,17 @@ class Generate:
 
                 # The column names have spaces, so map them to placeholders without spaces
                 data = rows[0]
-                columns = ', '.join([f'"{k}"' for k in data.keys()])
-                placeholders = ', '.join([f':{k.replace(" ", "_").replace(".", "_")}' for k in data.keys()])
-                newrows = [{k.replace(" ", "_").replace(".", "_"): v for k, v in row.items()} for row in rows]
-                self.conn.executemany( f"INSERT INTO parts ({columns}) VALUES ({placeholders})", newrows)
+                columns = ", ".join([f'"{k}"' for k in data.keys()])
+                placeholders = ", ".join(
+                    [f":{k.replace(' ', '_').replace('.', '_')}" for k in data.keys()]
+                )
+                newrows = [
+                    {k.replace(" ", "_").replace(".", "_"): v for k, v in row.items()}
+                    for row in rows
+                ]
+                self.conn.executemany(
+                    f"INSERT INTO parts ({columns}) VALUES ({placeholders})", newrows
+                )
                 self.conn.commit()
 
         print("Done importing parts")
@@ -348,7 +355,7 @@ class Jlcpcb(Generate):
 
     def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
         """Translate a row from the jlcparts db into the plugin db format."""
-        priceInput = json.loads(c['price'])
+        priceInput = json.loads(c["price"])
 
         # parse the price field
         price = Price(priceInput)
@@ -364,28 +371,28 @@ class Jlcpcb(Generate):
 
         # default to 'description', override it with the 'description' property from
         # 'extra' if it exists
-        description = c['description']
-        if c['extra']:
+        description = c["description"]
+        if c["extra"]:
             try:
-                extra = json.loads(c['extra'])
+                extra = json.loads(c["extra"])
                 if "description" in extra:
                     description = extra["description"]
             except Exception:
                 pass
 
         row = {
-            'LCSC Part':  f"C{c['lcsc']}",  # LCSC Part
-            'First Category': self.categories[c['category_id']][0],  # First Category
-            'Second Category': self.categories[c['category_id']][1],  # Second Category
-            'MFR.Part': c['mfr'],  # MFR.Part
-            'Package': c['package'],  # Package
-            'Solder Joint': int(c['joints']),  # Solder Joint
-            'Manufacturer': self.manufacturers[c['manufacturer_id']],  # Manufacturer
-            'Library Type': "Basic" if c['basic'] else "Extended",  # Library Type
-            'Description': description,  # Description
-            'Datasheet': c['datasheet'],  # Datasheet
-            'Price': price_str,  # Price
-            'Stock': str(c['stock']),  # Stock
+            "LCSC Part": f"C{c['lcsc']}",  # LCSC Part
+            "First Category": self.categories[c["category_id"]][0],  # First Category
+            "Second Category": self.categories[c["category_id"]][1],  # Second Category
+            "MFR.Part": c["mfr"],  # MFR.Part
+            "Package": c["package"],  # Package
+            "Solder Joint": int(c["joints"]),  # Solder Joint
+            "Manufacturer": self.manufacturers[c["manufacturer_id"]],  # Manufacturer
+            "Library Type": "Basic" if c["basic"] else "Extended",  # Library Type
+            "Description": description,  # Description
+            "Datasheet": c["datasheet"],  # Datasheet
+            "Price": price_str,  # Price
+            "Stock": str(c["stock"]),  # Stock
         }
         return row
 
@@ -438,6 +445,7 @@ class Jlcpcb(Generate):
             )
             """
         )
+
 
 class JlcpcbFTS5(Generate):
     """FTS5 specific database generation."""
@@ -512,20 +520,26 @@ class JlcpcbFTS5(Generate):
 
     def price_entry_to_str(self, price: Price) -> str:
         price_entries = Price.reduce_precision(price.price_entries)
-        self.stats['price_entries_total'] += len(price_entries)
+        self.stats["price_entries_total"] += len(price_entries)
         price_str: str = ""
 
         # filter parts priced below the cutoff value
         price_entries_cutoff = Price.filter_below_cutoff(price_entries, 0.01)
-        self.stats['price_entries_deleted_total'] += len(price_entries) - len(price_entries_cutoff)
+        self.stats["price_entries_deleted_total"] += len(price_entries) - len(
+            price_entries_cutoff
+        )
 
         # alias the variable for the next step
         price_entries = price_entries_cutoff
 
         # remove duplicates
         price_entries_unique = Price.filter_duplicate_prices(price_entries)
-        self.stats['price_entries_duplicates_deleted_total'] += len(price_entries) - len(price_entries_unique)
-        self.stats['price_entries_deleted_total'] += len(price_entries) - len(price_entries_unique)
+        self.stats["price_entries_duplicates_deleted_total"] += len(
+            price_entries
+        ) - len(price_entries_unique)
+        self.stats["price_entries_deleted_total"] += len(price_entries) - len(
+            price_entries_unique
+        )
         # alias over the variable for the next step
         price_entries = price_entries_unique
         # build the output string that is stored into the parts database
@@ -534,11 +548,11 @@ class JlcpcbFTS5(Generate):
                 f"{entry.min_quantity}-{entry.max_quantity if entry.max_quantity is not None else ''}:{entry.price_dollars_str}"
                 for entry in price_entries
             ]
-            )
+        )
         return price_str
 
     def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
-        price_str = self.price_entry_to_str(Price(json.loads(c['price'])))
+        price_str = self.price_entry_to_str(Price(json.loads(c["price"])))
         # default to 'description', override it with the 'description' property from
         # 'extra' if it exists
         description = self.fix_description(c)
@@ -546,15 +560,15 @@ class JlcpcbFTS5(Generate):
         # and add 'not ROHS' where ROHS is not present
         # as 99% of parts are ROHS at this point
         if " ROHS".lower() not in description.lower():
-           description += " not ROHS"
+            description += " not ROHS"
         else:
-           description = description.replace(" ROHS", "")
+            description = description.replace(" ROHS", "")
 
-        second_category = self.categories[c['category_id']][1]
-         # strip the 'Second category' out of the description if it
-         # is duplicated there
+        second_category = self.categories[c["category_id"]][1]
+        # strip the 'Second category' out of the description if it
+        # is duplicated there
         description = description.replace(second_category, "")
-        package = c['package']
+        package = c["package"]
 
         # remove 'Package' from the description if it is duplicated there
         description = description.replace(package, "")
@@ -565,27 +579,31 @@ class JlcpcbFTS5(Generate):
         description = description.strip()
 
         row = {
-            'LCSC Part': f"C{c['lcsc']}",
-            'First Category': self.categories[c['category_id']][0],
-            'Second Category': self.categories[c['category_id']][1],
-            'MFR.Part': c['mfr'],
-            'Package': package,
-            'Solder Joint': int(c['joints']),
-            'Manufacturer': self.manufacturers[c['manufacturer_id']],
-            'Library Type': "Basic" if c['basic'] else "Extended",
-            'Description': description,
-            'Datasheet': c['datasheet'],
-            'Price': price_str,
-            'Stock': str(c['stock']),
+            "LCSC Part": f"C{c['lcsc']}",
+            "First Category": self.categories[c["category_id"]][0],
+            "Second Category": self.categories[c["category_id"]][1],
+            "MFR.Part": c["mfr"],
+            "Package": package,
+            "Solder Joint": int(c["joints"]),
+            "Manufacturer": self.manufacturers[c["manufacturer_id"]],
+            "Library Type": "Basic" if c["basic"] else "Extended",
+            "Description": description,
+            "Datasheet": c["datasheet"],
+            "Price": price_str,
+            "Stock": str(c["stock"]),
         }
         return row
-    
+
     def display_stats(self):
-        price_entries_total = self.stats['price_entries_total']
-        price_entries_deleted_total = self.stats['price_entries_deleted_total']
-        price_entries_duplicates_deleted_total = self.stats['price_entries_duplicates_deleted_total']
-        print(f"Price value filtering trimmed {price_entries_deleted_total} (including {price_entries_duplicates_deleted_total} duplicates) out of {price_entries_total} entries {(price_entries_deleted_total / price_entries_total) * 100 if price_entries_total != 0 else 0:.2f}%")
-        super().display_stats()  
+        price_entries_total = self.stats["price_entries_total"]
+        price_entries_deleted_total = self.stats["price_entries_deleted_total"]
+        price_entries_duplicates_deleted_total = self.stats[
+            "price_entries_duplicates_deleted_total"
+        ]
+        print(
+            f"Price value filtering trimmed {price_entries_deleted_total} (including {price_entries_duplicates_deleted_total} duplicates) out of {price_entries_total} entries {(price_entries_deleted_total / price_entries_total) * 100 if price_entries_total != 0 else 0:.2f}%"
+        )
+        super().display_stats()
 
     def populate_categories(self):
         """Populate the categories table."""
