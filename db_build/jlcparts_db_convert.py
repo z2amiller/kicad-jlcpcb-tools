@@ -15,7 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from typing import Any, Optional
+from typing import Any
 import urllib.request
 import zipfile
 from zipfile import ZipFile
@@ -27,9 +27,7 @@ import humanize
 class PriceEntry:
     """Price for a quantity range."""
 
-    def __init__(
-        self, min_quantity: int, max_quantity: Optional[int], price_dollars: str
-    ):
+    def __init__(self, min_quantity: int, max_quantity: int | None, price_dollars: str):
         self.min_quantity = min_quantity
         self.max_quantity = max_quantity
         self.price_dollars_str = price_dollars
@@ -53,7 +51,7 @@ class PriceEntry:
         return f"{self.min_quantity}-{self.max_quantity if self.max_quantity is not None else ''}:{self.price_dollars_str}"
 
     min_quantity: int
-    max_quantity: Optional[int]
+    max_quantity: int | None
     price_dollars_str: str  # to avoid rounding due to float conversion
     price_dollars: float
 
@@ -117,7 +115,7 @@ class Price:
         if len(entries) > 1:
             first = 0
             second = 1
-            f: Optional[PriceEntry] = None
+            f: PriceEntry | None = None
             while True:
                 if f is None:
                     f = copy.deepcopy(entries[first])
@@ -219,9 +217,21 @@ class Generate:
         self.conn_jp.row_factory = sqlite3.Row
         self.conn.row_factory = sqlite3.Row
         print("Reading components")
-        res = self.conn_jp.execute(
-            "SELECT lcsc, category_id, mfr, package, joints, manufacturer_id, basic, preferred, description, datasheet, stock, price, extra FROM components"
-        )
+        res = self.conn_jp.execute("""
+            SELECT
+                lcsc,
+                category_id,
+                mfr,
+                package,
+                joints,
+                manufacturer_id,
+                basic,
+                description,
+                datasheet,
+                stock,
+                price,
+                extra
+            FROM components""")
         with click.progressbar(length=results[0], label="Importing parts") as bar:
             while True:
                 comps = res.fetchmany(size=100000)
@@ -360,7 +370,9 @@ class Jlcpcb(Generate):
     def __init__(self, output_db: Path, skip_cleanup: bool = False):
         chunk_num = Path("chunk_num.txt")
         self.skip_cleanup = skip_cleanup
-        super().__init__(output_db, chunk_num, skip_cleanup)
+        super().__init__(
+            output_db=output_db, chunk_num=chunk_num, skip_cleanup=skip_cleanup
+        )
 
     def translate_row(self, c: sqlite3.Row) -> dict[str, Any]:
         """Translate a row from the jlcparts db into the plugin db format."""
@@ -462,7 +474,9 @@ class JlcpcbFTS5(Generate):
     def __init__(self, output_db: Path, skip_cleanup: bool = False):
         chunk_num = Path("chunk_num_fts5.txt")
         self.skip_cleanup = skip_cleanup
-        super().__init__(output_db, chunk_num, skip_cleanup)
+        super().__init__(
+            output_db=output_db, chunk_num=chunk_num, skip_cleanup=skip_cleanup
+        )
         self.stats = {
             "price_entries_total": 0,
             "price_entries_deleted_total": 0,
@@ -861,7 +875,7 @@ def main(skip_cleanup: bool, fetch_parts_db: bool, skip_generate: bool):
         partsdb = Path(output_name)
 
         print(f"Generating {output_name} in {output_directory} directory")
-        generator = Jlcpcb(partsdb, skip_cleanup)
+        generator = Jlcpcb(output_db=partsdb, skip_cleanup=skip_cleanup)
         generator.build()
 
         end = datetime.now()
@@ -876,7 +890,7 @@ def main(skip_cleanup: bool, fetch_parts_db: bool, skip_generate: bool):
         partsdb = Path(output_name)
 
         print(f"Generating {output_name} in {output_directory} directory")
-        generator = JlcpcbFTS5(partsdb, skip_cleanup)
+        generator = JlcpcbFTS5(output_db=partsdb, skip_cleanup=skip_cleanup)
         generator.build()
 
         end = datetime.now()
