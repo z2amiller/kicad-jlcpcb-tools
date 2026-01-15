@@ -11,15 +11,19 @@ import os
 import sqlite3
 import sys
 import time
+from typing import Any
+import urllib.request
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
 from zipfile import ZipFile
 
 import click
+from componentdb import ComponentsDatabase
 import humanize
 
-from filemgr import FileManager, SevenZipFileManager
+from filemgr import FileManager
+from jlcapi import CategoryFetch, Component, JlcApi
 
 
 class PriceEntry:
@@ -608,6 +612,31 @@ def test_price_duplicate_price_filter():
     assert unique[len(unique) - 1].max_quantity is None
 
 
+def update_parts_db_from_api() -> None:
+    """Update the component cache database."""
+    db = ComponentsDatabase("db_working/new.sqlite3")
+    print("Fetching categories...")
+    initial_categories = JlcApi.fetchCategories(instockOnly=True)
+    categories = JlcApi.collapseCategories(initial_categories, limit=50000)
+    print(f"Found {len(initial_categories)} categories, collaped to {len(categories)}.")
+    for category in categories:
+        fetcher = CategoryFetch(category)
+
+        with click.progressbar(
+            length=category.count,
+            label=f"{category}",
+        ) as bar:
+
+            def callback(components: list[Any]) -> None:
+                comp_objs = [Component(comp) for comp in components]
+                db.update_cache(comp_objs)
+                bar.update(len(components))
+
+            fetcher.fetchAll(callback)
+    db.cleanup_stock()
+    db.close()
+
+
 @click.command()
 @click.option(
     "--skip-cleanup",
@@ -615,6 +644,40 @@ def test_price_duplicate_price_filter():
     show_default=True,
     default=False,
     help="Disable cleanup, intermediate database files will not be deleted",
+)
+@click.option(
+    "--parts-db-base-url",
+    default="http://yaqwsx.github.io/jlcparts/data",
+    show_default=True,
+    help="Base URL to fetch the parts database from",
+)
+@click.option(
+    "--fix-parts-db-descriptions",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Fix descriptions in the parts db by pulling from the 'extra' field",
+)
+@click.option(
+    "--update-parts-db",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Update the local parts db using LCSC API data",
+)
+@click.option(
+    "--clean-parts-db",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Clean the local parts db by removing old and out-of-stock parts",
+)
+@click.option(
+    "--archive-parts-db",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Archive the parts db after updating from the API",
 )
 @click.option(
     "--skip-generate",
@@ -635,8 +698,14 @@ def test_price_duplicate_price_filter():
 )
 def main(
     skip_cleanup: bool,
+    parts_db_base_url: str,
+    fix_parts_db_descriptions: bool,
+    update_parts_db: bool,
+    clean_parts_db: bool,
+    archive_parts_db: bool,
     skip_generate: bool,
     obsolete_parts_threshold_days: int,
+,
 ):
     """Perform the database steps."""
 
@@ -644,6 +713,38 @@ def main(
     if not os.path.exists(output_directory):
         os.mkdir(output_directory)
     os.chdir(output_directory)
+
+    if fix_parts_db_descriptions:
+        print("Fixing parts database descriptions")
+        db = ComponentsDatabase("cache.sqlite3")
+        db.fix_description()
+        db.close()
+
+    if update_parts_db:
+        update_parts_db_from_api()
+
+    if clean_parts_db:
+        print("Cleaning parts database")
+        db = ComponentsDatabase("cache.sqlite3")
+        db.truncate_old()
+        db.close()
+
+    if archive_parts_db:
+        print("Archiving parts database")
+
+        def fns(first_file: str, max: int) -> list[str]:
+            ret = [f"{first_file}"]
+            ret.extend([f"{first_file}.{num:03d}" for num in range(1, max + 1)])
+            return ret
+
+        with (
+            SplitFileWriter(
+                list(fns("cache.sqlite3.zip", 20)), 50 * 1024 * 1024
+            ) as sfw,
+            zipfile.ZipFile(sfw, "w", zipfile.ZIP_DEFLATED) as zf,
+        ):
+            zf.write("cache.sqlite3")
+            print(f"fn = {sfw}")
 
     if not skip_generate:
         # sqlite database
