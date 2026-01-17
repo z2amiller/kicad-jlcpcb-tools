@@ -6,21 +6,20 @@ This replaces the old .csv based database creation that JLCPCB no longer support
 """
 
 import copy
-from datetime import date, datetime
 import json
 import os
-from pathlib import Path
-import shutil
 import sqlite3
-import subprocess
 import sys
 import time
-import urllib.request
 import zipfile
+from datetime import date, datetime
+from pathlib import Path
 from zipfile import ZipFile
 
 import click
 import humanize
+
+from filemgr import FileManager, SevenZipFileManager
 
 
 class PriceEntry:
@@ -198,31 +197,17 @@ class Generate:
             zf.write(self.output_db)
 
     def split(self):
-        """Split the compressed so we stay below githubs 100M limit."""
+        """Split the compressed database so we stay below GitHub's 100MB limit.
 
-        # Set the size of each split file (in bytes)
-        split_size = 80000000  # 80 MB
-
-        # Open the zip file for byte-reading
-        print(f"Chunking {self.compressed_output_db}")
-        with open(self.compressed_output_db, "rb") as z:
-            # Read the file data in chunks
-            chunk = z.read(split_size)
-            chunk_num = 1
-
-            while chunk:
-                split_file_name = f"{self.compressed_output_db}.{chunk_num:03}"
-                with open(split_file_name, "wb") as split_file:
-                    # Write the chunk to the new split file
-                    split_file.write(chunk)
-
-                # Read the next chunk of data from the file
-                chunk = z.read(split_size)
-                chunk_num += 1
-
-            # create a helper file for the downloader which indicates the number of chunk files
-            with open(self.chunk_num, "w", encoding="utf-8") as f:
-                f.write(str(chunk_num - 1))
+        Uses FileManager to split the file and create a sentinel file.
+        This maintains compatibility with the previous output format.
+        """
+        file_manager = FileManager(
+            file_path=self.compressed_output_db,
+            chunk_size=80000000,  # 80 MB to stay well below GitHub's 100MB limit
+            sentinel_filename=str(self.chunk_num),
+        )
+        file_manager.split()
 
     def display_stats(self):
         """Print out some stats."""
@@ -630,102 +615,24 @@ def main(skip_cleanup: bool, fetch_parts_db: bool, skip_generate: bool):
 
     if fetch_parts_db:
         base_url = "https://yaqwsx.github.io/jlcparts/data"
-        first_file = "cache.zip"
-
-        # discover which tool is available
-        # it can be 7z (Linux) or 7zz (brew on OSX, see https://github.com/orgs/Homebrew/discussions/6072)
-        seven_zip_tools = ["7z", "7zz"]
-
-        seven_zip_tool = None
-
-        for tool in seven_zip_tools:
-            if shutil.which(tool) is not None:
-                seven_zip_tool = tool
-                break
-
-        if seven_zip_tool is None:
-            print(
-                f"Unable to find any seven zip tool {seven_zip_tools}, install one to use the fetch db feature"
-            )
-            sys.exit(1)
-        else:
-            print(f"Using seven zip tool '{seven_zip_tool}'")
 
         print(f"Fetching upstream parts database from {base_url}")
 
-        download_progress = DownloadProgress()
-        print(f"Fetching first file {first_file}")
-        urllib.request.urlretrieve(
-            f"{base_url}/{first_file}",
-            first_file,
-            reporthook=download_progress.progress_hook,
-        )
-
-        command = [seven_zip_tool, "l", first_file]
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        # NOTE: 'l' lists the contents of the archive and if any of the zip volumes
-        # are missing 7-zip will report non-zero. Only error if the exit code is non-zero
-        # AND the error text isn't present.
-        if result.returncode != 0 and "ERROR = Missing volume" not in result.stdout:
-            print(
-                f"Error running command '{' '.join(command)}': {result.stdout} {result.stderr}"
-            )
-            sys.exit(1)
-
+        # Use SevenZipFileManager to handle 7zip multi-volume archive download
         try:
-            # extract the file count by parsing the command output (stdout)
-            file_count = None
-            for line in result.stdout.splitlines():
-                if "Volume Index =" in line:
-                    try:
-                        file_count = int(line.split("=")[-1].strip())
-                        print(f"File count {file_count}")
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"Failed to parse file count as an integer from line: '{line}'."
-                        ) from exc
-            if file_count is None:
-                raise ValueError(
-                    "No 'Volume Index =' line found in the command output."
-                )
-        except ValueError as e:
+            seven_zip_manager = SevenZipFileManager(file_path="cache")
+            seven_zip_manager.download_from_github(base_url)
+            # Extract the database file
+            seven_zip_manager.extract(output_dir=".")
+        except RuntimeError as e:
+            print(f"Error: {e}")
             print(
-                "Unable to retrieve file count from the 7z output. "
-                f"Error: {e} "
-                "Expected format: 'Volume Index = <number>'. "
-                "Please ensure the 7z tool is installed and the archive is valid."
+                "Unable to fetch parts database. Please ensure 7z or 7zz is installed."
             )
             sys.exit(1)
-
-        # retrieve each file
-        # NOTE: Files start with '1'
-        for part in range(1, file_count + 1):
-            part_file = f"cache.z{part:02d}"
-            print(f"\nGetting file {part_file}")
-            download_progress = DownloadProgress()
-            urllib.request.urlretrieve(
-                f"{base_url}/{part_file}",
-                part_file,
-                reporthook=download_progress.progress_hook,
-            )
-
-        # extract the database file
-        print(f"\nExtracting {first_file}")
-        # pass '-y' that indicates yes to all questions, such as overwriting
-        # NOTE: Python's zipfile (https://docs.python.org/3/library/zipfile.html)
-        # cannot be used as as of 2025-07-22 "This module does not currently handle multi-disk ZIP files."
-        # and that's exactly what we have here
-        command = [seven_zip_tool, "x", "-y", first_file]
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            print(f"Error extracting {first_file} with command '{' '.join(command)}':")
-            print(result.stderr)
+        except OSError as e:
+            print(f"Download error: {e}")
             sys.exit(1)
-
-        # remove the intermediate individual zip files now that the database file
-        # has been extracted
-        for file in Path(".").glob("cache.z*"):
-            file.unlink()
 
     if not skip_generate:
         # sqlite database
