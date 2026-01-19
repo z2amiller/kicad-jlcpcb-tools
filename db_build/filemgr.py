@@ -132,7 +132,14 @@ class FileManager:
         print(f"Chunking {self.file_path}")  # noqa: T201
 
         # Build output file path in working directory
-        output_prefix = work_dir / self.compressed_output_file.name
+        # If compressed_output_file is absolute, use its parent; otherwise use work_dir
+        if self.compressed_output_file.is_absolute():
+            output_dir = self.compressed_output_file.parent
+        else:
+            output_dir = work_dir / self.compressed_output_file.parent
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_prefix = output_dir / self.compressed_output_file.name
         tracker = SplitTracker(str(output_prefix) + ".")
         with (
             SplitFileWriter(tracker.gen_split(), self.chunk_size) as writer,
@@ -143,7 +150,7 @@ class FileManager:
             zip_writer.write(self.file_path, arcname=self.file_path.name)
 
         # Create sentinel file indicating the number of chunks
-        sentinel_path = work_dir / self.sentinel_filename
+        sentinel_path = output_dir / self.sentinel_filename
         with open(sentinel_path, "w", encoding="utf-8") as f:  # noqa: T201
             f.write(str(tracker.get_chunk_count()))
 
@@ -155,6 +162,7 @@ class FileManager:
     def reassemble(
         self,
         output_path: Path | str | None = None,
+        input_dir: Path | str | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> Path:
         """Reassemble split chunks back into the original file.
@@ -164,6 +172,7 @@ class FileManager:
 
         Args:
             output_path: Path for the reassembled file (defaults to self.file_path)
+            input_dir: Directory containing the chunk files (defaults to current directory)
             progress_callback: Optional callback function(bytes_read, total_bytes)
                              for progress reporting
 
@@ -178,14 +187,21 @@ class FileManager:
         if output_path is None:
             output_path = self.file_path
 
+        if input_dir is None:
+            input_dir = Path(".")
+        else:
+            input_dir = Path(input_dir)
+
         output_path = Path(output_path)
-        files = glob.glob(f"{self.compressed_output_file}*")
+        # Search for chunk files in the input directory
+        search_pattern = input_dir / f"{self.compressed_output_file.name}*"
+        files = sorted(glob.glob(str(search_pattern)))
         print(
-            f"Matching chunks with prefix: {self.compressed_output_file} got {list(files)}"
+            f"Matching chunks with prefix: {search_pattern} got {[Path(f).name for f in files]}"
         )  # noqa: T201
         print(f"Reassembling {len(files)} chunks into {output_path}")  # noqa: T201
         with (
-            SplitFileReader(sorted(files), "r") as sfr,
+            SplitFileReader(files, "r") as sfr,
             zipfile.ZipFile(sfr, "r") as zip_reader,  # type: ignore
         ):
             zip_reader.extractall(path=output_path.parent)
@@ -297,6 +313,118 @@ class FileManager:
 
         return output_dir
 
+    def download_and_reassemble(
+        self,
+        github_url: str,
+        output_dir: Path | str | None = None,
+        output_file: Path | str | None = None,
+        progress_manager: NestedProgressBar | None = None,
+        cleanup: bool = True,
+    ) -> Path:
+        """Download split chunks from GitHub and reassemble into final file.
+
+        This is a convenience method that combines download_from_github() and
+        reassemble() into a single workflow, automatically cleaning up all
+        intermediate files (chunks and compressed archive).
+
+        Args:
+            github_url: Base URL to the GitHub archive (without filename or chunk extension)
+            output_dir: Directory for final output file (defaults to current directory)
+            output_file: Final output filename (defaults to self.file_path)
+            progress_manager: Optional NestedProgressBar instance for progress reporting.
+            cleanup: If True, delete all intermediate files after reassembly
+                    (default: True)
+
+        Returns:
+            Path: Path to the final reassembled file (uncompressed)
+
+        Raises:
+            FileNotFoundError: If sentinel file cannot be found or chunk files are missing
+            ValueError: If sentinel file format is invalid
+            OSError: If download or reassembly fails
+
+        """
+        if progress_manager is None:
+            progress_manager = NoOpProgressBar()
+
+        if output_dir is None:
+            output_dir = Path(".")
+        else:
+            output_dir = Path(output_dir)
+
+        if output_file is None:
+            output_file = self.file_path
+        else:
+            output_file = Path(output_file)
+
+        # Ensure output_file has correct parent directory
+        if output_file.parent != output_dir:
+            output_file = output_dir / output_file.name
+
+        try:
+            # Step 1: Download split files
+            print(f"Starting download and reassemble workflow")  # noqa: T201
+            print(f"  Final output: {output_file}")  # noqa: T201
+            self.download_from_github(
+                github_url, output_dir=output_dir, progress_manager=progress_manager
+            )
+
+            # Step 2: Reassemble the downloaded chunks
+            print(f"\nReassembling chunks...")  # noqa: T201
+            reassembled_file = self.reassemble(
+                output_path=output_file, input_dir=output_dir
+            )
+
+            # Step 3: Clean up intermediate files
+            if cleanup:
+                self._cleanup_intermediate_files(output_dir)
+
+            print(f"\n✓ Successfully completed download and reassembly")  # noqa: T201
+            print(f"  Final file: {reassembled_file}")  # noqa: T201
+            print(f"  Size: {reassembled_file.stat().st_size:,} bytes")  # noqa: T201
+
+            return reassembled_file
+
+        except Exception as e:
+            print(f"\n✗ Error during download and reassemble: {e}")  # noqa: T201
+            raise
+
+    def _cleanup_intermediate_files(self, directory: Path | str) -> None:
+        """Clean up intermediate chunk and compressed files.
+
+        Removes:
+        - Chunk files (e.g., parts-fts5.db.001, .002, etc.)
+        - Compressed archive (e.g., parts-fts5.db.zip)
+        - Sentinel file (e.g., chunk_num_fts5.txt)
+
+        Args:
+            directory: Directory containing intermediate files
+
+        """
+        directory = Path(directory)
+        files_deleted = 0
+
+        # Delete chunk files
+        for chunk_file in directory.glob(f"{self.compressed_output_file.name}.*"):
+            try:
+                chunk_file.unlink()
+                files_deleted += 1
+                print(f"  Deleted: {chunk_file.name}")  # noqa: T201
+            except OSError as e:
+                print(f"  Warning: Could not delete {chunk_file.name}: {e}")  # noqa: T201
+
+        # Delete sentinel file
+        sentinel_path = directory / self.sentinel_filename
+        if sentinel_path.exists():
+            try:
+                sentinel_path.unlink()
+                files_deleted += 1
+                print(f"  Deleted: {sentinel_path.name}")  # noqa: T201
+            except OSError as e:
+                print(f"  Warning: Could not delete {sentinel_path.name}: {e}")  # noqa: T201
+
+        print(f"Cleaned up {files_deleted} intermediate files")  # noqa: T201
+
 
 def main() -> None:
     """Download parts-fts5.db files from GitHub."""
@@ -343,27 +471,15 @@ def main() -> None:
             file_path="parts-fts5.db", sentinel_filename="chunk_num_fts5.txt"
         )
 
-        # Download the split files
-        manager.download_from_github(
-            args.url, output_dir=output_dir, progress_manager=TqdmNestedProgressBar()
+        # Download and reassemble in a single operation with cleanup
+        output_file = args.output_file or (Path(args.output) / "parts-fts5.db")
+        manager.download_and_reassemble(
+            github_url=args.url,
+            output_dir=args.output,
+            output_file=output_file,
+            progress_manager=TqdmNestedProgressBar(),
+            cleanup=True,
         )
-        print("✓ Download complete!")  # noqa: T201
-
-        # Reassemble if requested
-        if args.reassemble:
-            output_file = args.output_file or (output_dir / "parts-fts5.db.zip")
-            print(f"\nReassembling to {output_file}...")  # noqa: T201
-            manager.reassemble()
-            print("✓ Reassembly complete!")  # noqa: T201
-
-            # Verify the file
-            if output_file.exists():
-                file_size = output_file.stat().st_size
-                print(
-                    f"\n✓ Success! Reassembled file: {output_file.name} ({file_size:,} bytes)"
-                )  # noqa: T201
-            else:
-                print(f"\n✗ Error: {output_file.name} not found")  # noqa: T201
 
     except FileNotFoundError as e:
         print(f"\n✗ File not found: {e}")  # noqa: T201
