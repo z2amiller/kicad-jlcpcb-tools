@@ -730,21 +730,12 @@ def main(
         db.close()
 
     if archive_parts_db:
-        print("Archiving parts database")
-
-        def fns(first_file: str, max: int) -> list[str]:
-            ret = [f"{first_file}"]
-            ret.extend([f"{first_file}.{num:03d}" for num in range(1, max + 1)])
-            return ret
-
-        with (
-            SplitFileWriter(
-                list(fns("cache.sqlite3.zip", 20)), 50 * 1024 * 1024
-            ) as sfw,
-            zipfile.ZipFile(sfw, "w", zipfile.ZIP_DEFLATED) as zf,
-        ):
-            zf.write("cache.sqlite3")
-            print(f"fn = {sfw}")
+        fm = FileManager(
+            file_path=Path("cache.sqlite3"),
+            chunk_size=50 * 1024 * 1024,  # 50 MB
+            sentinel_filename="cache_chunk_num.txt",
+        )
+        fm.split(output_dir=Path("cached_archive"))
 
     if not skip_generate:
         # sqlite database

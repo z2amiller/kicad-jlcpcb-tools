@@ -94,7 +94,7 @@ class FileManager:
         self.cleanup_temp_dir()
         return False
 
-    def split(self) -> int:
+    def split(self, output_dir: Path) -> int:
         """Split the file into chunks, creating a sentinel file with chunk count.
 
         This method maintains compatibility with Generate.split() output format.
@@ -135,7 +135,7 @@ class FileManager:
         # If compressed_output_file is absolute, use its parent; otherwise use work_dir
         if self.compressed_output_file.is_absolute():
             output_dir = self.compressed_output_file.parent
-        else:
+        elif output_dir is None:
             output_dir = work_dir / self.compressed_output_file.parent
 
         output_dir.mkdir(parents=True, exist_ok=True)
