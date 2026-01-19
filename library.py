@@ -112,6 +112,25 @@ class Library:
         self.setup()
         self.check_library()
 
+    def refresh_library_config(self):
+        """Refresh library configuration from settings."""
+        # Get selected library from settings, default to FTS5
+        selected_library = self.parent.settings.get("library", {}).get(
+            "selected_library", DEFAULT_LIBRARY
+        )
+        if selected_library not in LIBRARY_CONFIG:
+            selected_library = DEFAULT_LIBRARY
+
+        self.selected_library = selected_library
+        library_config = LIBRARY_CONFIG[selected_library]
+        self.partsdb_file = os.path.join(self.datadir, library_config["db_file"])
+
+        self.logger.debug(
+            "Library configuration refreshed. Selected: %s, Database: %s",
+            self.selected_library,
+            self.partsdb_file,
+        )
+
     def setup(self):
         """Check if folders and database exist, setup if not."""
         if not os.path.isdir(self.datadir):
@@ -529,6 +548,13 @@ class Library:
         progress_file = os.path.join(self.datadir, "progress.txt")
         chunk_file_stub = library_config["chunk_stub"]
         completed_chunks = set()
+
+        self.logger.debug("Starting download of JLCPCB parts database...")
+        self.logger.debug(
+            "Using library: %s (basefile %s)",
+            self.selected_library,
+            library_config["chunk_stub"],
+        )
 
         # Check if there is a progress file
         if os.path.exists(progress_file):
