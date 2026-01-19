@@ -245,7 +245,7 @@ class Component(dict[str, Any]):
         self.data = data
 
     def asDatabaseRow(self) -> dict[str, Any]:
-        """Convert to database row format."""
+        """Convert to ComponentDatabase row format."""
         return {
             "lcsc": LcscId(self["componentCode"]).toDbKey(),
             "category_id": self["category_id"],
