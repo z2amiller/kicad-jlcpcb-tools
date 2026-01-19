@@ -13,9 +13,6 @@ from pathlib import Path
 import sqlite3
 import sys
 import time
-from typing import Any
-import zipfile
-from zipfile import ZipFile
 
 # Add parent directory to path so we can import common module
 # TODO(z2amiller):  Use proper packaging

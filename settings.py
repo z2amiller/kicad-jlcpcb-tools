@@ -7,6 +7,9 @@ import wx  # pylint: disable=import-error
 from .events import UpdateSetting
 from .helpers import HighResWxSize, loadBitmapScaled
 
+# Import library configuration to populate choices
+from .library import LIBRARY_CONFIG
+
 
 class SettingsDialog(wx.Dialog):
     """Dialog for plugin settings."""
@@ -263,6 +266,38 @@ class SettingsDialog(wx.Dialog):
         order_number_sizer.Add(self.order_number_image, 10, wx.ALL | wx.EXPAND, 5)
         order_number_sizer.Add(self.order_number_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Library Selection #####
+
+        library_label = wx.StaticText(
+            self,
+            id=wx.ID_ANY,
+            label="Parts Library:",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+        )
+
+        library_choices = [config["display_name"] for config in LIBRARY_CONFIG.values()]
+        self.library_selected_setting = wx.ComboBox(
+            self,
+            id=wx.ID_ANY,
+            value="",
+            choices=library_choices,
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=wx.CB_READONLY,
+            name="library_selected_library",
+        )
+
+        self.library_selected_setting.SetToolTip(
+            wx.ToolTip("Select which parts library to use")
+        )
+
+        self.library_selected_setting.Bind(wx.EVT_COMBOBOX, self.update_settings)
+
+        library_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        library_sizer.Add(library_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        library_sizer.Add(self.library_selected_setting, 1, wx.ALL | wx.EXPAND, 5)
+
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
@@ -275,6 +310,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -434,6 +470,17 @@ class SettingsDialog(wx.Dialog):
         self.update_order_number(
             self.parent.settings.get("general", {}).get("order_number", True)
         )
+        self.update_selected_library(
+            self.parent.settings.get("library", {}).get("selected_library", "fts5")
+        )
+
+    def update_selected_library(self, library_key):
+        """Update settings dialog according to the selected library."""
+        from .library import LIBRARY_CONFIG
+
+        if library_key in LIBRARY_CONFIG:
+            display_name = LIBRARY_CONFIG[library_key]["display_name"]
+            self.library_selected_setting.SetStringSelection(display_name)
 
     def update_settings(self, event):
         """Update and persist a setting that was changed."""
@@ -442,6 +489,17 @@ class SettingsDialog(wx.Dialog):
         self.logger.debug(section)
         self.logger.debug(name)
         self.logger.debug(value)
+
+        # Special handling for library selection: convert display name back to key
+        if section == "library" and name == "selected_library":
+            from .library import LIBRARY_CONFIG
+
+            # Find the key for this display name
+            for key, config in LIBRARY_CONFIG.items():
+                if config["display_name"] == value:
+                    value = key
+                    break
+
         getattr(self, f"update_{name}")(value)
 
         wx.PostEvent(
