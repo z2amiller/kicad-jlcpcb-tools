@@ -1,6 +1,6 @@
 """JLCPCB API interaction classes and utilities."""
 
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 import json
 import time
 from typing import Any, NamedTuple
