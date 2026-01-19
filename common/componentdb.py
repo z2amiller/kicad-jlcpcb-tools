@@ -1,5 +1,6 @@
 """Component database management."""
 
+from collections.abc import Generator
 import json
 import sqlite3
 import time
@@ -256,3 +257,39 @@ class ComponentsDatabase:
             (comp.asDatabaseRow() for comp in components),
         )
         self.conn.commit()
+
+    def fetch_components(
+        self, where_clause: str = "", batch_size: int = 100000
+    ) -> Generator[list[sqlite3.Row], None, None]:
+        """Yield batches of sqlite3.Row objects from the database.
+
+        Args:
+            where_clause: SQL WHERE clause (without the WHERE keyword). If empty,
+                         all components are returned.
+            batch_size: Number of components to yield in each batch (default 100000).
+
+        Yields:
+            list[sqlite3.Row]: Lists of rows up to batch_size length.
+
+        Example:
+            for batch in db.components_batch_generator("stock > 0", batch_size=10000):
+                for row in batch:
+                    print(row["lcsc"])
+
+        """
+        query = "SELECT * FROM components"
+
+        if where_clause:
+            query += f" WHERE {where_clause}"
+
+        query += " ORDER BY lcsc"
+
+        cursor = self.conn.execute(query)
+
+        while True:
+            rows = cursor.fetchmany(batch_size)
+
+            if not rows:
+                break
+
+            yield rows
