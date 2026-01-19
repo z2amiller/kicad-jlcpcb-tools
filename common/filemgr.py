@@ -94,7 +94,7 @@ class FileManager:
         self.cleanup_temp_dir()
         return False
 
-    def split(
+    def compress_and_split(
         self, output_dir: Path | None = None, delete_original: bool = False
     ) -> int:
         """Split the file into chunks, creating a sentinel file with chunk count.

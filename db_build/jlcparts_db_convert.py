@@ -209,7 +209,7 @@ class Generate:
             chunk_size=80000000,  # 80 MB to stay well below GitHub's 100MB limit
             sentinel_filename=str(self.chunk_num),
         )
-        file_manager.split()
+        file_manager.compress_and_split()
 
     def display_stats(self):
         """Print out some stats."""
@@ -748,7 +748,9 @@ def main(
             chunk_size=50 * 1024 * 1024,  # 50 MB
             sentinel_filename="cache_chunk_num.txt",
         )
-        fm.split(output_dir=Path("cached_archive"), delete_original=skip_cleanup)
+        fm.compress_and_split(
+            output_dir=Path("cached_archive"), delete_original=skip_cleanup
+        )
 
 
 if __name__ == "__main__":
