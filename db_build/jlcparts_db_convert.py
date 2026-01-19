@@ -13,6 +13,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import time
+from typing import NamedTuple
 
 # Add parent directory to path so we can import common module
 # TODO(z2amiller):  Use proper packaging
@@ -57,6 +58,60 @@ class PriceEntry:
     max_quantity: int | None
     price_dollars_str: str  # to avoid rounding due to float conversion
     price_dollars: float
+
+
+class PartDatabaseConfig(NamedTuple):
+    """Configuration for part database generation."""
+
+    name: str
+    output_dir: str
+    chunk_file_name: str
+    where_clause: str
+
+
+class DatabaseConfig:
+    """Predefined database configurations."""
+
+    @staticmethod
+    def preferredAndBasic() -> PartDatabaseConfig:
+        """Select only preferred and basic parts."""
+        return PartDatabaseConfig(
+            name="basic-parts-fts5.db",
+            output_dir="archive/basic",
+            chunk_file_name="chunk_num_basic_parts_fts5.txt",
+            where_clause=" WHERE basic = 1 OR preferred = 1",
+        )
+
+    @staticmethod
+    def allParts() -> PartDatabaseConfig:
+        """Select all parts."""
+        return PartDatabaseConfig(
+            name="all-parts-fts5.db",
+            output_dir="archive/all",
+            chunk_file_name="chunk_num_all_parts_fts5.txt",
+            where_clause=" WHERE TRUE",
+        )
+
+    @staticmethod
+    def ignoreObsoleteParts(obsolete_threshold_days: int = 365) -> PartDatabaseConfig:
+        """Select all parts except obsolete parts."""
+        filter_seconds = int(time.time()) - obsolete_threshold_days * 24 * 60 * 60
+        return PartDatabaseConfig(
+            name="parts-fts5.db",
+            output_dir="archive/parts",
+            chunk_file_name="chunk_num_fts5.txt",
+            where_clause=f" WHERE NOT (stock = 0 AND last_on_stock < {filter_seconds})",
+        )
+
+    @staticmethod
+    def emptyParts() -> PartDatabaseConfig:
+        """Select no parts."""
+        return PartDatabaseConfig(
+            name="empty-parts-fts5.db",
+            output_dir="archive/empty",
+            chunk_file_name="chunk_num_empty_parts_fts5.txt",
+            where_clause=" WHERE FALSE",
+        )
 
 
 class Price:
@@ -151,12 +206,14 @@ class Generate:
     def __init__(
         self,
         output_db: Path,
+        archive_dir: Path,
         chunk_num: Path = Path("chunk_num_fts5.txt"),
         jlcparts_db_name: str = "cache.sqlite3",
         obsolete_parts_threshold_days: int = 0,
         skip_cleanup: bool = False,
     ):
         self.output_db = output_db
+        self.archive_dir = archive_dir
         self.jlcparts_db_name = jlcparts_db_name
         self.compressed_output_db = f"{self.output_db}.zip"
         self.chunk_num = chunk_num
@@ -209,33 +266,19 @@ class Generate:
             chunk_size=80000000,  # 80 MB to stay well below GitHub's 100MB limit
             sentinel_filename=str(self.chunk_num),
         )
-        file_manager.compress_and_split()
+        file_manager.compress_and_split(output_dir=self.archive_dir)
 
     def display_stats(self):
         """Print out some stats."""
         jlcparts_db_size = humanize.naturalsize(os.path.getsize(self.jlcparts_db_name))
         print(f"jlcparts database ({self.jlcparts_db_name}): {jlcparts_db_size}")
         print(f"part count: {humanize.intcomma(self.part_count)}")
-        print(
-            f"output db: {humanize.naturalsize(os.path.getsize(self.output_db.name))}"
-        )
 
     def cleanup(self):
         """Remove the compressed zip file und output db after splitting."""
 
         print(f"Deleting {self.output_db}")
         os.unlink(self.output_db)
-
-    def component_where_clause(self) -> str:
-        """Return the WHERE clause for filtering components."""
-        if self.obsolete_parts_threshold_days > 0:
-            # filter out parts that have been obsolete for longer than the threshold
-            filter_seconds = (
-                int(time.time()) - self.obsolete_parts_threshold_days * 24 * 60 * 60
-            )
-            return f" WHERE NOT (stock = 0 AND last_on_stock < {filter_seconds})"
-        else:
-            return ""
 
     def create_tables(self):
         """Create tables."""
@@ -304,7 +347,7 @@ class Generate:
             return "Preferred"
         return "Extended"
 
-    def load_tables(self):
+    def load_tables(self, where_clause: str = " WHERE TRUE"):
         """Load the input data into the output database."""
 
         # load the tables into memory
@@ -316,9 +359,7 @@ class Generate:
         res = self.conn_jp.execute("SELECT * FROM categories")
         cats = {i: (c, sc) for i, c, sc in res.fetchall()}
 
-        res = self.conn_jp.execute(
-            f"select count(*) from components {self.component_where_clause()}"
-        )
+        res = self.conn_jp.execute(f"select count(*) from components {where_clause}")
         results = res.fetchone()
         print(f"{humanize.intcomma(results[0])} parts to import")
 
@@ -345,7 +386,7 @@ class Generate:
                 stock,
                 price,
                 extra
-            FROM components {self.component_where_clause()}""")
+            FROM components {where_clause}""")
         while True:
             comps = res.fetchmany(size=100000)
 
@@ -489,12 +530,12 @@ class Generate:
         self.conn.execute("insert into parts(parts) values('optimize')")
         print("Done optimizing fts5 parts table")
 
-    def build(self):
+    def build(self, where_clause: str = " WHERE TRUE"):
         """Run all of the steps to generate the database files for upload."""
         self.remove_original()
         self.connect_sqlite()
         self.create_tables()
-        self.load_tables()
+        self.load_tables(where_clause=where_clause)
         self.populate_categories()
         self.optimize()
         self.meta_data()
@@ -698,11 +739,10 @@ def main(
 ):
     """Perform the database steps."""
 
-    components_db = "cache_archive/cache.sqlite3"
-
-    output_directory = "db_working"
-    if not os.path.exists(output_directory):
-        os.mkdir(output_directory)
+    working_directory = "db_working"
+    components_db = f"{working_directory}/cache.sqlite3"
+    if not os.path.exists(working_directory):
+        os.mkdir(working_directory)
 
     if fix_parts_db_descriptions:
         print("Fixing parts database descriptions")
@@ -719,29 +759,31 @@ def main(
         db.truncate_old()
         db.close()
 
-    os.chdir(output_directory)
-    if not skip_generate:
-        # sqlite database
-        start = datetime.now()
-        output_name = "parts-fts5.db"
-        partsdb = Path(output_name)
-
-        print(f"Generating {output_name} in {output_directory} directory")
-        generator = Generate(
-            output_db=partsdb,
-            skip_cleanup=skip_cleanup,
-            obsolete_parts_threshold_days=obsolete_parts_threshold_days,
-            jlcparts_db_name=f"../{components_db}",  # TODO(z2amiller): Fix this hack
-        )
-        generator.build()
-
-        end = datetime.now()
-        deltatime = end - start
-        print(
-            f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}"
+    configs = [
+        DatabaseConfig.preferredAndBasic(),
+        DatabaseConfig.allParts(),
+        DatabaseConfig.emptyParts(),
+    ]
+    if obsolete_parts_threshold_days > 0:
+        configs.insert(
+            0, DatabaseConfig.ignoreObsoleteParts(obsolete_parts_threshold_days)
         )
 
-    os.chdir("..")
+    for config in configs:
+        if not os.path.exists(config.output_dir):
+            os.makedirs(config.output_dir)
+
+        if not skip_generate:
+            print(f"Generating {config.name}...")
+            generator = Generate(
+                output_db=Path(working_directory) / config.name,
+                archive_dir=Path(config.output_dir),
+                chunk_num=Path(config.chunk_file_name),
+                jlcparts_db_name=components_db,
+                skip_cleanup=skip_cleanup,
+            )
+            generator.build(where_clause=config.where_clause)
+
     if archive_parts_db:
         fm = FileManager(
             file_path=Path(components_db),
@@ -749,7 +791,7 @@ def main(
             sentinel_filename="cache_chunk_num.txt",
         )
         fm.compress_and_split(
-            output_dir=Path("cached_archive"), delete_original=skip_cleanup
+            output_dir=Path("archive/components"), delete_original=skip_cleanup
         )
 
 
