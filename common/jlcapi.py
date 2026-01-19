@@ -1,6 +1,6 @@
 """JLCPCB API interaction classes and utilities."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 import json
 import time
 from typing import Any, NamedTuple
@@ -196,12 +196,11 @@ class CategoryFetch:
         self.currentPage += 1
         return components
 
-    def fetchAll(self, callback: Callable[[list[Any]], None]):
-        """Fetch all components in the category, invoking callback for each page.
+    def fetchAll(self) -> Generator[list[Any], None, None]:
+        """Fetch all components in the category, yielding each page.
 
-        Args:
-            callback: Function to call with each page of components.  The callback
-                should accept a single argument: a list of component dicts.
+        Yields:
+            List of component dicts for each page fetched from the API.
 
         """
         while True:
@@ -210,7 +209,7 @@ class CategoryFetch:
             )
             if not components:
                 break
-            callback(components)
+            yield components
 
 
 class LcscId:

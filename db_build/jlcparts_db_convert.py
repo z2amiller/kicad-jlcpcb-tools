@@ -17,12 +17,17 @@ from typing import Any
 import zipfile
 from zipfile import ZipFile
 
+# Add parent directory to path so we can import common module
+# TODO(z2amiller):  Use proper packaging
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import click
 import humanize
 
 from common.componentdb import ComponentsDatabase
 from common.filemgr import FileManager
 from common.jlcapi import CategoryFetch, Component, JlcApi
+from common.progress import TqdmNestedProgressBar
 
 
 class PriceEntry:
@@ -150,11 +155,12 @@ class Generate:
         self,
         output_db: Path,
         chunk_num: Path = Path("chunk_num_fts5.txt"),
+        jlcparts_db_name: str = "cache.sqlite3",
         obsolete_parts_threshold_days: int = 0,
         skip_cleanup: bool = False,
     ):
         self.output_db = output_db
-        self.jlcparts_db_name = "cache.sqlite3"
+        self.jlcparts_db_name = jlcparts_db_name
         self.compressed_output_db = f"{self.output_db}.zip"
         self.chunk_num = chunk_num
         self.skip_cleanup = skip_cleanup
@@ -195,12 +201,6 @@ class Generate:
         self.conn_jp.close()
         self.conn.close()
 
-    def compress(self):
-        """Compress the output database into a new compressed file."""
-        print(f"Compressing {self.output_db}")
-        with ZipFile(self.compressed_output_db, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.write(self.output_db)
-
     def split(self):
         """Split the compressed database so we stay below GitHub's 100MB limit.
 
@@ -208,7 +208,7 @@ class Generate:
         This maintains compatibility with the previous output format.
         """
         file_manager = FileManager(
-            file_path=self.compressed_output_db,
+            file_path=self.output_db,
             chunk_size=80000000,  # 80 MB to stay well below GitHub's 100MB limit
             sentinel_filename=str(self.chunk_num),
         )
@@ -222,15 +222,9 @@ class Generate:
         print(
             f"output db: {humanize.naturalsize(os.path.getsize(self.output_db.name))}"
         )
-        print(
-            f"output db (compressed): {humanize.naturalsize(os.path.getsize(self.compressed_output_db))}"
-        )
 
     def cleanup(self):
         """Remove the compressed zip file und output db after splitting."""
-
-        print(f"Deleting {self.compressed_output_db}")
-        os.unlink(self.compressed_output_db)
 
         print(f"Deleting {self.output_db}")
         os.unlink(self.output_db)
@@ -508,7 +502,6 @@ class Generate:
         self.optimize()
         self.meta_data()
         self.close_sqlite()
-        self.compress()
         self.split()
         self.display_stats()
         if self.skip_cleanup:
@@ -613,25 +606,26 @@ def test_price_duplicate_price_filter():
 
 def update_parts_db_from_api() -> None:
     """Update the component cache database."""
-    db = ComponentsDatabase("db_working/new.sqlite3")
+    db = ComponentsDatabase("cache_archive/cache.sqlite3")
     print("Fetching categories...")
     initial_categories = JlcApi.fetchCategories(instockOnly=True)
     categories = JlcApi.collapseCategories(initial_categories, limit=50000)
     print(f"Found {len(initial_categories)} categories, collaped to {len(categories)}.")
-    for category in categories:
-        fetcher = CategoryFetch(category)
 
-        with click.progressbar(
-            length=category.count,
-            label=f"{category}",
-        ) as bar:
+    progress = TqdmNestedProgressBar()
 
-            def callback(components: list[Any]) -> None:
-                comp_objs = [Component(comp) for comp in components]
-                db.update_cache(comp_objs)
-                bar.update(len(components))
+    with progress.outer(len(categories), "Fetching categories") as outer_pbar:
+        for category in categories:
+            fetcher = CategoryFetch(category)
 
-            fetcher.fetchAll(callback)
+            with progress.inner(category.count, f"{category}") as inner_pbar:
+                for components in fetcher.fetchAll():
+                    comp_objs = [Component(comp) for comp in components]
+                    db.update_cache(comp_objs)
+                    inner_pbar.update(len(components))
+
+            outer_pbar.update()
+
     db.cleanup_stock()
     db.close()
 
@@ -740,6 +734,7 @@ def main(
             output_db=partsdb,
             skip_cleanup=skip_cleanup,
             obsolete_parts_threshold_days=obsolete_parts_threshold_days,
+            jlcparts_db_name=f"../{components_db}",  # TODO(z2amiller): Fix this hack
         )
         generator.build()
 
@@ -749,6 +744,7 @@ def main(
             f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}"
         )
 
+    os.chdir("..")
     if archive_parts_db:
         fm = FileManager(
             file_path=Path(components_db),
