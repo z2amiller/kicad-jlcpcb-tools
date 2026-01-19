@@ -4,7 +4,7 @@ import json
 import sqlite3
 import time
 
-from jlcapi import Component
+from .jlcapi import Component
 
 _CREATE_STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS components (

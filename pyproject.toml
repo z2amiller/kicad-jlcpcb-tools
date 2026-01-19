@@ -21,6 +21,10 @@ dependencies = [
     "click>=8.0",
     "humanize>=4.0",
     "requests>=2.28",
+    "cachetools>=5.0",
+    "ratelimit>=2.2.1",
+    "tqdm>=4.0",
+    "retry>=0.9.2",
 ]
 
 [project.optional-dependencies]
@@ -36,7 +40,7 @@ Repository = "https://github.com/bouni/kicad-jlcpcb-tools.git"
 Issues = "https://github.com/bouni/kicad-jlcpcb-tools/issues"
 
 [tool.setuptools]
-packages = ["db_build"]
+packages = ["db_build", "common"]
 
 [tool.ruff.lint]
 
@@ -145,7 +149,7 @@ split-on-trailing-comma = false
 
 [tool.ruff.lint.per-file-ignores]
 "db_build/jlcparts_db_convert.py" = ["T201"]
-"db_build/filemgr.py" = ["T201"]
+"common/filemgr.py" = ["T201"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25

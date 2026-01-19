@@ -6,24 +6,23 @@ This replaces the old .csv based database creation that JLCPCB no longer support
 """
 
 import copy
+from datetime import date, datetime
 import json
 import os
+from pathlib import Path
 import sqlite3
 import sys
 import time
 from typing import Any
-import urllib.request
 import zipfile
-from datetime import date, datetime
-from pathlib import Path
 from zipfile import ZipFile
 
 import click
-from componentdb import ComponentsDatabase
 import humanize
 
-from filemgr import FileManager
-from jlcapi import CategoryFetch, Component, JlcApi
+from common.componentdb import ComponentsDatabase
+from common.filemgr import FileManager
+from common.jlcapi import CategoryFetch, Component, JlcApi
 
 
 class PriceEntry:
@@ -705,18 +704,18 @@ def main(
     archive_parts_db: bool,
     skip_generate: bool,
     obsolete_parts_threshold_days: int,
-,
 ):
     """Perform the database steps."""
+
+    components_db = "cache_archive/cache.sqlite3"
 
     output_directory = "db_working"
     if not os.path.exists(output_directory):
         os.mkdir(output_directory)
-    os.chdir(output_directory)
 
     if fix_parts_db_descriptions:
         print("Fixing parts database descriptions")
-        db = ComponentsDatabase("cache.sqlite3")
+        db = ComponentsDatabase(components_db)
         db.fix_description()
         db.close()
 
@@ -725,18 +724,11 @@ def main(
 
     if clean_parts_db:
         print("Cleaning parts database")
-        db = ComponentsDatabase("cache.sqlite3")
+        db = ComponentsDatabase(components_db)
         db.truncate_old()
         db.close()
 
-    if archive_parts_db:
-        fm = FileManager(
-            file_path=Path("cache.sqlite3"),
-            chunk_size=50 * 1024 * 1024,  # 50 MB
-            sentinel_filename="cache_chunk_num.txt",
-        )
-        fm.split(output_dir=Path("cached_archive"))
-
+    os.chdir(output_directory)
     if not skip_generate:
         # sqlite database
         start = datetime.now()
@@ -756,6 +748,14 @@ def main(
         print(
             f"Elapsed time: {humanize.precisedelta(deltatime, minimum_unit='seconds')}"
         )
+
+    if archive_parts_db:
+        fm = FileManager(
+            file_path=Path(components_db),
+            chunk_size=50 * 1024 * 1024,  # 50 MB
+            sentinel_filename="cache_chunk_num.txt",
+        )
+        fm.split(output_dir=Path("cached_archive"), delete_original=skip_cleanup)
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ class FileManager:
         if self.use_temp_dir:
             if self.temp_dir is None:
                 self.temp_dir = Path(tempfile.mkdtemp(prefix="filemanager_"))
-                print(f"Created temporary working directory: {self.temp_dir}")  # noqa: T201
+                print(f"Created temporary working directory: {self.temp_dir}")
             return self.temp_dir
         return Path(".")
 
@@ -82,7 +82,7 @@ class FileManager:
         """
         if self.temp_dir and self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
-            print(f"Cleaned up temporary directory: {self.temp_dir}")  # noqa: T201
+            print(f"Cleaned up temporary directory: {self.temp_dir}")
             self.temp_dir = None
 
     def __enter__(self):
@@ -94,7 +94,9 @@ class FileManager:
         self.cleanup_temp_dir()
         return False
 
-    def split(self, output_dir: Path) -> int:
+    def split(
+        self, output_dir: Path | None = None, delete_original: bool = False
+    ) -> int:
         """Split the file into chunks, creating a sentinel file with chunk count.
 
         This method maintains compatibility with Generate.split() output format.
@@ -129,7 +131,7 @@ class FileManager:
                 return len(self.files)
 
         work_dir = self._get_work_dir()
-        print(f"Chunking {self.file_path}")  # noqa: T201
+        print(f"Chunking {self.file_path}")
 
         # Build output file path in working directory
         # If compressed_output_file is absolute, use its parent; otherwise use work_dir
@@ -151,12 +153,15 @@ class FileManager:
 
         # Create sentinel file indicating the number of chunks
         sentinel_path = output_dir / self.sentinel_filename
-        with open(sentinel_path, "w", encoding="utf-8") as f:  # noqa: T201
+        with open(sentinel_path, "w", encoding="utf-8") as f:
             f.write(str(tracker.get_chunk_count()))
 
-        print(  # noqa: T201
+        print(
             f"Created {tracker.get_chunk_count()} chunks with sentinel file: {sentinel_path}"
         )
+        if delete_original:
+            self.file_path.unlink()
+            print(f"Deleted original file: {self.file_path}")
         return tracker.get_chunk_count()
 
     def reassemble(
@@ -198,15 +203,15 @@ class FileManager:
         files = sorted(glob.glob(str(search_pattern)))
         print(
             f"Matching chunks with prefix: {search_pattern} got {[Path(f).name for f in files]}"
-        )  # noqa: T201
-        print(f"Reassembling {len(files)} chunks into {output_path}")  # noqa: T201
+        )
+        print(f"Reassembling {len(files)} chunks into {output_path}")
         with (
             SplitFileReader(files, "r") as sfr,
             zipfile.ZipFile(sfr, "r") as zip_reader,  # type: ignore
         ):
             zip_reader.extractall(path=output_path.parent)
 
-        print(f"Successfully reassembled file: {output_path}")  # noqa: T201
+        print(f"Successfully reassembled file: {output_path}")
         return output_path
 
     def download_from_github(
@@ -246,7 +251,7 @@ class FileManager:
         sentinel_url = f"{github_url}/{self.sentinel_filename}"
         sentinel_local = download_dir / self.sentinel_filename
 
-        print(f"Downloading sentinel file from {sentinel_url}")  # noqa: T201
+        print(f"Downloading sentinel file from {sentinel_url}")
         try:
             response = requests.get(sentinel_url, allow_redirects=True, timeout=300)
             response.raise_for_status()
@@ -264,7 +269,7 @@ class FileManager:
         except ValueError as e:
             raise ValueError(f"Invalid sentinel file format at {sentinel_local}") from e
 
-        print(f"Downloading {chunk_count} chunks from {github_url}")  # noqa: T201
+        print(f"Downloading {chunk_count} chunks from {github_url}")
 
         with progress_manager.outer(
             chunk_count,
@@ -309,7 +314,7 @@ class FileManager:
             output_dir.mkdir(parents=True, exist_ok=True)
             for file in download_dir.glob(f"{self.compressed_output_file.name}*"):
                 shutil.copy2(file, output_dir / file.name)
-            print(f"Copied downloaded files to {output_dir}")  # noqa: T201
+            print(f"Copied downloaded files to {output_dir}")
 
         return output_dir
 
@@ -363,14 +368,14 @@ class FileManager:
 
         try:
             # Step 1: Download split files
-            print("Starting download and reassemble workflow")  # noqa: T201
-            print(f"  Final output: {output_file}")  # noqa: T201
+            print("Starting download and reassemble workflow")
+            print(f"  Final output: {output_file}")
             self.download_from_github(
                 github_url, output_dir=output_dir, progress_manager=progress_manager
             )
 
             # Step 2: Reassemble the downloaded chunks
-            print("\nReassembling chunks...")  # noqa: T201
+            print("\nReassembling chunks...")
             reassembled_file = self.reassemble(
                 output_path=output_file, input_dir=output_dir
             )
@@ -379,14 +384,14 @@ class FileManager:
             if cleanup:
                 self._cleanup_intermediate_files(output_dir)
 
-            print("\n✓ Successfully completed download and reassembly")  # noqa: T201
-            print(f"  Final file: {reassembled_file}")  # noqa: T201
-            print(f"  Size: {reassembled_file.stat().st_size:,} bytes")  # noqa: T201
+            print("\n✓ Successfully completed download and reassembly")
+            print(f"  Final file: {reassembled_file}")
+            print(f"  Size: {reassembled_file.stat().st_size:,} bytes")
 
             return reassembled_file
 
         except Exception as e:
-            print(f"\n✗ Error during download and reassemble: {e}")  # noqa: T201
+            print(f"\n✗ Error during download and reassemble: {e}")
             raise
 
     def _cleanup_intermediate_files(self, directory: Path | str) -> None:
@@ -409,9 +414,9 @@ class FileManager:
             try:
                 chunk_file.unlink()
                 files_deleted += 1
-                print(f"  Deleted: {chunk_file.name}")  # noqa: T201
+                print(f"  Deleted: {chunk_file.name}")
             except OSError as e:
-                print(f"  Warning: Could not delete {chunk_file.name}: {e}")  # noqa: T201
+                print(f"  Warning: Could not delete {chunk_file.name}: {e}")
 
         # Delete sentinel file
         sentinel_path = directory / self.sentinel_filename
@@ -419,11 +424,11 @@ class FileManager:
             try:
                 sentinel_path.unlink()
                 files_deleted += 1
-                print(f"  Deleted: {sentinel_path.name}")  # noqa: T201
+                print(f"  Deleted: {sentinel_path.name}")
             except OSError as e:
-                print(f"  Warning: Could not delete {sentinel_path.name}: {e}")  # noqa: T201
+                print(f"  Warning: Could not delete {sentinel_path.name}: {e}")
 
-        print(f"Cleaned up {files_deleted} intermediate files")  # noqa: T201
+        print(f"Cleaned up {files_deleted} intermediate files")
 
 
 def main() -> None:
@@ -463,8 +468,8 @@ def main() -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Downloading parts-fts5.db files from {args.url}")  # noqa: T201
-    print(f"Output directory: {output_dir.absolute()}")  # noqa: T201
+    print(f"Downloading parts-fts5.db files from {args.url}")
+    print(f"Output directory: {output_dir.absolute()}")
 
     try:
         manager = FileManager(
@@ -482,13 +487,13 @@ def main() -> None:
         )
 
     except FileNotFoundError as e:
-        print(f"\n✗ File not found: {e}")  # noqa: T201
+        print(f"\n✗ File not found: {e}")
     except ValueError as e:
-        print(f"\n✗ Invalid sentinel file: {e}")  # noqa: T201
+        print(f"\n✗ Invalid sentinel file: {e}")
     except OSError as e:
-        print(f"\n✗ Download error: {e}")  # noqa: T201
+        print(f"\n✗ Download error: {e}")
     except Exception as e:
-        print(f"\n✗ Unexpected error: {e}")  # noqa: T201
+        print(f"\n✗ Unexpected error: {e}")
 
 
 if __name__ == "__main__":
