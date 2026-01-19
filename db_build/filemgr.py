@@ -363,14 +363,14 @@ class FileManager:
 
         try:
             # Step 1: Download split files
-            print(f"Starting download and reassemble workflow")  # noqa: T201
+            print("Starting download and reassemble workflow")  # noqa: T201
             print(f"  Final output: {output_file}")  # noqa: T201
             self.download_from_github(
                 github_url, output_dir=output_dir, progress_manager=progress_manager
             )
 
             # Step 2: Reassemble the downloaded chunks
-            print(f"\nReassembling chunks...")  # noqa: T201
+            print("\nReassembling chunks...")  # noqa: T201
             reassembled_file = self.reassemble(
                 output_path=output_file, input_dir=output_dir
             )
@@ -379,7 +379,7 @@ class FileManager:
             if cleanup:
                 self._cleanup_intermediate_files(output_dir)
 
-            print(f"\n✓ Successfully completed download and reassembly")  # noqa: T201
+            print("\n✓ Successfully completed download and reassembly")  # noqa: T201
             print(f"  Final file: {reassembled_file}")  # noqa: T201
             print(f"  Size: {reassembled_file.stat().st_size:,} bytes")  # noqa: T201
 
