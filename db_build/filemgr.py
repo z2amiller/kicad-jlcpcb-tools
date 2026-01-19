@@ -12,6 +12,8 @@ import argparse
 from collections.abc import Callable, Generator
 import glob
 from pathlib import Path
+import shutil
+import tempfile
 from typing import Any
 import zipfile
 
@@ -31,6 +33,7 @@ class FileManager:
         chunk_size: int = 80000000,  # 80 MB default
         sentinel_filename: str = "chunk_num.txt",
         compressed_output_file: str | None = None,
+        use_temp_dir: bool = False,
     ):
         """Initialize FileManager.
 
@@ -41,6 +44,8 @@ class FileManager:
             compressed_output_file: Path for compressed output file
                                     (defaults to file_path.zip).  May end up being
                                     the prefix of the split files.
+            use_temp_dir: If True, create a temporary working directory for
+                         intermediate files. Useful for large operations.
 
         """
         self.file_path = Path(file_path)
@@ -51,6 +56,43 @@ class FileManager:
             if compressed_output_file
             else Path(f"{self.file_path}.zip")
         )
+        self.use_temp_dir = use_temp_dir
+        self.temp_dir: Path | None = None
+
+    def _get_work_dir(self) -> Path:
+        """Get the working directory, creating temp dir if needed.
+
+        Returns:
+            Path: The working directory (either temp or current).
+
+        """
+        if self.use_temp_dir:
+            if self.temp_dir is None:
+                self.temp_dir = Path(tempfile.mkdtemp(prefix="filemanager_"))
+                print(f"Created temporary working directory: {self.temp_dir}")  # noqa: T201
+            return self.temp_dir
+        return Path(".")
+
+    def cleanup_temp_dir(self) -> None:
+        """Clean up the temporary working directory if it exists.
+
+        This method should be called when finished with the FileManager
+        to clean up temporary files.
+
+        """
+        if self.temp_dir and self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir)
+            print(f"Cleaned up temporary directory: {self.temp_dir}")  # noqa: T201
+            self.temp_dir = None
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit, ensuring temp dir cleanup."""
+        self.cleanup_temp_dir()
+        return False
 
     def split(self) -> int:
         """Split the file into chunks, creating a sentinel file with chunk count.
@@ -86,9 +128,12 @@ class FileManager:
             def get_chunk_count(self) -> int:
                 return len(self.files)
 
-        print(f"Chunking {self.file_path}")
+        work_dir = self._get_work_dir()
+        print(f"Chunking {self.file_path}")  # noqa: T201
 
-        tracker = SplitTracker(str(self.compressed_output_file) + ".")
+        # Build output file path in working directory
+        output_prefix = work_dir / self.compressed_output_file.name
+        tracker = SplitTracker(str(output_prefix) + ".")
         with (
             SplitFileWriter(tracker.gen_split(), self.chunk_size) as writer,
             zipfile.ZipFile(
@@ -98,12 +143,13 @@ class FileManager:
             zip_writer.write(self.file_path, arcname=self.file_path.name)
 
         # Create sentinel file indicating the number of chunks
-        with open(self.sentinel_filename, "w", encoding="utf-8") as f:  # noqa: T201
+        sentinel_path = work_dir / self.sentinel_filename
+        with open(sentinel_path, "w", encoding="utf-8") as f:  # noqa: T201
             f.write(str(tracker.get_chunk_count()))
 
-        print(
-            f"Created {tracker.get_chunk_count()} chunks with sentinel file: {self.sentinel_filename}"
-        )  # noqa: T201
+        print(  # noqa: T201
+            f"Created {tracker.get_chunk_count()} chunks with sentinel file: {sentinel_path}"
+        )
         return tracker.get_chunk_count()
 
     def reassemble(
@@ -176,11 +222,13 @@ class FileManager:
         else:
             output_dir = Path(output_dir)
 
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Use temp dir for downloads if configured, otherwise use output_dir
+        download_dir = self._get_work_dir() if self.use_temp_dir else output_dir
+        download_dir.mkdir(parents=True, exist_ok=True)
 
         # Download sentinel file first to determine chunk count
         sentinel_url = f"{github_url}/{self.sentinel_filename}"
-        sentinel_local = output_dir / self.sentinel_filename
+        sentinel_local = download_dir / self.sentinel_filename
 
         print(f"Downloading sentinel file from {sentinel_url}")  # noqa: T201
         try:
@@ -209,7 +257,7 @@ class FileManager:
             for i in range(1, chunk_count + 1):
                 chunk_filename = f"{self.compressed_output_file.name}.{i:03d}"
                 chunk_url = f"{github_url}/{chunk_filename}"
-                chunk_local = output_dir / chunk_filename
+                chunk_local = download_dir / chunk_filename
 
                 try:
                     with progress_manager.inner(
@@ -239,6 +287,13 @@ class FileManager:
                     raise OSError(
                         f"Failed to download chunk {chunk_filename} from {chunk_url}: {e}"
                     ) from e
+
+        # If using temp dir, copy files to output_dir
+        if self.use_temp_dir and download_dir != output_dir:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            for file in download_dir.glob(f"{self.compressed_output_file.name}*"):
+                shutil.copy2(file, output_dir / file.name)
+            print(f"Copied downloaded files to {output_dir}")  # noqa: T201
 
         return output_dir
 
