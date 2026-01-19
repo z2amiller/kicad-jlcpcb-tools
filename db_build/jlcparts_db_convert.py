@@ -617,13 +617,6 @@ def test_price_duplicate_price_filter():
     help="Disable cleanup, intermediate database files will not be deleted",
 )
 @click.option(
-    "--fetch-parts-db",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Fetch the upstream parts db from yaqwsx",
-)
-@click.option(
     "--skip-generate",
     is_flag=True,
     show_default=True,
@@ -642,7 +635,6 @@ def test_price_duplicate_price_filter():
 )
 def main(
     skip_cleanup: bool,
-    fetch_parts_db: bool,
     skip_generate: bool,
     obsolete_parts_threshold_days: int,
 ):
@@ -652,27 +644,6 @@ def main(
     if not os.path.exists(output_directory):
         os.mkdir(output_directory)
     os.chdir(output_directory)
-
-    if fetch_parts_db:
-        base_url = "https://yaqwsx.github.io/jlcparts/data"
-
-        print(f"Fetching upstream parts database from {base_url}")
-
-        # Use SevenZipFileManager to handle 7zip multi-volume archive download
-        try:
-            seven_zip_manager = SevenZipFileManager(file_path="cache")
-            seven_zip_manager.download_from_github(base_url)
-            # Extract the database file
-            seven_zip_manager.extract(output_dir=".")
-        except RuntimeError as e:
-            print(f"Error: {e}")
-            print(
-                "Unable to fetch parts database. Please ensure 7z or 7zz is installed."
-            )
-            sys.exit(1)
-        except OSError as e:
-            print(f"Download error: {e}")
-            sys.exit(1)
 
     if not skip_generate:
         # sqlite database
