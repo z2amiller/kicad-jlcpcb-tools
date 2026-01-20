@@ -12,7 +12,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install dependencies
-        run: pip install pytest humanize
+        run: pip install -e .[dev]
+      - name: Run common tests
+        run: pytest common/
       - name: Run db_build tests
         working-directory: db_build
         run: pytest jlcparts_db_convert.py
