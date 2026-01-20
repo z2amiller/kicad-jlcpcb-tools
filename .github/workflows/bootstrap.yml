@@ -58,8 +58,10 @@ jobs:
           for seq in $(seq -w 01 30); do
             rm cache.z$seq || true
           done
+
+          cd ..
           
-          python3 jlcparts_db_convert.py --skip-generate --fix-parts-db-descriptions --clean-parts-db --archive-parts-db
+          python3 jlcparts_db_convert.py --skip-generate --fix-components-db-descriptions --clean-components-db --archive-components-db
 
           ls -lah db_working/
 
@@ -74,4 +76,4 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages
-          path: db_build/archive/cache
+          path: db_build/archive/components

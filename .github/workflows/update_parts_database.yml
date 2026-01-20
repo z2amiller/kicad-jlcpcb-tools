@@ -47,7 +47,7 @@ jobs:
           cd db_build
 
           # fetch the cached database
-          python3 jlcparts_db_convert.py --fetch-parts-db --skip-generate
+          python3 jlcparts_db_convert.py --fetch-components-db --skip-generate
 
           ls -lah db_working/
 
@@ -57,7 +57,7 @@ jobs:
           echo "============================================================================================================================="
 
           # creates the converted database in 80M split-zip files in folder db_working
-          python3 jlcparts_db_convert.py
+          python3 jlcparts_db_convert.py --update-components-db --clean-components-db --archive-components-db --obsolete-parts-threshold-days=365
           # remove the source db, as we don't want to package that one
           rm db_working/cache.sqlite3
           # some info output for sanity check
@@ -68,12 +68,26 @@ jobs:
           echo "============================================================================================================================="
           df -h
           echo "============================================================================================================================="
-
-      - name: Upload pages artifact
+      - name: Upload all-item parts db
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages
-          path: db_build/db_working
+          path: db_build/archive/all
+      - name: Upload basic parts db
+        uses: actions/upload-pages-artifact@v3
+        with:
+          name: github-pages
+          path: db_build/archive/basic
+      - name: Upload default parts db
+        uses: actions/upload-pages-artifact@v3
+        with:
+          name: github-pages
+          path: db_build/archive/parts
+      - name: Upload empty parts db
+        uses: actions/upload-pages-artifact@v3
+        with:
+          name: github-pages
+          path: db_build/archive/empty
   deploy:
     name: "Deploy"
     runs-on: ubuntu-latest
