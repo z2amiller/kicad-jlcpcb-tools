@@ -20,7 +20,6 @@ class NestedProgressBar(ABC):
     with automatic cleanup.
     """
 
-    @abstractmethod
     def outer(self, total: int, description: str = ""):
         """Context manager for outer progress bar.
 
@@ -33,7 +32,8 @@ class NestedProgressBar(ABC):
 
         """
 
-    @abstractmethod
+        yield ProgressCallback(lambda inc: None)
+
     def inner(self, total: int | None = None, description: str = ""):
         """Context manager for inner progress bar.
 
@@ -45,6 +45,8 @@ class NestedProgressBar(ABC):
             ProgressCallback: Object with update() and set_total() methods.
 
         """
+
+        yield InnerProgressCallback(None, lambda inc: None)
 
 
 class ProgressCallback:
@@ -231,3 +233,144 @@ class NoOpProgressBar(NestedProgressBar):
                 pass
 
         yield NoOpInnerCallback()
+
+
+class PrintNestedProgressBar(NestedProgressBar):
+    """Simple progress bar implementation using print statements.
+
+    Emits progress lines when configured thresholds are reached.
+    Useful for simple console output without fancy progress bar rendering.
+    """
+
+    def __init__(
+        self, outer_threshold: int = 100000, inner_threshold: int = 100000
+    ) -> None:
+        """Initialize the print-based progress bar.
+
+        Args:
+            outer_threshold: Number of items to process before printing outer progress.
+            inner_threshold: Number of items to process before printing inner progress.
+
+        """
+        self.outer_threshold = outer_threshold
+        self.inner_threshold = inner_threshold
+        self.outer_description = ""
+        self.inner_description = ""
+        self.outer_count = 0
+        self.inner_count = 0
+        self.outer_total = 0
+        self.inner_total = 0
+        self.outer_accumulator = 0
+        self.inner_accumulator = 0
+
+    @contextmanager
+    def outer(self, total: int, description: str = ""):
+        """Context manager for outer progress bar.
+
+        Usage:
+            with progress.outer(100000, "Processing") as pbar:
+                for i in range(100000):
+                    pbar.update(1000)
+
+        Args:
+            total: Total number of items for outer progress.
+            description: Description for the outer progress bar.
+
+        Yields:
+            ProgressCallback: Object with update() method.
+
+        """
+        self.outer_total = total
+        self.outer_description = description
+        self.outer_count = 0
+        self.outer_accumulator = 0
+
+        print(f"Starting: {description} (total: {total})")
+
+        def _update_outer(inc: int) -> None:
+            self.outer_count += inc
+            self.outer_accumulator += inc
+            if (
+                self.outer_accumulator >= self.outer_threshold
+                or self.outer_count >= self.outer_total
+            ):
+                print(
+                    f"{self.outer_description}: {self.outer_count}/{self.outer_total}"
+                )
+                self.outer_accumulator = 0
+
+        try:
+            yield ProgressCallback(_update_outer)
+        finally:
+            if self.outer_count > 0:
+                print(
+                    f"Completed: {self.outer_description} ({self.outer_count}/{self.outer_total})"
+                )
+
+    @contextmanager
+    def inner(self, total: int = 0, description: str = ""):
+        """Context manager for inner progress bar.
+
+        Usage:
+            with progress.outer(100, "Outer") as outer_pbar:
+                with progress.inner(1000, "Inner") as inner_pbar:
+                    for i in range(1000):
+                        inner_pbar.update()
+
+        Args:
+            total: Total number of items for inner progress.
+            description: Description for the inner progress bar.
+
+        Yields:
+            InnerProgressCallback: Object with update() and set_total() methods.
+
+        """
+        self.inner_total = total
+        self.inner_description = description
+        self.inner_count = 0
+        self.inner_accumulator = 0
+
+        if description:
+            print(
+                f"  Starting: {description}" + (f" (total: {total})" if total else "")
+            )
+
+        def _update_inner(inc: int) -> None:
+            self.inner_count += inc
+            self.inner_accumulator += inc
+            if (
+                self.inner_accumulator >= self.inner_threshold
+                or self.inner_count >= self.inner_total
+            ):
+                print(
+                    f"    {self.inner_description}: {self.inner_count}/{self.inner_total}"
+                )
+                self.inner_accumulator = 0
+
+        class PrintInnerCallback(InnerProgressCallback):
+            """Inner progress callback using print statements."""
+
+            def __init__(self, callback: Callable[[int], None]) -> None:
+                """Initialize with callback."""
+                super().__init__(None, callback)
+                self._total = total
+
+            def set_total(self, new_total: int) -> None:
+                """Update the total size."""
+                nonlocal total
+                total = new_total
+                self._total = new_total
+                self.bar = None  # Don't use tqdm bar
+
+        try:
+            yield PrintInnerCallback(_update_inner)
+        finally:
+            if description and self.inner_count > 0:
+                print(
+                    f"  Completed: {description}"
+                    + (
+                        f" ({self.inner_count}/{self.inner_total})"
+                        if self.inner_total
+                        else f" ({self.inner_count})"
+                    )
+                )
