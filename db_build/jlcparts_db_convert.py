@@ -28,7 +28,6 @@ class PartDatabaseConfig(NamedTuple):
     """Configuration for part database generation."""
 
     name: str
-    output_dir: str
     chunk_file_name: str
     where_clause: str
 
@@ -41,7 +40,6 @@ class DatabaseConfig:
         """Select only preferred and basic parts."""
         return PartDatabaseConfig(
             name="basic-parts-fts5.db",
-            output_dir="archive/basic",
             chunk_file_name="chunk_num_basic_parts_fts5.txt",
             where_clause="basic = 1 OR preferred = 1",
         )
@@ -51,7 +49,6 @@ class DatabaseConfig:
         """Select all parts."""
         return PartDatabaseConfig(
             name="all-parts-fts5.db",
-            output_dir="archive/all",
             chunk_file_name="chunk_num_all_parts_fts5.txt",
             where_clause="TRUE",
         )
@@ -62,7 +59,6 @@ class DatabaseConfig:
         filter_seconds = int(time.time()) - obsolete_threshold_days * 24 * 60 * 60
         return PartDatabaseConfig(
             name="parts-fts5.db",
-            output_dir="archive/parts",
             chunk_file_name="chunk_num_fts5.txt",
             where_clause=f"NOT (stock = 0 AND last_on_stock < {filter_seconds})",
         )
@@ -72,7 +68,6 @@ class DatabaseConfig:
         """Select no parts."""
         return PartDatabaseConfig(
             name="empty-parts-fts5.db",
-            output_dir="archive/empty",
             chunk_file_name="chunk_num_empty_parts_fts5.txt",
             where_clause="FALSE",
         )
@@ -230,16 +225,16 @@ def main(
             0, DatabaseConfig.ignoreObsoleteParts(obsolete_parts_threshold_days)
         )
 
+    archive_dir = Path("archive")
+    if not archive_dir.exists():
+        os.makedirs(archive_dir)
     for config in configs:
-        if not os.path.exists(config.output_dir):
-            os.makedirs(config.output_dir)
-
         if not skip_generate:
             print(f"Generating {config.name}...")
             componentdb = ComponentsDatabase(components_db)
             partsdb = PartsDatabase(
                 output_db=Path(working_directory) / config.name,
-                archive_dir=Path(config.output_dir),
+                archive_dir=Path(archive_dir),
                 chunk_num=Path(config.chunk_file_name),
                 skip_cleanup=skip_cleanup,
             )
@@ -262,7 +257,7 @@ def main(
             sentinel_filename="cache_chunk_num.txt",
         )
         fm.compress_and_split(
-            output_dir=Path("archive/components"), delete_original=skip_cleanup
+            output_dir=Path(archive_dir), delete_original=skip_cleanup
         )
 
 
