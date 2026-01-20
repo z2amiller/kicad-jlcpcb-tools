@@ -122,7 +122,7 @@ class FileManager:
 
             def gen_split(self) -> Generator[Any, Any, None]:
                 while True:
-                    name = f"{self.file_prefix}{len(self.files):03d}"
+                    name = f"{self.file_prefix}{len(self.files) + 1:03d}"
                     with open(name, "wb") as output_file:
                         self.files.append(name)
                         yield output_file
@@ -275,7 +275,7 @@ class FileManager:
             chunk_count,
             description=f"Downloading {self.compressed_output_file.name}    ",
         ) as outer_pbar:  # type: ignore
-            for i in range(chunk_count):
+            for i in range(1, chunk_count + 1):
                 chunk_filename = f"{self.compressed_output_file.name}.{i:03d}"
                 chunk_url = f"{github_url}/{chunk_filename}"
                 chunk_local = download_dir / chunk_filename
