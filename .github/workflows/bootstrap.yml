@@ -3,8 +3,8 @@ name: "Bootstrap the initial component database"
 on:
   workflow_dispatch:  # allow for manually trigger workflow
 jobs:
-  build_and_update:
-    name: "Update component database and frontend"
+  bootstrap_database:
+    name: "Bootstrap component database"
     runs-on: ubuntu-latest
     environment: github-pages
     steps:
