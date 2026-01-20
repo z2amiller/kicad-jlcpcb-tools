@@ -80,7 +80,7 @@ class DatabaseConfig:
 
 def update_components_db_from_api() -> None:
     """Update the component cache database."""
-    db = ComponentsDatabase("cache_archive/cache.sqlite3")
+    db = ComponentsDatabase("db_working/cache.sqlite3")
     print("Fetching categories...")
     initial_categories = JlcApi.fetchCategories(instockOnly=True)
     categories = JlcApi.collapseCategories(initial_categories, limit=50000)
