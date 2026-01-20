@@ -275,7 +275,7 @@ class FileManager:
             chunk_count,
             description=f"Downloading {self.compressed_output_file.name}    ",
         ) as outer_pbar:  # type: ignore
-            for i in range(1, chunk_count + 1):
+            for i in range(chunk_count):
                 chunk_filename = f"{self.compressed_output_file.name}.{i:03d}"
                 chunk_url = f"{github_url}/{chunk_filename}"
                 chunk_local = download_dir / chunk_filename
