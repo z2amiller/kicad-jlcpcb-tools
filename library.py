@@ -42,33 +42,33 @@ class LibraryState(Enum):
 # Library configuration mapping: defines available library options
 # Each library specifies the database filename, count file name, and chunk file stub
 LIBRARY_CONFIG = {
-    "fts5": {
-        "display_name": "FTS5 Library",
+    "default": {
+        "display_name": "Standard Library - Recently In Stock",
         "db_file": "parts-fts5.db",
         "cnt_file": "chunk_num_fts5.txt",
         "chunk_stub": "parts-fts5.db.zip.",
     },
-    "standard": {
-        "display_name": "Standard Library",
-        "db_file": "parts-standard.db",
-        "cnt_file": "chunk_num_standard.txt",
-        "chunk_stub": "parts-standard.db.zip.",
+    "all-parts": {
+        "display_name": "All Parts Library",
+        "db_file": "all-parts-fts5.db",
+        "cnt_file": "chunk_num_all_parts_fts5.txt",
+        "chunk_stub": "all-parts-fts5.db.zip.",
     },
     "basic": {
-        "display_name": "Basic Library",
-        "db_file": "parts-basic.db",
-        "cnt_file": "chunk_num_basic.txt",
-        "chunk_stub": "parts-basic.db.zip.",
+        "display_name": "Basic + Preferred Library",
+        "db_file": "basic-parts-fts5.db",
+        "cnt_file": "chunk_num_basic_parts_fts5.txt",
+        "chunk_stub": "basic-parts-fts5.db.zip.",
     },
-    "full": {
-        "display_name": "Full Library",
-        "db_file": "parts-full.db",
-        "cnt_file": "chunk_num_full.txt",
-        "chunk_stub": "parts-full.db.zip.",
+    "empty": {
+        "display_name": "Empty Library - No parts!",
+        "db_file": "empty-parts-fts5.db",
+        "cnt_file": "chunk_num_empty_parts_fts5.txt",
+        "chunk_stub": "empty-parts-fts5.db.zip.",
     },
 }
 
-DEFAULT_LIBRARY = "fts5"
+DEFAULT_LIBRARY = "default"
 
 
 class Library:
@@ -543,7 +543,7 @@ class Library:
         library_config = LIBRARY_CONFIG[self.selected_library]
 
         # Define basic variables
-        url_stub = "https://bouni.github.io/kicad-jlcpcb-tools/"
+        url_stub = "https://z2amiller.github.io/kicad-jlcpcb-tools/"
         cnt_file = library_config["cnt_file"]
         progress_file = os.path.join(self.datadir, "progress.txt")
         chunk_file_stub = library_config["chunk_stub"]
