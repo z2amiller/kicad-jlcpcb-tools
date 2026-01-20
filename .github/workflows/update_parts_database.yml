@@ -71,22 +71,7 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages
-          path: db_build/archive/all
-      - name: Upload basic parts db
-        uses: actions/upload-pages-artifact@v3
-        with:
-          name: github-pages
-          path: db_build/archive/basic
-      - name: Upload default parts db
-        uses: actions/upload-pages-artifact@v3
-        with:
-          name: github-pages
-          path: db_build/archive/parts
-      - name: Upload empty parts db
-        uses: actions/upload-pages-artifact@v3
-        with:
-          name: github-pages
-          path: db_build/archive/empty
+          path: db_build/archive
   deploy:
     name: "Deploy"
     runs-on: ubuntu-latest
