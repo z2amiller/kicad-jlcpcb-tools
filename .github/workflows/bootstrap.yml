@@ -75,4 +75,4 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages
-          path: db_build/archive/cache
+          path: db_build/archive/components
