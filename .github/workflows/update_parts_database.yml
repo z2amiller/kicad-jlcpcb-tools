@@ -51,8 +51,6 @@ jobs:
           python3 jlcparts_db_convert.py \
               --fetch-components-db \
               --components-db-base-url=http://z2amiller.github.io/kicad-jlcpcb-tools \
-              --update-components-db \
-              --clean-components-db \
               --archive-components-db \
               --obsolete-parts-threshold-days=365
 
