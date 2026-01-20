@@ -13,6 +13,23 @@ from .filemgr import FileManager
 from .progress import NestedProgressBar
 from .translate import ComponentTranslator
 
+# Register date adapter to avoid deprecation warning
+# See: https://docs.python.org/3/library/sqlite3.html#sqlite3-adapter-converter-recipes
+
+
+def _adapt_date(val: date) -> str:
+    """Adapt datetime.date to ISO format string for SQLite storage."""
+    return val.isoformat()
+
+
+def _convert_date(val: bytes) -> date:
+    """Convert ISO format string from SQLite back to datetime.date."""
+    return date.fromisoformat(val.decode())
+
+
+sqlite3.register_adapter(date, _adapt_date)
+sqlite3.register_converter("date", _convert_date)
+
 _CREATE_STATEMENTS = [
     """
     CREATE virtual TABLE IF NOT EXISTS parts using fts5 (
@@ -257,7 +274,7 @@ class PartsDatabase:
                 "cache.sqlite3",
                 db_size,
                 self.part_count,
-                date.today(),
+                date.today().isoformat(),
                 datetime.now().isoformat(),
             ],
         )

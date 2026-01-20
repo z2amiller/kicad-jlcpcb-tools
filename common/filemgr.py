@@ -134,14 +134,18 @@ class FileManager:
         print(f"Chunking {self.file_path}")
 
         # Build output file path in working directory
-        # If compressed_output_file is absolute, use its parent; otherwise use work_dir
-        if self.compressed_output_file.is_absolute():
-            output_dir = self.compressed_output_file.parent
-        elif output_dir is None:
-            output_dir = work_dir / self.compressed_output_file.parent
+        # If output_dir is provided, always use it (takes precedence)
+        # Otherwise, determine based on compressed_output_file
+        if output_dir is not None:
+            # Convert output_dir to absolute path to ensure files are created in correct location
+            actual_output_dir = Path(output_dir).resolve()
+        elif self.compressed_output_file.is_absolute():
+            actual_output_dir = self.compressed_output_file.parent
+        else:
+            actual_output_dir = work_dir / self.compressed_output_file.parent
 
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_prefix = output_dir / self.compressed_output_file.name
+        actual_output_dir.mkdir(parents=True, exist_ok=True)
+        output_prefix = actual_output_dir / self.compressed_output_file.name
         tracker = SplitTracker(str(output_prefix) + ".")
         with (
             SplitFileWriter(tracker.gen_split(), self.chunk_size) as writer,
@@ -152,7 +156,7 @@ class FileManager:
             zip_writer.write(self.file_path, arcname=self.file_path.name)
 
         # Create sentinel file indicating the number of chunks
-        sentinel_path = output_dir / self.sentinel_filename
+        sentinel_path = actual_output_dir / self.sentinel_filename
         with open(sentinel_path, "w", encoding="utf-8") as f:
             f.write(str(tracker.get_chunk_count()))
 
@@ -205,11 +209,30 @@ class FileManager:
             f"Matching chunks with prefix: {search_pattern} got {[Path(f).name for f in files]}"
         )
         print(f"Reassembling {len(files)} chunks into {output_path}")
-        with (
-            SplitFileReader(files, "r") as sfr,
-            zipfile.ZipFile(sfr, "r") as zip_reader,  # type: ignore
-        ):
-            zip_reader.extractall(path=output_path.parent)
+
+        # Create a temporary directory to extract the zip contents
+        with tempfile.TemporaryDirectory() as temp_extract_dir:
+            with (
+                SplitFileReader(files, "r") as sfr,
+                zipfile.ZipFile(sfr, "r") as zip_reader,  # type: ignore
+            ):
+                zip_reader.extractall(path=temp_extract_dir)
+
+            # The zip should contain one file - move it to the desired output path
+            extracted_files = list(Path(temp_extract_dir).iterdir())
+            if len(extracted_files) == 1 and extracted_files[0].is_file():
+                # Single file case - move it directly
+                extracted_files[0].rename(output_path)
+            else:
+                # Multiple files or directory structure - copy the entire extracted content
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                for item in extracted_files:
+                    if item.is_file():
+                        shutil.copy2(item, output_path.parent / item.name)
+                    else:
+                        shutil.copytree(
+                            item, output_path.parent / item.name, dirs_exist_ok=True
+                        )
 
         print(f"Successfully reassembled file: {output_path}")
         return output_path
