@@ -258,6 +258,26 @@ class ComponentsDatabase:
         )
         self.conn.commit()
 
+    def count_components(self, where_clause: str = "") -> int:
+        """Count the number of components in the database.
+
+        Args:
+            where_clause: SQL WHERE clause (without the WHERE keyword). If empty,
+                         all components are counted.
+
+        Returns:
+            Number of components matching the where_clause.
+
+        """
+        query = "SELECT COUNT(*) AS count FROM components"
+
+        if where_clause:
+            query += f" WHERE {where_clause}"
+
+        cursor = self.conn.execute(query)
+        row = cursor.fetchone()
+        return row["count"] if row else 0
+
     def fetch_components(
         self, where_clause: str = "", batch_size: int = 100000
     ) -> Generator[list[sqlite3.Row], None, None]:
@@ -293,3 +313,26 @@ class ComponentsDatabase:
                 break
 
             yield rows
+
+    def get_manufacturers(self) -> dict[int, str]:
+        """Get all manufacturers from the database.
+
+        Returns:
+            Dictionary mapping manufacturer ID to manufacturer name.
+
+        """
+        cursor = self.conn.execute("SELECT id, name FROM manufacturers")
+        return {row["id"]: row["name"] for row in cursor.fetchall()}
+
+    def get_categories(self) -> dict[int, tuple[str, str]]:
+        """Get all categories from the database.
+
+        Returns:
+            Dictionary mapping category ID to (category, subcategory) tuple.
+
+        """
+        cursor = self.conn.execute("SELECT id, category, subcategory FROM categories")
+        return {
+            row["id"]: (row["category"], row["subcategory"])
+            for row in cursor.fetchall()
+        }
