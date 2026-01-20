@@ -6,7 +6,7 @@ Provides abstract and concrete implementations for tracking nested progress
 during file operations.
 """
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from collections.abc import Callable
 from contextlib import contextmanager
 

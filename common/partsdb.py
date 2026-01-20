@@ -78,6 +78,7 @@ class Generate:
                        one will be created from the componentdb lookup tables.
             progress: Optional NestedProgressBar for progress reporting. If not provided,
                      progress will be printed to console.
+
         """
         self.componentdb = componentdb
         self.partsdb = partsdb
@@ -94,6 +95,7 @@ class Generate:
 
         Args:
             where_clause: Optional SQL WHERE clause to filter components.
+
         """
         # Initialize translator if not provided
         if self.translator is None:
@@ -120,6 +122,7 @@ class Generate:
         Args:
             where_clause: SQL WHERE clause to filter components.
             pbar: Optional progress bar callback for updating outer bar.
+
         """
         batch_count = 0
         for batch in self.componentdb.fetch_components(where_clause=where_clause):
