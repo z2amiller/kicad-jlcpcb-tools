@@ -78,7 +78,7 @@ class DatabaseConfig:
         )
 
 
-def update_parts_db_from_api() -> None:
+def update_components_db_from_api() -> None:
     """Update the component cache database."""
     db = ComponentsDatabase("cache_archive/cache.sqlite3")
     print("Fetching categories...")
@@ -117,38 +117,45 @@ def update_parts_db_from_api() -> None:
     help="Disable cleanup, intermediate database files will not be deleted",
 )
 @click.option(
-    "--parts-db-base-url",
+    "--components-db-base-url",
     default="http://yaqwsx.github.io/jlcparts/data",
     show_default=True,
-    help="Base URL to fetch the parts database from",
+    help="Base URL to fetch the components database from",
 )
 @click.option(
-    "--fix-parts-db-descriptions",
+    "--fetch-components-db",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Fix descriptions in the parts db by pulling from the 'extra' field",
+    help="Fetch the components db from the remote server",
 )
 @click.option(
-    "--update-parts-db",
+    "--fix-components-db-descriptions",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Update the local parts db using LCSC API data",
+    help="Fix descriptions in the components db by pulling from the 'extra' field",
 )
 @click.option(
-    "--clean-parts-db",
+    "--update-components-db",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Clean the local parts db by removing old and out-of-stock parts",
+    help="Update the local components db using LCSC API data",
 )
 @click.option(
-    "--archive-parts-db",
+    "--clean-components-db",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Archive the parts db after updating from the API",
+    help="Clean the local components db by removing old and out-of-stock parts",
+)
+@click.option(
+    "--archive-components-db",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Archive the components db after updating from the API",
 )
 @click.option(
     "--skip-generate",
@@ -169,11 +176,12 @@ def update_parts_db_from_api() -> None:
 )
 def main(
     skip_cleanup: bool,
-    parts_db_base_url: str,
-    fix_parts_db_descriptions: bool,
-    update_parts_db: bool,
-    clean_parts_db: bool,
-    archive_parts_db: bool,
+    fetch_components_db: bool,
+    components_db_base_url: str,
+    fix_components_db_descriptions: bool,
+    update_components_db: bool,
+    clean_components_db: bool,
+    archive_components_db: bool,
     skip_generate: bool,
     obsolete_parts_threshold_days: int,
 ):
@@ -181,20 +189,33 @@ def main(
 
     working_directory = "db_working"
     components_db = f"{working_directory}/cache.sqlite3"
+
+    if fetch_components_db:
+        print("Fetching components database...")
+        fm = FileManager(
+            file_path=Path(components_db),
+            sentinel_filename="cache_chunk_num.txt",
+        )
+        fm.download_and_reassemble(
+            github_url=components_db_base_url,
+            output_dir=Path(working_directory),
+            cleanup=not skip_cleanup,
+        )
+
     if not os.path.exists(working_directory):
         os.mkdir(working_directory)
 
-    if fix_parts_db_descriptions:
-        print("Fixing parts database descriptions")
+    if fix_components_db_descriptions:
+        print("Fixing components database descriptions")
         db = ComponentsDatabase(components_db)
         db.fix_description()
         db.close()
 
-    if update_parts_db:
-        update_parts_db_from_api()
+    if update_components_db:
+        update_components_db_from_api()
 
-    if clean_parts_db:
-        print("Cleaning parts database")
+    if clean_components_db:
+        print("Cleaning components database")
         db = ComponentsDatabase(components_db)
         db.truncate_old()
         db.close()
@@ -234,7 +255,7 @@ def main(
             )
             generator.generate(where_clause=config.where_clause)
 
-    if archive_parts_db:
+    if archive_components_db:
         fm = FileManager(
             file_path=Path(components_db),
             chunk_size=50 * 1024 * 1024,  # 50 MB

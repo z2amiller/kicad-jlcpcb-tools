@@ -54,7 +54,7 @@ jobs:
               --update-components-db \
               --clean-components-db \
               --archive-components-db \
-               --obsolete-parts-threshold-days=365
+              --obsolete-parts-threshold-days=365
 
           # remove the raw source db, as we don't want to package that one
           rm db_working/cache.sqlite3

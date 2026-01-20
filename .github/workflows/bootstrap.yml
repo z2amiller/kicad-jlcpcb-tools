@@ -60,7 +60,7 @@ jobs:
 
           cd ..
           
-          python3 jlcparts_db_convert.py --skip-generate --fix-parts-db-descriptions --clean-parts-db --archive-parts-db
+          python3 jlcparts_db_convert.py --skip-generate --fix-components-db-descriptions --clean-components-db --archive-components-db
 
           ls -lah db_working/
 
