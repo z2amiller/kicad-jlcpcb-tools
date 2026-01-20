@@ -49,6 +49,7 @@ jobs:
 
           cd db_build
 
+          mkdir db_working
           cd db_working
           wget -q https://yaqwsx.github.io/jlcparts/data/cache.zip
           for seq in $(seq -w 01 30); do
