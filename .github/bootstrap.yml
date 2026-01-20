@@ -1,5 +1,5 @@
 ---
-name: "Update parts database"
+name: "Bootstrap the initial component database"
 on:
   workflow_dispatch:  # allow for manually trigger workflow
 jobs:
@@ -27,6 +27,8 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: release/integrate
       - name: Show versions
         run: |
           sqlite3 --version
@@ -35,6 +37,7 @@ jobs:
       - name: Install python dependencies
         run: |
           pip install humanize
+          pip install -e .
       - name: Update database
         run: |
           set -x
@@ -46,23 +49,21 @@ jobs:
 
           cd db_build
 
-          # fetch the cached database
-          python3 jlcparts_db_convert.py --fetch-parts-db --skip-generate
+          cd db_working
+          wget -q https://yaqwsx.github.io/jlcparts/data/cache.zip
+          for seq in $(seq -w 01 30); do
+            wget -q https://yaqwsx.github.io/jlcparts/data/cache.z$seq || true
+          done
+          7z x cache.zip
+          for seq in $(seq -w 01 30); do
+            rm cache.z$seq || true
+          done
+          
+          python3 jlcparts_db_convert.py --skip-generate --fix-parts-db-descriptions --clean-parts-db --archive-parts-db
 
           ls -lah db_working/
 
-          # Print the current disk usage, might help with future "no disk space left" issues
-          echo "============================================================================================================================="
-          df -h
-          echo "============================================================================================================================="
-
-          # creates the converted database in 80M split-zip files in folder db_working
-          python3 jlcparts_db_convert.py
-          # remove the source db, as we don't want to package that one
           rm db_working/cache.sqlite3
-          # some info output for sanity check
-          ls -lah db_working
-          du -cslh db_working
 
           # Print the current disk usage, might help with future "no disk space left" issues
           echo "============================================================================================================================="
@@ -73,27 +74,4 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages
-          path: db_build/db_working
-  deploy:
-    name: "Deploy"
-    runs-on: ubuntu-latest
-    needs: build_and_update
-    permissions:
-      actions: write
-      contents: write
-      pages: write
-      id-token: write
-    # Deploy to the github-pages environment
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-      # delete-artifact
-      - name: Clean
-        uses: geekyeggo/delete-artifact@v4
-        with:
-          name: github-pages
+          path: db_build/archive/cache
