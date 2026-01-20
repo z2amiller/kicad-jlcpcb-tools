@@ -150,6 +150,8 @@ split-on-trailing-comma = false
 [tool.ruff.lint.per-file-ignores]
 "db_build/jlcparts_db_convert.py" = ["T201"]
 "common/filemgr.py" = ["T201"]
+"common/partsdb.py" = ["T201"]
+"common/progress.py" = ["T201"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25
