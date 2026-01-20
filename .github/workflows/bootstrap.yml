@@ -75,7 +75,7 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           name: github-pages
-          path: db_build/archive/components
+          path: db_build/archive
   deploy:
     name: "Deploy"
     runs-on: ubuntu-latest
