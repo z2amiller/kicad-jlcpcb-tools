@@ -35,6 +35,7 @@ jobs:
       - name: Install python dependencies
         run: |
           pip install humanize
+          pip install -e .
       - name: Update database
         run: |
           set -x
