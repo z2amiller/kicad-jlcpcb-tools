@@ -692,7 +692,7 @@ class Library:
         # Combine and extract downloaded files
         self.logger.debug("Combining and extracting zip part files...")
         try:
-            unzip_parts(self.parent, self.datadir)
+            unzip_parts(self.parent, self.datadir, library_config["db_file"] + ".zip")
         except Exception as e:
             wx.PostEvent(
                 self.parent,
