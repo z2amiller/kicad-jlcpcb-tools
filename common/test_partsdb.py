@@ -8,12 +8,66 @@ import sys
 import tempfile
 from unittest.mock import Mock, patch
 
+import pytest
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from common.partsdb import _CREATE_STATEMENTS, Generate, PartsDatabase
 from common.progress import NoOpProgressBar
 from common.translate import ComponentTranslator
+
+# ============================================================================
+# Pytest Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def temp_test_dir():
+    """Create a temporary test directory and clean up after test.
+
+    This fixture creates a unique temporary directory for each test.
+    The directory and all its contents are automatically deleted after
+    the test completes, even if the test fails.
+
+    Returns:
+        Path: The temporary directory path.
+
+    """
+    test_dir = Path(tempfile.mkdtemp(prefix="test_partsdb_"))
+    yield test_dir
+    shutil.rmtree(test_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def parts_database(temp_test_dir):
+    """Create a PartsDatabase instance and ensure it's closed after test.
+
+    This fixture automatically creates a PartsDatabase with a temporary
+    output database and archive directory. The database connection is
+    automatically closed at the end of the test, ensuring proper cleanup
+    without requiring manual close_sqlite() calls.
+
+    Args:
+        temp_test_dir: The temporary directory fixture.
+
+    Yields:
+        tuple: (database, output_db_path) for use in tests.
+               The database is automatically closed after the test.
+
+    """
+    archive_dir = temp_test_dir / "archive"
+    archive_dir.mkdir()
+    output_db = temp_test_dir / "test_parts.db"
+
+    db = PartsDatabase(output_db, archive_dir)
+
+    yield db, output_db
+
+    # Ensure database is closed after test
+    if db.conn:
+        db.close_sqlite()
+
 
 # ============================================================================
 # PartsDatabase Tests
@@ -23,60 +77,55 @@ from common.translate import ComponentTranslator
 class TestPartsDatabase:
     """Tests for PartsDatabase class."""
 
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.temp_dir = Path(tempfile.mkdtemp(prefix="test_partsdb_"))
-        self.output_db = self.temp_dir / "test_parts.db"
-        self.archive_dir = self.temp_dir / "archive"
-        self.archive_dir.mkdir()
-
-    def teardown_method(self):
-        """Clean up test fixtures."""
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_parts_database_init(self):
+    def test_parts_database_init(self, parts_database):
         """PartsDatabase initializes with correct paths."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
-        db.close_sqlite()
+        db, output_db = parts_database
 
-        assert self.output_db.exists()
+        assert output_db.exists()
         assert isinstance(db.part_count, int)
         assert db.part_count == 0
 
-    def test_parts_database_init_removes_existing(self):
+    def test_parts_database_init_removes_existing(self, temp_test_dir):
         """PartsDatabase removes existing output database."""
         # Create an existing database
-        self.output_db.write_text("old content")
-        assert self.output_db.exists()
+        output_db = temp_test_dir / "test_parts.db"
+        archive_dir = temp_test_dir / "archive"
+        archive_dir.mkdir()
 
-        db = PartsDatabase(self.output_db, self.archive_dir)
-        db.close_sqlite()
+        output_db.write_text("old content")
+        assert output_db.exists()
+
+        db = PartsDatabase(output_db, archive_dir)
 
         # Old file should be removed and replaced with new database
-        assert self.output_db.exists()
+        assert output_db.exists()
         # Verify it's a valid database
-        conn = sqlite3.connect(self.output_db)
+        conn = sqlite3.connect(output_db)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in cursor.fetchall()]
         conn.close()
         assert len(tables) > 0
+        db.close_sqlite()
 
-    def test_parts_database_custom_chunk_num(self):
+    def test_parts_database_custom_chunk_num(self, temp_test_dir):
         """PartsDatabase accepts custom chunk_num filename."""
+        output_db = temp_test_dir / "test_parts.db"
+        archive_dir = temp_test_dir / "archive"
+        archive_dir.mkdir()
+
         custom_chunk = Path("custom_chunk.txt")
-        db = PartsDatabase(self.output_db, self.archive_dir, chunk_num=custom_chunk)
+        db = PartsDatabase(output_db, archive_dir, chunk_num=custom_chunk)
         assert db.chunk_num == custom_chunk
         db.close_sqlite()
 
-    def test_parts_database_create_tables(self):
+    def test_parts_database_create_tables(self, parts_database):
         """PartsDatabase creates all required tables."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         cursor = db.conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in cursor.fetchall()]
-        db.close_sqlite()
 
         # Should have parts (FTS5), mapping, meta, categories
         assert "parts" in tables
@@ -84,21 +133,20 @@ class TestPartsDatabase:
         assert "meta" in tables
         assert "categories" in tables
 
-    def test_parts_database_parts_table_schema(self):
+    def test_parts_database_parts_table_schema(self, parts_database):
         """PartsDatabase creates parts table with correct columns."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         cursor = db.conn.cursor()
         cursor.execute("PRAGMA table_info(parts)")
         columns = [row[1] for row in cursor.fetchall()]
-        db.close_sqlite()
 
         # FTS5 virtual tables have slightly different schema, just verify parts table exists
         assert len(columns) > 0
 
-    def test_parts_database_update_parts_single_row(self):
+    def test_parts_database_update_parts_single_row(self, parts_database):
         """PartsDatabase updates parts with single row."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         row = {
             "LCSC Part": "C123456",
@@ -122,13 +170,12 @@ class TestPartsDatabase:
         cursor = db.conn.cursor()
         cursor.execute('SELECT COUNT(*) FROM parts WHERE "LCSC Part" = ?', ("C123456",))
         count = cursor.fetchone()[0]
-        db.close_sqlite()
 
         assert count == 1
 
-    def test_parts_database_update_parts_multiple_rows(self):
+    def test_parts_database_update_parts_multiple_rows(self, parts_database):
         """PartsDatabase updates parts with multiple rows."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         rows = [
             {
@@ -154,21 +201,19 @@ class TestPartsDatabase:
         cursor = db.conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM parts")
         count = cursor.fetchone()[0]
-        db.close_sqlite()
 
         assert count == 10
 
-    def test_parts_database_update_parts_empty_list(self):
+    def test_parts_database_update_parts_empty_list(self, parts_database):
         """PartsDatabase handles empty update list gracefully."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         db.update_parts([])
         assert db.part_count == 0
-        db.close_sqlite()
 
-    def test_parts_database_update_parts_with_special_chars(self):
+    def test_parts_database_update_parts_with_special_chars(self, parts_database):
         """PartsDatabase handles special characters in part data."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         row = {
             "LCSC Part": "C999999",
@@ -187,11 +232,10 @@ class TestPartsDatabase:
 
         db.update_parts([row])
         assert db.part_count == 1
-        db.close_sqlite()
 
-    def test_parts_database_populate_categories(self):
+    def test_parts_database_populate_categories(self, parts_database):
         """PartsDatabase populates categories from parts."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         # Insert some parts
         rows = [
@@ -230,13 +274,12 @@ class TestPartsDatabase:
         cursor = db.conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM categories")
         count = cursor.fetchone()[0]
-        db.close_sqlite()
 
         assert count == 2
 
-    def test_parts_database_metadata(self):
+    def test_parts_database_metadata(self, parts_database):
         """PartsDatabase records metadata."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         # Add some parts first
         row = {
@@ -262,14 +305,13 @@ class TestPartsDatabase:
 
         cursor.execute("SELECT partcount FROM meta")
         part_count = cursor.fetchone()[0]
-        db.close_sqlite()
 
         assert count == 1
         assert part_count == 1
 
-    def test_parts_database_metadata_records_size(self):
+    def test_parts_database_metadata_records_size(self, parts_database):
         """PartsDatabase metadata records database size."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         # Add some data
         rows = [
@@ -295,39 +337,46 @@ class TestPartsDatabase:
         cursor = db.conn.cursor()
         cursor.execute("SELECT size FROM meta")
         size = cursor.fetchone()[0]
-        db.close_sqlite()
 
         # Size should be positive and reasonable
         assert size > 0
 
-    def test_parts_database_metadata_records_date(self):
+    def test_parts_database_metadata_records_date(self, parts_database):
         """PartsDatabase metadata records current date."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
+
         db.meta_data()
 
         cursor = db.conn.cursor()
         cursor.execute("SELECT date FROM meta")
         result = cursor.fetchone()[0]
-        db.close_sqlite()
 
         # Should record today's date as a string
         assert str(date.today()) in result or result == str(date.today())
 
-    def test_parts_database_remove_original(self):
+    def test_parts_database_remove_original(self, temp_test_dir):
         """PartsDatabase removes existing database."""
-        # Create a file
-        self.output_db.write_text("test")
-        assert self.output_db.exists()
+        output_db = temp_test_dir / "test_parts.db"
+        archive_dir = temp_test_dir / "archive"
+        archive_dir.mkdir()
 
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        # Create a file
+        output_db.write_text("test")
+        assert output_db.exists()
+
+        db = PartsDatabase(output_db, archive_dir)
         # File should be removed during init and recreated as database
-        assert self.output_db.exists()
+        assert output_db.exists()
         db.close_sqlite()
 
     @patch("common.partsdb.FileManager")
-    def test_parts_database_split(self, mock_fm):
+    def test_parts_database_split(self, mock_fm, temp_test_dir):
         """PartsDatabase calls FileManager to split database."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        output_db = temp_test_dir / "test_parts.db"
+        archive_dir = temp_test_dir / "archive"
+        archive_dir.mkdir()
+
+        db = PartsDatabase(output_db, archive_dir)
 
         # Add some data
         row = {
@@ -348,7 +397,7 @@ class TestPartsDatabase:
         db.close_sqlite()
 
         # Now test split
-        db2 = PartsDatabase(self.output_db, self.archive_dir)
+        db2 = PartsDatabase(output_db, archive_dir)
         db2.close_sqlite()
 
         # Mock the split process so it doesn't actually run
@@ -357,17 +406,25 @@ class TestPartsDatabase:
 
     @patch("common.partsdb.os.unlink")
     @patch("common.partsdb.FileManager")
-    def test_parts_database_cleanup(self, mock_fm, mock_unlink):
+    def test_parts_database_cleanup(self, mock_fm, mock_unlink, temp_test_dir):
         """PartsDatabase cleanup removes original database file."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        output_db = temp_test_dir / "test_parts.db"
+        archive_dir = temp_test_dir / "archive"
+        archive_dir.mkdir()
+
+        db = PartsDatabase(output_db, archive_dir)
         db.close_sqlite()
 
         db.cleanup()
         mock_unlink.assert_called_once()
 
-    def test_parts_database_skip_cleanup_flag(self):
+    def test_parts_database_skip_cleanup_flag(self, temp_test_dir):
         """PartsDatabase respects skip_cleanup flag."""
-        db = PartsDatabase(self.output_db, self.archive_dir, skip_cleanup=True)
+        output_db = temp_test_dir / "test_parts.db"
+        archive_dir = temp_test_dir / "archive"
+        archive_dir.mkdir()
+
+        db = PartsDatabase(output_db, archive_dir, skip_cleanup=True)
         assert db.skip_cleanup is True
         db.close_sqlite()
 
@@ -380,21 +437,10 @@ class TestPartsDatabase:
 class TestGenerate:
     """Tests for Generate class."""
 
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.temp_dir = Path(tempfile.mkdtemp(prefix="test_generate_"))
-        self.output_db = self.temp_dir / "test_parts.db"
-        self.archive_dir = self.temp_dir / "archive"
-        self.archive_dir.mkdir()
-
-    def teardown_method(self):
-        """Clean up test fixtures."""
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_generate_init(self):
+    def test_generate_init(self, parts_database):
         """Generate initializes with database and translator."""
+        partsdb, _ = parts_database
         mock_componentdb = Mock()
-        partsdb = PartsDatabase(self.output_db, self.archive_dir)
         progress = NoOpProgressBar()
         translator = ComponentTranslator({}, {})
 
@@ -407,29 +453,26 @@ class TestGenerate:
         assert gen.total_components == 0
         assert gen.loaded_components == 0
 
-        partsdb.close_sqlite()
-
-    def test_generate_init_without_translator(self):
+    def test_generate_init_without_translator(self, parts_database):
         """Generate creates translator if not provided."""
+        partsdb, _ = parts_database
         mock_componentdb = Mock()
         mock_componentdb.get_manufacturers.return_value = {1: "Samsung"}
         mock_componentdb.get_categories.return_value = {1: ("Resistors", "Fixed")}
 
-        partsdb = PartsDatabase(self.output_db, self.archive_dir)
         progress = NoOpProgressBar()
 
         gen = Generate(mock_componentdb, partsdb, progress)
 
         assert gen.translator is None  # Not created until generate() is called
-        partsdb.close_sqlite()
 
-    def test_generate_tracks_components(self):
+    def test_generate_tracks_components(self, parts_database):
         """Generate tracks total and loaded component counts."""
+        partsdb, _ = parts_database
         mock_componentdb = Mock()
         mock_componentdb.count_components.return_value = 100
         mock_componentdb.fetch_components.return_value = []
 
-        partsdb = PartsDatabase(self.output_db, self.archive_dir)
         progress = NoOpProgressBar()
 
         gen = Generate(mock_componentdb, partsdb, progress)
@@ -438,18 +481,19 @@ class TestGenerate:
         gen.total_components = 100
 
         assert gen.total_components == 100
-        partsdb.close_sqlite()
 
     @patch("common.partsdb.ComponentTranslator")
-    def test_generate_creates_translator_on_demand(self, mock_translator_class):
+    def test_generate_creates_translator_on_demand(
+        self, mock_translator_class, parts_database
+    ):
         """Generate creates translator if not provided during generate()."""
+        partsdb, _ = parts_database
         mock_componentdb = Mock()
         mock_componentdb.count_components.return_value = 0
         mock_componentdb.fetch_components.return_value = []
         mock_componentdb.get_manufacturers.return_value = {}
         mock_componentdb.get_categories.return_value = {}
 
-        partsdb = PartsDatabase(self.output_db, self.archive_dir)
         progress = NoOpProgressBar()
 
         gen = Generate(mock_componentdb, partsdb, progress)
@@ -462,14 +506,13 @@ class TestGenerate:
             gen.generate()
 
         # Translator should still be None in this context (mocked away)
-        partsdb.close_sqlite()
 
-    def test_generate_process_batches_empty(self):
+    def test_generate_process_batches_empty(self, parts_database):
         """Generate handles empty component batches."""
+        partsdb, _ = parts_database
         mock_componentdb = Mock()
         mock_componentdb.fetch_components.return_value = []
 
-        partsdb = PartsDatabase(self.output_db, self.archive_dir)
         progress = NoOpProgressBar()
         translator = ComponentTranslator({}, {})
 
@@ -477,10 +520,10 @@ class TestGenerate:
         gen._process_batches("", None)
 
         assert gen.loaded_components == 0
-        partsdb.close_sqlite()
 
-    def test_generate_process_batches_single_batch(self):
+    def test_generate_process_batches_single_batch(self, parts_database):
         """Generate processes a single batch of components."""
+        partsdb, _ = parts_database
         # Create mock component rows
         mock_rows = []
         for _ in range(5):
@@ -490,7 +533,6 @@ class TestGenerate:
         mock_componentdb = Mock()
         mock_componentdb.fetch_components.return_value = [mock_rows]
 
-        partsdb = PartsDatabase(self.output_db, self.archive_dir)
         progress = NoOpProgressBar()
 
         # Create a translator that returns valid part data
@@ -518,12 +560,11 @@ class TestGenerate:
         gen._process_batches("", None)
 
         assert gen.loaded_components == 5
-        partsdb.close_sqlite()
 
-    def test_generate_report_stats_no_translator(self):
+    def test_generate_report_stats_no_translator(self, parts_database):
         """Generate reports error when no data processed."""
+        partsdb, _ = parts_database
         mock_componentdb = Mock()
-        partsdb = PartsDatabase(self.output_db, self.archive_dir)
         progress = NoOpProgressBar()
 
         gen = Generate(mock_componentdb, partsdb, progress)
@@ -533,12 +574,10 @@ class TestGenerate:
         # This would print to stdout, we just verify it doesn't crash
         gen.report_stats()
 
-        partsdb.close_sqlite()
-
-    def test_generate_report_stats_with_data(self):
+    def test_generate_report_stats_with_data(self, parts_database):
         """Generate reports statistics from translator."""
+        partsdb, _ = parts_database
         mock_componentdb = Mock()
-        partsdb = PartsDatabase(self.output_db, self.archive_dir)
         progress = NoOpProgressBar()
 
         translator = Mock(spec=ComponentTranslator)
@@ -548,12 +587,11 @@ class TestGenerate:
         gen.report_stats()
 
         translator.get_statistics.assert_called_once()
-        partsdb.close_sqlite()
 
-    def test_generate_report_stats_zero_deletion(self):
+    def test_generate_report_stats_zero_deletion(self, parts_database):
         """Generate handles zero deletions in statistics."""
+        partsdb, _ = parts_database
         mock_componentdb = Mock()
-        partsdb = PartsDatabase(self.output_db, self.archive_dir)
         progress = NoOpProgressBar()
 
         translator = Mock(spec=ComponentTranslator)
@@ -563,7 +601,6 @@ class TestGenerate:
         gen.report_stats()
 
         translator.get_statistics.assert_called_once()
-        partsdb.close_sqlite()
 
 
 # ============================================================================
@@ -574,20 +611,9 @@ class TestGenerate:
 class TestPartsDBIntegration:
     """Integration tests for partsdb module."""
 
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.temp_dir = Path(tempfile.mkdtemp(prefix="test_partsdb_int_"))
-        self.output_db = self.temp_dir / "test_parts.db"
-        self.archive_dir = self.temp_dir / "archive"
-        self.archive_dir.mkdir()
-
-    def teardown_method(self):
-        """Clean up test fixtures."""
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_parts_database_full_workflow(self):
+    def test_parts_database_full_workflow(self, parts_database):
         """PartsDatabase handles full workflow: create, insert, optimize, metadata."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, output_db = parts_database
 
         # Insert parts
         rows = [
@@ -625,15 +651,13 @@ class TestPartsDBIntegration:
         cursor.execute("SELECT COUNT(*) FROM meta")
         meta_count = cursor.fetchone()[0]
 
-        db.close_sqlite()
-
         assert parts_count == 1
         assert categories_count == 1
         assert meta_count == 1
 
-    def test_multiple_category_insertion(self):
+    def test_multiple_category_insertion(self, parts_database):
         """PartsDatabase handles multiple categories correctly."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         # Insert parts with different categories
         rows = [
@@ -659,14 +683,13 @@ class TestPartsDBIntegration:
         cursor = db.conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM categories")
         categories_count = cursor.fetchone()[0]
-        db.close_sqlite()
 
         # Should have 3 first categories with multiple second categories
         assert categories_count > 0
 
-    def test_fts5_search_capability(self):
+    def test_fts5_search_capability(self, parts_database):
         """PartsDatabase parts table supports FTS5 search."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         rows = [
             {
@@ -705,13 +728,11 @@ class TestPartsDBIntegration:
         cursor.execute("SELECT COUNT(*) FROM parts WHERE parts MATCH ?", ("resistor",))
         count = cursor.fetchone()[0]
 
-        db.close_sqlite()
-
         assert count > 0
 
-    def test_special_field_name_handling(self):
+    def test_special_field_name_handling(self, parts_database):
         """PartsDatabase handles field names with spaces and dots correctly."""
-        db = PartsDatabase(self.output_db, self.archive_dir)
+        db, _ = parts_database
 
         # Fields have spaces like "LCSC Part", "Solder Joint", etc.
         row = {
@@ -733,7 +754,6 @@ class TestPartsDBIntegration:
         cursor = db.conn.cursor()
         cursor.execute('SELECT COUNT(*) FROM parts WHERE "LCSC Part" = ?', ("C999",))
         count = cursor.fetchone()[0]
-        db.close_sqlite()
 
         assert count == 1
 
