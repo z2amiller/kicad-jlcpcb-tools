@@ -237,27 +237,47 @@ class FileManager:
         print(f"Successfully reassembled file: {output_path}")
         return output_path
 
-    def download_from_github(
+    def download(
         self,
-        github_url: str,
+        url: str,
+        output_path: Path | str | None = None,
         output_dir: Path | str | None = None,
         progress_manager: NestedProgressBar | None = None,
     ) -> Path:
-        """Download split file chunks from a GitHub release or archive.
+        """Download a file from a URL.
+
+        Supports both simple file downloads and split chunk downloads from GitHub.
 
         Args:
-            github_url: Base URL to the GitHub archive (without filename or chunk extension)
-            output_dir: Directory to download chunks into (defaults to current directory)
+            url: URL to download (can be file URL or base URL for chunks)
+            output_path: Path where the downloaded file should be saved (for simple downloads)
+            output_dir: Directory to download chunks into (for chunk downloads)
             progress_manager: Optional NestedProgressBar instance for progress reporting.
 
         Returns:
             Path: Path to the downloaded file.
 
         Raises:
-            FileNotFoundError: If sentinel file cannot be found at the remote location
+            FileNotFoundError: If file cannot be found at the remote location
             OSError: If download fails.
 
         """
+        # Handle simple file download if output_path is provided
+        if output_path is not None:
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            print(f"Downloading file from {url}")
+            try:
+                response = requests.get(url, allow_redirects=True, timeout=300)
+                response.raise_for_status()
+                with open(output_path, "wb") as f:
+                    f.write(response.content)
+                print(f"Successfully downloaded to {output_path}")
+                return output_path
+            except requests.RequestException as e:
+                raise OSError(f"Failed to download from {url}: {e}") from e
+
         if progress_manager is None:
             progress_manager = NoOpProgressBar()
 
@@ -271,7 +291,7 @@ class FileManager:
         download_dir.mkdir(parents=True, exist_ok=True)
 
         # Download sentinel file first to determine chunk count
-        sentinel_url = f"{github_url}/{self.sentinel_filename}"
+        sentinel_url = f"{url}/{self.sentinel_filename}"
         sentinel_local = download_dir / self.sentinel_filename
 
         print(f"Downloading sentinel file from {sentinel_url}")
@@ -292,7 +312,7 @@ class FileManager:
         except ValueError as e:
             raise ValueError(f"Invalid sentinel file format at {sentinel_local}") from e
 
-        print(f"Downloading {chunk_count} chunks from {github_url}")
+        print(f"Downloading {chunk_count} chunks from {url}")
 
         with progress_manager.outer(
             chunk_count,
@@ -300,7 +320,7 @@ class FileManager:
         ) as outer_pbar:  # type: ignore
             for i in range(1, chunk_count + 1):
                 chunk_filename = f"{self.compressed_output_file.name}.{i:03d}"
-                chunk_url = f"{github_url}/{chunk_filename}"
+                chunk_url = f"{url}/{chunk_filename}"
                 chunk_local = download_dir / chunk_filename
 
                 try:
@@ -343,22 +363,22 @@ class FileManager:
 
     def download_and_reassemble(
         self,
-        github_url: str,
+        url: str,
+        output_path: Path | str | None = None,
         output_dir: Path | str | None = None,
-        output_file: Path | str | None = None,
         progress_manager: NestedProgressBar | None = None,
         cleanup: bool = True,
     ) -> Path:
         """Download split chunks from GitHub and reassemble into final file.
 
-        This is a convenience method that combines download_from_github() and
+        This is a convenience method that combines download() and
         reassemble() into a single workflow, automatically cleaning up all
         intermediate files (chunks and compressed archive).
 
         Args:
-            github_url: Base URL to the GitHub archive (without filename or chunk extension)
-            output_dir: Directory for final output file (defaults to current directory)
-            output_file: Final output filename (defaults to self.file_path)
+            url: Base URL to the GitHub archive (without filename or chunk extension)
+            output_path: Final output filename (defaults to self.file_path)
+            output_dir: Directory for chunks and final output file (defaults to current directory)
             progress_manager: Optional NestedProgressBar instance for progress reporting.
             cleanup: If True, delete all intermediate files after reassembly
                     (default: True)
@@ -380,27 +400,29 @@ class FileManager:
         else:
             output_dir = Path(output_dir)
 
-        if output_file is None:
-            output_file = self.file_path
+        if output_path is None:
+            output_path = self.file_path
         else:
-            output_file = Path(output_file)
+            output_path = Path(output_path)
 
-        # Ensure output_file has correct parent directory
-        if output_file.parent != output_dir:
-            output_file = output_dir / output_file.name
+        # Ensure output_path has correct parent directory
+        if output_path.parent != output_dir:
+            output_path = output_dir / output_path.name
 
         try:
             # Step 1: Download split files
             print("Starting download and reassemble workflow")
-            print(f"  Final output: {output_file}")
-            self.download_from_github(
-                github_url, output_dir=output_dir, progress_manager=progress_manager
+            print(f"  Final output: {output_path}")
+            self.download(
+                url=url,
+                output_dir=output_dir,
+                progress_manager=progress_manager,
             )
 
             # Step 2: Reassemble the downloaded chunks
             print("\nReassembling chunks...")
             reassembled_file = self.reassemble(
-                output_path=output_file, input_dir=output_dir
+                output_path=output_path, input_dir=output_dir
             )
 
             # Step 3: Clean up intermediate files
@@ -502,9 +524,9 @@ def main() -> None:
         # Download and reassemble in a single operation with cleanup
         output_file = args.output_file or (Path(args.output) / "parts-fts5.db")
         manager.download_and_reassemble(
-            github_url=args.url,
+            url=args.url,
             output_dir=args.output,
-            output_file=output_file,
+            output_path=output_file,
             progress_manager=TqdmNestedProgressBar(),
             cleanup=True,
         )
