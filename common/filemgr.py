@@ -222,7 +222,7 @@ class FileManager:
             extracted_files = list(Path(temp_extract_dir).iterdir())
             if len(extracted_files) == 1 and extracted_files[0].is_file():
                 # Single file case - move it directly
-                extracted_files[0].rename(output_path)
+                shutil.copy2(extracted_files[0], output_path)
             else:
                 # Multiple files or directory structure - copy the entire extracted content
                 output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -524,7 +524,7 @@ def main() -> None:
         # Download and reassemble in a single operation with cleanup
         output_file = args.output_file or (Path(args.output) / "parts-fts5.db")
         manager.download_and_reassemble(
-            url=args.url,
+            args.url,
             output_dir=args.output,
             output_path=output_file,
             progress_manager=TqdmNestedProgressBar(),

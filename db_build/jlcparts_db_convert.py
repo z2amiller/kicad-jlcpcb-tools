@@ -192,7 +192,7 @@ def main(
             sentinel_filename="cache_chunk_num.txt",
         )
         fm.download_and_reassemble(
-            github_url=components_db_base_url,
+            url=components_db_base_url,
             output_dir=Path(working_directory),
             cleanup=not skip_cleanup,
         )
