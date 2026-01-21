@@ -220,15 +220,19 @@ class FileManager:
 
             # The zip should contain one file - move it to the desired output path
             extracted_files = list(Path(temp_extract_dir).iterdir())
-            # Multiple files or directory structure - copy the entire extracted content
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            for item in extracted_files:
-                if item.is_file():
-                    shutil.copy2(item, output_path.parent / item.name)
-                else:
-                    shutil.copytree(
-                        item, output_path.parent / item.name, dirs_exist_ok=True
-                    )
+            if len(extracted_files) == 1 and extracted_files[0].is_file():
+                # Single file case - move it directly
+                shutil.copy2(extracted_files[0], output_path)
+            else:
+                # Multiple files or directory structure - copy the entire extracted content
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                for item in extracted_files:
+                    if item.is_file():
+                        shutil.copy2(item, output_path.parent / item.name)
+                    else:
+                        shutil.copytree(
+                            item, output_path.parent / item.name, dirs_exist_ok=True
+                        )
 
         print(f"Successfully reassembled file: {output_path}")
         return output_path
