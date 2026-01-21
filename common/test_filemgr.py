@@ -1,6 +1,7 @@
 """Test FileManager split and reassemble workflow."""
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -26,6 +27,7 @@ def temp_test_dir():
 
     Returns:
         Path: The temporary directory path.
+
     """
     test_dir = Path(tempfile.mkdtemp(prefix="test_filemgr_"))
     yield test_dir
@@ -44,6 +46,7 @@ def temp_file(temp_test_dir):
 
     Returns:
         tuple: (test_file_path, test_content) for assertions and verification.
+
     """
     test_file = temp_test_dir / "test_data.txt"
     test_content = "Test content " * 10000
@@ -65,8 +68,8 @@ def http_server(temp_test_dir):
     Yields:
         tuple: (server_url, temp_test_dir) where server_url is the base URL
                (e.g., http://127.0.0.1:12345) to use for requests.
+
     """
-    import os
 
     class QuietHTTPRequestHandler(SimpleHTTPRequestHandler):
         """HTTP request handler that suppresses logging."""
