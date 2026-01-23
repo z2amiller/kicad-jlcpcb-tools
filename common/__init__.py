@@ -8,6 +8,7 @@ Provides reusable components for file management and database operations.
 <<<<<<< HEAD
 =======
 from .componentdb import ComponentsDatabase
+<<<<<<< HEAD
 from .filemgr import FileManager
 from .jlcapi import ApiCategory, CategoryFetch, Component, JlcApi, LcscId
 >>>>>>> 2dfb794 (Add componentdb module with tests)
@@ -54,4 +55,9 @@ __all__ = [
     "ProgressCallback",
     "TqdmNestedProgressBar",
 >>>>>>> 2dfb794 (Add componentdb module with tests)
+=======
+
+__all__ = [
+    "ComponentsDatabase",
+>>>>>>> 67d3271 (Modify __init__ to reflect componentdb)
 ]
