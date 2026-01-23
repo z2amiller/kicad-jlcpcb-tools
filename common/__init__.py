@@ -6,6 +6,7 @@ Provides reusable components for file management and database operations.
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 from .componentdb import ComponentsDatabase
 <<<<<<< HEAD
@@ -61,3 +62,6 @@ __all__ = [
     "ComponentsDatabase",
 >>>>>>> 67d3271 (Modify __init__ to reflect componentdb)
 ]
+=======
+__all__ = []
+>>>>>>> 9da245c (Add partsdb module with tests)
