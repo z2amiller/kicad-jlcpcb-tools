@@ -39,6 +39,38 @@ class LibraryState(Enum):
     DOWNLOAD_RUNNING = 2
 
 
+# Library configuration mapping: defines available library options
+# Each library specifies the database filename, count file name, and chunk file stub
+LIBRARY_CONFIG = {
+    "default": {
+        "display_name": "FTS5 Full Library - Backwards Compatible",
+        "db_file": "parts-fts5.db",
+        "cnt_file": "chunk_num_fts5.txt",
+        "chunk_stub": "parts-fts5.db.zip.",
+    },
+    "standard-parts": {
+        "display_name": "Standard Library",
+        "db_file": "new-parts-fts5.db",
+        "cnt_file": "chunk_num_new_parts_fts5.txt",
+        "chunk_stub": "new-parts-fts5.db.zip.",
+    },
+    "basic": {
+        "display_name": "Basic + Preferred Library",
+        "db_file": "basic-parts-fts5.db",
+        "cnt_file": "chunk_num_basic_parts_fts5.txt",
+        "chunk_stub": "basic-parts-fts5.db.zip.",
+    },
+    "empty": {
+        "display_name": "Empty Library - No parts!",
+        "db_file": "empty-parts-fts5.db",
+        "cnt_file": "chunk_num_empty_parts_fts5.txt",
+        "chunk_stub": "empty-parts-fts5.db.zip.",
+    },
+}
+
+DEFAULT_LIBRARY = "standard-parts"
+
+
 class Library:
     """A storage class to get data from a sqlite database and write it back."""
 
@@ -48,7 +80,18 @@ class Library:
         self.order_by = "LCSC Part"
         self.order_dir = "ASC"
         self.datadir = os.path.join(PLUGIN_PATH, "jlcpcb")
-        self.partsdb_file = os.path.join(self.datadir, "parts-fts5.db")
+
+        # Get selected library from settings, default to FTS5
+        selected_library = self.parent.settings.get("library", {}).get(
+            "selected_library", DEFAULT_LIBRARY
+        )
+        if selected_library not in LIBRARY_CONFIG:
+            selected_library = DEFAULT_LIBRARY
+
+        self.selected_library = selected_library
+        library_config = LIBRARY_CONFIG[selected_library]
+        self.partsdb_file = os.path.join(self.datadir, library_config["db_file"])
+
         self.rotationsdb_file = os.path.join(self.datadir, "rotations.db")
         self.localcorrectionsdb_file = os.path.join(
             self.parent.project_path, "jlcpcb", "project.db"
@@ -68,6 +111,25 @@ class Library:
 
         self.setup()
         self.check_library()
+
+    def refresh_library_config(self):
+        """Refresh library configuration from settings."""
+        # Get selected library from settings, default to FTS5
+        selected_library = self.parent.settings.get("library", {}).get(
+            "selected_library", DEFAULT_LIBRARY
+        )
+        if selected_library not in LIBRARY_CONFIG:
+            selected_library = DEFAULT_LIBRARY
+
+        self.selected_library = selected_library
+        library_config = LIBRARY_CONFIG[selected_library]
+        self.partsdb_file = os.path.join(self.datadir, library_config["db_file"])
+
+        self.logger.debug(
+            "Library configuration refreshed. Selected: %s, Database: %s",
+            self.selected_library,
+            self.partsdb_file,
+        )
 
     def setup(self):
         """Check if folders and database exist, setup if not."""
@@ -477,12 +539,22 @@ class Library:
         start = time.time()
         wx.PostEvent(self.parent, DownloadStartedEvent())
 
+        # Get library configuration for selected library
+        library_config = LIBRARY_CONFIG[self.selected_library]
+
         # Define basic variables
-        url_stub = "https://bouni.github.io/kicad-jlcpcb-tools/"
-        cnt_file = "chunk_num_fts5.txt"
+        url_stub = "https://z2amiller.github.io/kicad-jlcpcb-tools/"
+        cnt_file = library_config["cnt_file"]
         progress_file = os.path.join(self.datadir, "progress.txt")
-        chunk_file_stub = "parts-fts5.db.zip."
+        chunk_file_stub = library_config["chunk_stub"]
         completed_chunks = set()
+
+        self.logger.debug("Starting download of JLCPCB parts database...")
+        self.logger.debug(
+            "Using library: %s (basefile %s)",
+            self.selected_library,
+            library_config["chunk_stub"],
+        )
 
         # Check if there is a progress file
         if os.path.exists(progress_file):
@@ -620,7 +692,7 @@ class Library:
         # Combine and extract downloaded files
         self.logger.debug("Combining and extracting zip part files...")
         try:
-            unzip_parts(self.parent, self.datadir)
+            unzip_parts(self.parent, self.datadir, library_config["db_file"] + ".zip")
         except Exception as e:
             wx.PostEvent(
                 self.parent,
