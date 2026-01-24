@@ -14,11 +14,6 @@ from typing import NamedTuple
 # Add parent directory to path so we can import common module
 # TODO(z2amiller):  Use proper packaging
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from typing import NamedTuple
-
-# Add parent directory to path so we can import common module
-# TODO(z2amiller):  Use proper packaging
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import click
 
@@ -41,6 +36,8 @@ class PartDatabaseConfig(NamedTuple):
 class DatabaseConfig:
     """Predefined database configurations."""
 
+    # TODO(z2amiller): Share these configs with the database chooser
+    # in the main plugin.
     @staticmethod
     def preferredAndBasic() -> PartDatabaseConfig:
         """Select only preferred and basic parts."""
@@ -70,8 +67,8 @@ class DatabaseConfig:
         """Select all parts except obsolete parts."""
         filter_seconds = int(time.time()) - obsolete_threshold_days * 24 * 60 * 60
         return PartDatabaseConfig(
-            name="current-parts-fts5.db",
-            chunk_file_name="chunk_num_current_parts_fts5.txt",
+            name="new-parts-fts5.db",
+            chunk_file_name="chunk_num_new_parts_fts5.txt",
             where_clause=f"NOT (stock = 0 AND last_on_stock < {filter_seconds})",
             populate_preferred=True,
         )
@@ -111,44 +108,6 @@ def update_components_db_from_api() -> None:
                     inner_pbar.update(len(components))
 
             outer_pbar.update()
-
-    db.cleanup_stock()
-    db.close()
-    def emptyParts() -> PartDatabaseConfig:
-        """Select no parts."""
-        return PartDatabaseConfig(
-            name="empty-parts-fts5.db",
-            chunk_file_name="chunk_num_empty_parts_fts5.txt",
-            where_clause="FALSE",
-        )
-
-
-def update_components_db_from_api() -> None:
-    """Update the component cache database."""
-    db = ComponentsDatabase("db_working/cache.sqlite3")
-    print("Fetching categories...")
-    initial_categories = JlcApi.fetchCategories(instockOnly=True)
-    categories = JlcApi.collapseCategories(initial_categories, limit=50000)
-    print(f"Found {len(initial_categories)} categories, collaped to {len(categories)}.")
-
-    progress = (
-        TqdmNestedProgressBar()
-        if sys.stdout.isatty()
-        else PrintNestedProgressBar(outer_threshold=1, inner_threshold=2000)
-    )
-
-    with progress.outer(len(categories), "Fetching categories") as outer_pbar:
-        for category in categories:
-            fetcher = CategoryFetch(category)
-
-            with progress.inner(category.count, f"{category}") as inner_pbar:
-                for components in fetcher.fetchAll():
-                    comp_objs = [Component(comp) for comp in components]
-                    db.update_cache(comp_objs)
-                    inner_pbar.update(len(components))
-
-            outer_pbar.update()
-
     db.cleanup_stock()
     db.close()
 
@@ -197,45 +156,9 @@ def update_components_db_from_api() -> None:
 )
 @click.option(
     "--archive-components-db",
-    "--components-db-base-url",
-    default="http://yaqwsx.github.io/jlcparts/data",
-    show_default=True,
-    help="Base URL to fetch the components database from",
-)
-@click.option(
-    "--fetch-components-db",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Fetch the components db from the remote server",
-)
-@click.option(
-    "--fix-components-db-descriptions",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Fix descriptions in the components db by pulling from the 'extra' field",
-)
-@click.option(
-    "--update-components-db",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Update the local components db using LCSC API data",
-)
-@click.option(
-    "--clean-components-db",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Clean the local components db by removing old and out-of-stock parts",
-)
-@click.option(
-    "--archive-components-db",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Archive the components db after updating from the API",
     help="Archive the components db after updating from the API",
 )
 @click.option(
@@ -251,18 +174,12 @@ def update_components_db_from_api() -> None:
     default=365,
     type=int,
     help="""
-        Setting this to > 0 will generate an additional dataabase that ignores parts
-        that have been out of stock for more than the specified number of days.
+        Setting this to > 0 will generate an additional parts database that excludes parts
+        that have been obsolete (out of stock) for more than the specified number of days.
     """,
 )
 def main(
     skip_cleanup: bool,
-    fetch_components_db: bool,
-    components_db_base_url: str,
-    fix_components_db_descriptions: bool,
-    update_components_db: bool,
-    clean_components_db: bool,
-    archive_components_db: bool,
     fetch_components_db: bool,
     components_db_base_url: str,
     fix_components_db_descriptions: bool,
@@ -339,7 +256,6 @@ def main(
                 componentdb=componentdb,
                 partsdb=partsdb,
                 progress=progress,
-                populate_preferred=config.populate_preferred,
             )
             generator.generate(where_clause=config.where_clause)
 
@@ -349,8 +265,6 @@ def main(
             chunk_size=50 * 1024 * 1024,  # 50 MB
             sentinel_filename="cache_chunk_num.txt",
         )
-        fm.compress_and_split(
-            output_dir=Path(archive_dir), delete_original=skip_cleanup
         fm.compress_and_split(
             output_dir=Path(archive_dir), delete_original=skip_cleanup
         )
