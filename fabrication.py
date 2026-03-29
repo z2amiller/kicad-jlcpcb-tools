@@ -33,7 +33,7 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
-from .footprint_helpers import get_is_dnp
+from .footprint_helpers import get_is_dnp, get_lcsc_value
 
 # Compatibility hack for V6 / V7 / V7.99
 try:
@@ -178,12 +178,20 @@ class Fabrication:
         if footprint.GetLayer() != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
+        lcsc = get_lcsc_value(footprint)
+        getter_values = []
+        if lcsc:
+            getter_values.append(str(lcsc))
+
         for getter in (
             lambda: str(footprint.GetReference()),
             lambda: str(footprint.GetValue()),
             lambda: str(footprint.GetFPID().GetLibItemName()),
         ):
-            match = self._find_correction(getter())
+            getter_values.append(getter())
+
+        for value in getter_values:
+            match = self._find_correction(value)
             if match:
                 return self.rotate(footprint, rotation, match[0])
         return rotation
@@ -238,12 +246,20 @@ class Fabrication:
 
     def fix_position(self, footprint, position):
         """Fix the position of footprints in order to be correct for JLCPCB."""
+        lcsc = get_lcsc_value(footprint)
+        getter_values = []
+        if lcsc:
+            getter_values.append(str(lcsc))
+
         for getter in (
             lambda: str(footprint.GetReference()),
             lambda: str(footprint.GetValue()),
             lambda: str(footprint.GetFPID().GetLibItemName()),
         ):
-            match = self._find_correction(getter())
+            getter_values.append(getter())
+
+        for value in getter_values:
+            match = self._find_correction(value)
             if match:
                 return self.reposition(footprint, position, match[1])
         return position
