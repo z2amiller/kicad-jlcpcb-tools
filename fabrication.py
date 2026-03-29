@@ -32,6 +32,8 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
+from .helpers import get_lcsc_value
+
 # Compatibility hack for V6 / V7 / V7.99
 try:
     from pcbnew import DRILL_MARKS_NO_DRILL_SHAPE  # pylint: disable=import-error
@@ -92,6 +94,12 @@ class Fabrication:
         for regex, correction, _ in self.corrections:
             if re.search(regex, str(footprint.GetFPID().GetLibItemName())):
                 return self.rotate(footprint, rotation, correction)
+        # Then if the assigned LCSC number matches
+        lcsc = get_lcsc_value(footprint)
+        if lcsc:
+            for regex, correction, _ in self.corrections:
+                if re.search(regex, str(lcsc)):
+                    return self.rotate(footprint, rotation, correction)
         # If no correction matches, return the original rotation
         return rotation
 
@@ -122,8 +130,12 @@ class Fabrication:
             if footprint.GetLayer() != 0:
                 # bottom angles need to be mirrored on Y-axis
                 rotation = (180 - rotation) % 360
-            offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(offset[1]) * math.sin(math.radians(rotation))
-            offset_y = - FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(offset[1]) * math.cos(math.radians(rotation))
+            offset_x = FromMM(offset[0]) * math.cos(math.radians(rotation)) + FromMM(
+                offset[1]
+            ) * math.sin(math.radians(rotation))
+            offset_y = -FromMM(offset[0]) * math.sin(math.radians(rotation)) + FromMM(
+                offset[1]
+            ) * math.cos(math.radians(rotation))
             if footprint.GetLayer() != 0:
                 # mirrored coordinate system needs to be taken into account on the bottom
                 offset_x = -offset_x
@@ -136,14 +148,18 @@ class Fabrication:
                 offset[0],
                 offset[1],
             )
-            return wxPoint(
-                position.x + offset_x, position.y + offset_y
-            )
+            return wxPoint(position.x + offset_x, position.y + offset_y)
         return position
 
     def fix_position(self, footprint, position):
         """Fix the position of footprints in order to be correct for JLCPCB."""
-        # First check if the part name matches
+        # First check lcsc number since it is most specific
+        lcsc = get_lcsc_value(footprint)
+        if lcsc:
+            for regex, _, correction in self.corrections:
+                if re.search(regex, str(lcsc)):
+                    return self.reposition(footprint, position, correction)
+        # Then check if the part name matches
         for regex, _, correction in self.corrections:
             if re.search(regex, str(footprint.GetReference())):
                 return self.reposition(footprint, position, correction)
