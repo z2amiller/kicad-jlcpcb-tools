@@ -546,7 +546,6 @@ class SettingsDialog(wx.Dialog):
         hooks_box_sizer.Add(pre_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
         hooks_box_sizer.Add(post_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
         hooks_box_sizer.Add(timeout_sizer, 0, wx.ALL | wx.EXPAND, 5)
-
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
