@@ -18,6 +18,19 @@ class _FakeFabrication:
         self.gerberdir = "/tmp/gerber-output"
 
 
+class _FakeIPCClient:
+    def __init__(self, available=True):
+        self._available = available
+        self.calls = []
+
+    def is_available(self):
+        return self._available
+
+    def call(self, method, params):
+        self.calls.append((method, params))
+        return {"ok": True}
+
+
 def test_ipc_export_plan_requires_minimum_version():
     """IPC export plan should fail fast on unsupported KiCad versions."""
     plan = IPCExportPlan(_FakeFabrication((10, 0, 0)))
@@ -78,3 +91,39 @@ def test_ipc_export_plan_falls_back_when_direct_ipc_export_fails():
     plan.generate_gerbers(layer_count=4)
 
     assert calls[0][0][:4] == ["kicad-cli", "pcb", "export", "gerbers"]
+
+
+def test_ipc_export_plan_uses_direct_ipc_when_available():
+    """When IPC transport is available, direct IPC export should be used."""
+    cli_calls = []
+
+    def _runner(cmd, **kwargs):
+        cli_calls.append((cmd, kwargs))
+
+    ipc_client = _FakeIPCClient(available=True)
+    plan = IPCExportPlan(
+        _FakeFabrication((11, 0, 0)),
+        command_runner=_runner,
+        ipc_client=ipc_client,
+    )
+
+    plan.generate_gerbers(layer_count=4)
+    plan.generate_drill_files()
+
+    assert cli_calls == []
+    assert ipc_client.calls == [
+        (
+            "pcb.export.gerbers",
+            {
+                "board": "/tmp/fixture.kicad_pcb",
+                "output_dir": "/tmp/gerber-output",
+            },
+        ),
+        (
+            "pcb.export.drill",
+            {
+                "board": "/tmp/fixture.kicad_pcb",
+                "output_dir": "/tmp/gerber-output",
+            },
+        ),
+    ]
