@@ -38,6 +38,14 @@ def test_default_socket_path_uses_env_override(monkeypatch):
     assert KiCadIPCClient.default_socket_path() == "/tmp/kicad-ipc-test.sock"
 
 
+def test_default_socket_path_prefers_kicad_api_socket(monkeypatch):
+    """KiCad IPC launcher variable should take precedence when present."""
+    monkeypatch.setenv("KICAD_API_SOCKET", "/tmp/kicad-api.sock")
+    monkeypatch.setenv("KICAD_IPC_SOCKET", "/tmp/kicad-ipc-test.sock")
+
+    assert KiCadIPCClient.default_socket_path() == "/tmp/kicad-api.sock"
+
+
 def test_is_available_false_when_socket_missing(monkeypatch):
     """Availability should be false if the socket path does not exist."""
     client = KiCadIPCClient(socket_path="/tmp/missing-kicad-ipc.sock")

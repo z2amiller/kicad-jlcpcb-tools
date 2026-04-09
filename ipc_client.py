@@ -28,6 +28,10 @@ class KiCadIPCClient:
     @staticmethod
     def default_socket_path() -> Optional[str]:
         """Return the default KiCad IPC socket path for the current platform."""
+        api_socket = os.getenv("KICAD_API_SOCKET")
+        if api_socket:
+            return api_socket
+
         override = os.getenv("KICAD_IPC_SOCKET")
         if override:
             return override
