@@ -91,8 +91,8 @@ class StrictCheckDialog(wx.Dialog):
             self.failures,
             key=lambda failure: (
                 bool(failure.get("exempted", False)),
-                str(failure.get("lcsc", "")).casefold(),
                 str(failure.get("reference", "")).casefold(),
+                str(failure.get("lcsc", "")).casefold(),
                 str(failure.get("check_type", "")).casefold(),
             ),
         )
