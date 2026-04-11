@@ -88,3 +88,51 @@ def evaluate_part_strict_check(
         matched_value_terms=_matched_terms(params_text, value_terms),
         matched_footprint_terms=_matched_terms(params_text, footprint_terms),
     )
+
+
+def build_strict_check_failures(
+    rows: list[list],
+    columns: dict[str, int],
+    exemption_getter,
+) -> list[dict]:
+    """Build strict-check failure records for rows with assigned LCSC values."""
+    failures = []
+
+    for row in rows:
+        result = evaluate_part_strict_check(
+            reference=row[columns["REF_COL"]],
+            value=row[columns["VALUE_COL"]],
+            footprint=row[columns["FP_COL"]],
+            lcsc=row[columns["LCSC_COL"]],
+            params_value=row[columns["PARAMS_COL"]],
+        )
+        if result is None:
+            continue
+
+        exemptions = exemption_getter(result.reference, result.lcsc)
+        if not result.value_ok:
+            failures.append(
+                {
+                    "reference": result.reference,
+                    "lcsc": result.lcsc,
+                    "check_type": "value",
+                    "value": row[columns["VALUE_COL"]],
+                    "footprint": row[columns["FP_COL"]],
+                    "params_text": result.params_text,
+                    "exempted": exemptions.get("value", False),
+                }
+            )
+        if not result.footprint_ok:
+            failures.append(
+                {
+                    "reference": result.reference,
+                    "lcsc": result.lcsc,
+                    "check_type": "footprint",
+                    "value": row[columns["VALUE_COL"]],
+                    "footprint": row[columns["FP_COL"]],
+                    "params_text": result.params_text,
+                    "exempted": exemptions.get("footprint", False),
+                }
+            )
+
+    return failures

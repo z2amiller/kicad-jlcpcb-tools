@@ -62,7 +62,7 @@ from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
 from .strict_check_dialog import StrictCheckDialog
-from .strict_checks import evaluate_part_strict_check
+from .strict_checks import build_strict_check_failures
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -1091,50 +1091,11 @@ class JLCPCBTools(wx.Dialog):
 
     def get_strict_check_failures(self) -> list[dict]:
         """Return strict-check failures with current exemption status."""
-        columns = self.partlist_data_model.columns
-        failures = []
-
-        for row in self.partlist_data_model.get_all():
-            result = evaluate_part_strict_check(
-                reference=row[columns["REF_COL"]],
-                value=row[columns["VALUE_COL"]],
-                footprint=row[columns["FP_COL"]],
-                lcsc=row[columns["LCSC_COL"]],
-                params_value=row[columns["PARAMS_COL"]],
-            )
-            if result is None:
-                continue
-
-            exemptions = self.store.get_strict_check_exemptions(
-                result.reference,
-                result.lcsc,
-            )
-            if not result.value_ok:
-                failures.append(
-                    {
-                        "reference": result.reference,
-                        "lcsc": result.lcsc,
-                        "check_type": "value",
-                        "value": row[columns["VALUE_COL"]],
-                        "footprint": row[columns["FP_COL"]],
-                        "params_text": result.params_text,
-                        "exempted": exemptions.get("value", False),
-                    }
-                )
-            if not result.footprint_ok:
-                failures.append(
-                    {
-                        "reference": result.reference,
-                        "lcsc": result.lcsc,
-                        "check_type": "footprint",
-                        "value": row[columns["VALUE_COL"]],
-                        "footprint": row[columns["FP_COL"]],
-                        "params_text": result.params_text,
-                        "exempted": exemptions.get("footprint", False),
-                    }
-                )
-
-        return failures
+        return build_strict_check_failures(
+            self.partlist_data_model.get_all(),
+            self.partlist_data_model.columns,
+            self.store.get_strict_check_exemptions,
+        )
 
     def show_strict_check_dialog(
         self,
