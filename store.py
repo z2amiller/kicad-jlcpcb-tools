@@ -8,14 +8,24 @@ from pathlib import Path
 import sqlite3
 from typing import Union
 
-from .helpers import (
-    dict_factory,
-    get_exclude_from_bom,
-    get_exclude_from_pos,
-    get_lcsc_value,
-    get_valid_footprints,
-    natural_sort_collation,
-)
+try:
+    from .helpers import (
+        dict_factory,
+        get_exclude_from_bom,
+        get_exclude_from_pos,
+        get_lcsc_value,
+        get_valid_footprints,
+        natural_sort_collation,
+    )
+except ImportError:  # pragma: no cover - direct module import in tests
+    from helpers import (  # type: ignore[no-redef]
+        dict_factory,
+        get_exclude_from_bom,
+        get_exclude_from_pos,
+        get_lcsc_value,
+        get_valid_footprints,
+        natural_sort_collation,
+    )
 
 
 class Store:
