@@ -20,7 +20,7 @@ class StrictCheckDialog(wx.Dialog):
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX,
         )
         self.parent = parent
-        self.failures = failures
+        self.failures = [dict(failure) for failure in failures]
 
         self.issue_list = wx.dataview.DataViewListCtrl(
             self,
@@ -35,18 +35,7 @@ class StrictCheckDialog(wx.Dialog):
         self.issue_list.AppendTextColumn("Footprint", width=160)
         self.issue_list.AppendTextColumn("LCSC Params", width=430)
 
-        for failure in failures:
-            self.issue_list.AppendItem(
-                [
-                    bool(failure.get("exempted", False)),
-                    str(failure.get("reference", "")),
-                    str(failure.get("lcsc", "")),
-                    str(failure.get("check_type", "")).capitalize(),
-                    str(failure.get("value", "")),
-                    str(failure.get("footprint", "")),
-                    str(failure.get("params_text", "")),
-                ]
-            )
+        self._populate_issue_list()
         self.issue_list.Bind(
             wx.dataview.EVT_DATAVIEW_ITEM_VALUE_CHANGED,
             self.on_toggle_changed,
@@ -92,7 +81,43 @@ class StrictCheckDialog(wx.Dialog):
 
     def on_toggle_changed(self, _):
         """Refresh summary text when exemption checkboxes are edited."""
+        self._sync_failures_from_list()
+        self._populate_issue_list()
         self.update_summary()
+
+    def _sorted_failures(self) -> list[dict]:
+        """Return failures sorted with unexempted rows first."""
+        return sorted(
+            self.failures,
+            key=lambda failure: (
+                bool(failure.get("exempted", False)),
+                str(failure.get("lcsc", "")).casefold(),
+                str(failure.get("reference", "")).casefold(),
+                str(failure.get("check_type", "")).casefold(),
+            ),
+        )
+
+    def _populate_issue_list(self):
+        """Rebuild the issue list from the current sorted failure state."""
+        self.issue_list.DeleteAllItems()
+        self.failures = self._sorted_failures()
+        for failure in self.failures:
+            self.issue_list.AppendItem(
+                [
+                    bool(failure.get("exempted", False)),
+                    str(failure.get("reference", "")),
+                    str(failure.get("lcsc", "")),
+                    str(failure.get("check_type", "")).capitalize(),
+                    str(failure.get("value", "")),
+                    str(failure.get("footprint", "")),
+                    str(failure.get("params_text", "")),
+                ]
+            )
+
+    def _sync_failures_from_list(self):
+        """Copy toggle state from the visible list back into backing failure rows."""
+        for row in range(self.issue_list.GetItemCount()):
+            self.failures[row]["exempted"] = bool(self.issue_list.GetToggleValue(row, 0))
 
     def update_summary(self):
         """Update selected/remaining issue summary in dialog header area."""
@@ -142,6 +167,8 @@ class StrictCheckDialog(wx.Dialog):
             matched += 1
 
         if matched:
+            self._sync_failures_from_list()
+            self._populate_issue_list()
             self.update_summary()
 
     def get_selected_exemptions(self) -> list[tuple[str, str, str]]:
