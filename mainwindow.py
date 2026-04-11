@@ -408,7 +408,7 @@ class JLCPCBTools(wx.Dialog):
             align=wx.ALIGN_CENTER,
         )
         params_renderer = HighlightedTextRenderer(
-            value_decoder=decode_highlighted_value,
+            value_decoder=self.decode_mainwindow_highlight_value,
             align=wx.ALIGN_CENTER,
         )
         params = dv.DataViewColumn(
@@ -922,6 +922,9 @@ class JLCPCBTools(wx.Dialog):
         self.settings[e.section][e.setting] = e.value
         self.save_settings()
 
+        if e.section == "highlighting" and e.setting == "matches":
+            self.footprint_list.Refresh()
+
         # Refresh library configuration if relevant library settings changed
         if e.section == "library" and e.setting in ["selected_library", "data_path"]:
             self.library.refresh_library_config()
@@ -934,6 +937,30 @@ class JLCPCBTools(wx.Dialog):
         """Load settings from settings.json."""
         with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
             self.settings = json.load(j)
+
+        highlighting_settings = self.settings.setdefault("highlighting", {})
+        partselector_settings = self.settings.setdefault("partselector", {})
+        migrated = False
+        if "matches" not in highlighting_settings:
+            if "highlight_matches" in partselector_settings:
+                highlighting_settings["matches"] = partselector_settings.pop(
+                    "highlight_matches"
+                )
+                migrated = True
+            else:
+                highlighting_settings["matches"] = True
+                migrated = True
+        if migrated:
+            self.save_settings()
+
+    def decode_mainwindow_highlight_value(
+        self, value: str
+    ) -> tuple[str, list[str]]:
+        """Decode params cell text, optionally disabling highlight terms by setting."""
+        text, terms = decode_highlighted_value(value)
+        if not self.settings.get("highlighting", {}).get("matches", True):
+            return text, []
+        return text, terms
 
     def save_settings(self):
         """Save settings to settings.json."""
@@ -978,8 +1005,10 @@ class JLCPCBTools(wx.Dialog):
                 if (
                     isinstance(drawing, kicad_pcbnew.PCB_SHAPE)
                     and drawing.GetShape() == kicad_pcbnew.S_RECT
-                    and ((hasattr(drawing, "IsFilled") and drawing.IsFilled())
-                    or (hasattr(drawing, "IsSolidFill") and drawing.IsSolidFill()))
+                    and (
+                        (hasattr(drawing, "IsFilled") and drawing.IsFilled())
+                        or (hasattr(drawing, "IsSolidFill") and drawing.IsSolidFill())
+                    )
                 ):
                     corners = drawing.GetRectCorners()
 
