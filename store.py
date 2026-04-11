@@ -81,7 +81,30 @@ class Store:
                 "exclude_from_pos NUMERIC DEFAULT 0"
                 ")",
             )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS strict_check_exemptions ("
+                "reference TEXT NOT NULL,"
+                "lcsc TEXT NOT NULL,"
+                "check_type TEXT NOT NULL,"
+                "exempt NUMERIC NOT NULL DEFAULT 1,"
+                "PRIMARY KEY(reference, lcsc, check_type)"
+                ")",
+            )
             cur.commit()
+
+    @staticmethod
+    def _clear_strict_check_exemptions_tx(cur, ref: str, lcsc: Union[str, None] = None):
+        """Delete strict-check exemptions for a reference (optionally one LCSC)."""
+        if lcsc is None:
+            cur.execute(
+                "DELETE FROM strict_check_exemptions WHERE reference = :reference",
+                {"reference": ref},
+            )
+            return
+        cur.execute(
+            "DELETE FROM strict_check_exemptions WHERE reference = :reference AND lcsc = :lcsc",
+            {"reference": ref, "lcsc": lcsc},
+        )
 
     def read_all(self) -> dict:
         """Read all parts from the database."""
@@ -117,10 +140,16 @@ class Store:
     def update_part(self, part: dict):
         """Update a part in the database, overwrite lcsc if supplied."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            old = cur.execute(
+                "SELECT lcsc FROM part_info WHERE reference = :reference",
+                {"reference": part["reference"]},
+            ).fetchone()
             cur.execute(
                 "UPDATE part_info set value = :value, footprint = :footprint, lcsc = :lcsc, exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos WHERE reference = :reference",
                 part,
             )
+            if old is not None and old[0] != part["lcsc"]:
+                self._clear_strict_check_exemptions_tx(cur, part["reference"])
             cur.commit()
 
     def get_part(self, ref: str) -> dict:
@@ -162,10 +191,75 @@ class Store:
     def set_lcsc(self, ref: str, lcsc: str):
         """Change the LCSC attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            old = cur.execute(
+                "SELECT lcsc FROM part_info WHERE reference = :reference",
+                {"reference": ref},
+            ).fetchone()
             cur.execute(
                 "UPDATE part_info SET lcsc = :lcsc WHERE reference = :reference",
                 {"reference": ref, "lcsc": lcsc},
             )
+            if old is not None and old[0] != lcsc:
+                self._clear_strict_check_exemptions_tx(cur, ref)
+            cur.commit()
+
+    def set_strict_check_exemption(
+        self,
+        ref: str,
+        lcsc: str,
+        check_type: str,
+        exempt: bool = True,
+    ):
+        """Set or clear strict-check exemption for one check type."""
+        if check_type not in {"value", "footprint"}:
+            raise ValueError("check_type must be either 'value' or 'footprint'")
+
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            if exempt:
+                cur.execute(
+                    "INSERT OR REPLACE INTO strict_check_exemptions"
+                    " (reference, lcsc, check_type, exempt)"
+                    " VALUES (:reference, :lcsc, :check_type, 1)",
+                    {
+                        "reference": ref,
+                        "lcsc": lcsc,
+                        "check_type": check_type,
+                    },
+                )
+            else:
+                cur.execute(
+                    "DELETE FROM strict_check_exemptions"
+                    " WHERE reference = :reference AND lcsc = :lcsc AND check_type = :check_type",
+                    {
+                        "reference": ref,
+                        "lcsc": lcsc,
+                        "check_type": check_type,
+                    },
+                )
+            cur.commit()
+
+    def get_strict_check_exemptions(self, ref: str, lcsc: str) -> dict[str, bool]:
+        """Get strict-check exemptions for a reference + LCSC pair."""
+        result = {"value": False, "footprint": False}
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            rows = cur.execute(
+                "SELECT check_type, exempt FROM strict_check_exemptions"
+                " WHERE reference = :reference AND lcsc = :lcsc",
+                {"reference": ref, "lcsc": lcsc},
+            ).fetchall()
+        for check_type, exempt in rows:
+            if check_type in result:
+                result[check_type] = bool(exempt)
+        return result
+
+    def clear_strict_check_exemptions(
+        self,
+        ref: str,
+        lcsc: Union[str, None] = None,
+    ):
+        """Clear strict-check exemptions for a reference (and optional LCSC)."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            self._clear_strict_check_exemptions_tx(cur, ref, lcsc)
             cur.commit()
 
     def update_from_board(self):
@@ -241,6 +335,9 @@ class Store:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
                 f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"
+            )
+            cur.execute(
+                f"DELETE FROM strict_check_exemptions WHERE reference NOT IN ({','.join(refs)})"
             )
             cur.commit()
 
