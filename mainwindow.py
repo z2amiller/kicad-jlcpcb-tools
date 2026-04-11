@@ -1206,7 +1206,7 @@ class JLCPCBTools(wx.Dialog):
             if unresolved:
                 result = self.show_strict_check_dialog(
                     unresolved,
-                    "Generate anyway",
+                    "Generate Anyway",
                     "Strict check required",
                 )
                 if result == wx.ID_CANCEL:
