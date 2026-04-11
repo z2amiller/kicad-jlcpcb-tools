@@ -57,6 +57,14 @@ class StrictCheckDialog(wx.Dialog):
             wx.ID_ANY,
             "Select issues to exempt for this reference+LCSC. Unselected issues remain blocking.",
         )
+        self.bulk_lcsc_label = wx.StaticText(self, wx.ID_ANY, "Bulk by LCSC:")
+        self.bulk_lcsc_value = wx.TextCtrl(self, wx.ID_ANY, "")
+        self.bulk_use_selected_button = wx.Button(self, wx.ID_ANY, "Use selected row")
+        self.bulk_exempt_button = wx.Button(self, wx.ID_ANY, "Exempt matching LCSC")
+        self.bulk_clear_button = wx.Button(self, wx.ID_ANY, "Clear matching LCSC")
+        self.bulk_use_selected_button.Bind(wx.EVT_BUTTON, self.use_selected_lcsc)
+        self.bulk_exempt_button.Bind(wx.EVT_BUTTON, self.exempt_matching_lcsc)
+        self.bulk_clear_button.Bind(wx.EVT_BUTTON, self.clear_matching_lcsc)
         self.summary_text = wx.StaticText(self, wx.ID_ANY, "")
         self.update_summary()
 
@@ -66,7 +74,15 @@ class StrictCheckDialog(wx.Dialog):
             ok_button.SetLabel(continue_label)
 
         root = wx.BoxSizer(wx.VERTICAL)
+        bulk_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        bulk_sizer.Add(self.bulk_lcsc_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 4)
+        bulk_sizer.Add(self.bulk_lcsc_value, 1, wx.ALL | wx.EXPAND, 4)
+        bulk_sizer.Add(self.bulk_use_selected_button, 0, wx.ALL, 4)
+        bulk_sizer.Add(self.bulk_exempt_button, 0, wx.ALL, 4)
+        bulk_sizer.Add(self.bulk_clear_button, 0, wx.ALL, 4)
+
         root.Add(self.help_text, 0, wx.ALL, 8)
+        root.Add(bulk_sizer, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 4)
         root.Add(self.summary_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         root.Add(self.issue_list, 1, wx.ALL | wx.EXPAND, 8)
         if button_sizer is not None:
@@ -90,6 +106,43 @@ class StrictCheckDialog(wx.Dialog):
         self.summary_text.SetLabel(
             f"{total} issue(s): {selected} exempted, {blocking} still blocking"
         )
+
+    def use_selected_lcsc(self, _):
+        """Populate the bulk LCSC field from the first selected row in the grid."""
+        selection = self.issue_list.GetSelections()
+        if not selection:
+            item = self.issue_list.GetSelection()
+            if not item.IsOk():
+                return
+            selection = [item]
+
+        row = self.issue_list.ItemToRow(selection[0])
+        self.bulk_lcsc_value.SetValue(self.issue_list.GetTextValue(row, 2).strip())
+
+    def exempt_matching_lcsc(self, _):
+        """Mark all rows matching the typed LCSC value as exempted."""
+        self._apply_bulk_lcsc_toggle(True)
+
+    def clear_matching_lcsc(self, _):
+        """Clear exemptions for all rows matching the typed LCSC value."""
+        self._apply_bulk_lcsc_toggle(False)
+
+    def _apply_bulk_lcsc_toggle(self, exempt: bool):
+        """Set exemption toggles for all rows whose LCSC matches the input value."""
+        lcsc = self.bulk_lcsc_value.GetValue().strip()
+        if not lcsc:
+            return
+
+        matched = 0
+        target = lcsc.casefold()
+        for row in range(self.issue_list.GetItemCount()):
+            if self.issue_list.GetTextValue(row, 2).strip().casefold() != target:
+                continue
+            self.issue_list.SetToggleValue(exempt, row, 0)
+            matched += 1
+
+        if matched:
+            self.update_summary()
 
     def get_selected_exemptions(self) -> list[tuple[str, str, str]]:
         """Return `(reference, lcsc, check_type)` tuples selected for exemption."""
