@@ -2,13 +2,16 @@
 
 from dataview_highlight import (
     HighlightQueryCache,
+    build_footprint_alias_map,
     decode_highlighted_value,
     encode_highlighted_value,
     expand_footprint,
     expand_value,
     filtered_highlight_terms,
     find_highlight_spans,
+    get_footprint_highlight_rules,
     normalize_highlight_terms,
+    set_footprint_highlight_rules,
     simplify_footprint_name,
 )
 
@@ -105,6 +108,28 @@ def test_simplify_footprint_name_falls_back_to_last_token():
     assert simplify_footprint_name("Package_TO_SOT_SMD:SOT-23") == "SOT-23"
 
 
+def test_simplify_footprint_name_uses_runtime_no_prefix_rules():
+    """Simplified names are derived from no-prefix extraction rules when configured."""
+    old_aliases, old_rules = get_footprint_highlight_rules()
+    try:
+        set_footprint_highlight_rules(
+            alias_forward=old_aliases,
+            extraction_rules=[
+                {
+                    "reference_prefix": "",
+                    "pattern": r"R_([0-9]{4})_[0-9]+METRIC",
+                    "replacement": "PKG-$1",
+                }
+            ],
+        )
+        assert (
+            simplify_footprint_name("Resistor_SMD:R_0603_1608Metric")
+            == "PKG-0603"
+        )
+    finally:
+        set_footprint_highlight_rules(old_aliases, old_rules)
+
+
 def test_expand_value_for_resistor_adds_ohm_symbol_variants():
     """Resistor values expand with Ω-compatible alternatives for matching."""
     assert expand_value("R1", "390R") == ["390R", "390Ω"]
@@ -149,3 +174,87 @@ def test_expand_footprint_maps_capacitor_electrolytic_diameter():
 def test_expand_footprint_diameter_mapping_is_capacitor_only():
     """Electrolytic diameter mapping is only applied for capacitor references."""
     assert "SMD,D6.3" not in expand_footprint("U5", "Capacitor_SMD:CP_Elec_6.3x7.7")
+
+
+def test_build_footprint_alias_map_generates_reverse_aliases():
+    """Alias helper creates reverse mappings from forward-only definitions."""
+    alias_map = build_footprint_alias_map({"ABC": "XYZ"})
+    assert alias_map == {"ABC": ["XYZ"], "XYZ": ["ABC"]}
+
+
+def test_build_footprint_alias_map_supports_comma_separated_alias_lists():
+    """Alias map builder splits comma-separated alias tokens and reverses each."""
+    alias_map = build_footprint_alias_map({"SOT-23": "TO-236, SOT23"})
+    assert alias_map["SOT-23"] == ["SOT23", "TO-236"]
+    assert alias_map["TO-236"] == ["SOT-23"]
+    assert alias_map["SOT23"] == ["SOT-23"]
+
+
+def test_expand_footprint_uses_runtime_alias_configuration():
+    """Runtime-configured aliases are used to produce alternate footprint terms."""
+    old_aliases, old_rules = get_footprint_highlight_rules()
+    try:
+        set_footprint_highlight_rules(
+            alias_forward={"QFN-32": "LQFP-32"},
+            extraction_rules=[],
+        )
+        assert "LQFP-32" in expand_footprint("U1", "Package_QFP:QFN-32")
+        assert "QFN-32" in expand_footprint("U1", "Package_QFP:LQFP-32")
+    finally:
+        set_footprint_highlight_rules(old_aliases, old_rules)
+
+
+def test_expand_footprint_runtime_alias_matching_is_case_insensitive():
+    """User-entered alias keys match footprint names regardless of case."""
+    old_aliases, old_rules = get_footprint_highlight_rules()
+    try:
+        set_footprint_highlight_rules(
+            alias_forward={"qfn-32": "LQFP-32"},
+            extraction_rules=[],
+        )
+        assert "LQFP-32" in expand_footprint("U1", "Package_QFP:QFN-32")
+    finally:
+        set_footprint_highlight_rules(old_aliases, old_rules)
+
+
+def test_expand_footprint_runtime_alias_supports_comma_separated_values():
+    """Comma-separated alias values emit all configured aliases and reverse matches."""
+    old_aliases, old_rules = get_footprint_highlight_rules()
+    try:
+        set_footprint_highlight_rules(
+            alias_forward={"SOT-23": "TO-236, SOT23"},
+            extraction_rules=[],
+        )
+        variants = expand_footprint("Q1", "Package_TO_SOT_SMD:SOT-23")
+        assert "TO-236" in variants
+        assert "SOT23" in variants
+        reverse_variants = expand_footprint("Q1", "Package_TO_SOT_SMD:SOT23")
+        assert "SOT-23" in reverse_variants
+    finally:
+        set_footprint_highlight_rules(old_aliases, old_rules)
+
+
+def test_expand_footprint_uses_runtime_regex_rules_with_capture_groups():
+    """Configured regex rules support `$n` capture replacement tokens."""
+    old_aliases, old_rules = get_footprint_highlight_rules()
+    try:
+        set_footprint_highlight_rules(
+            alias_forward={},
+            extraction_rules=[
+                {
+                    "reference_prefix": "C",
+                    "pattern": r"CP_ELEC_([0-9]+(?:\.[0-9]+)?)X[0-9]+(?:\.[0-9]+)?",
+                    "replacement": "SMD,D$1",
+                }
+            ],
+        )
+        assert "SMD,D8.0" in expand_footprint(
+            "C1",
+            "Capacitor_SMD:CP_Elec_8.0x10.5",
+        )
+        assert "SMD,D8.0" not in expand_footprint(
+            "U1",
+            "Capacitor_SMD:CP_Elec_8.0x10.5",
+        )
+    finally:
+        set_footprint_highlight_rules(old_aliases, old_rules)

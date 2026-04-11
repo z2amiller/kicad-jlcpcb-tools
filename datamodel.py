@@ -269,6 +269,18 @@ class PartListDataModel(dv.PyDataViewModel):
         )
         self.ItemChanged(self.ObjectToItem(obj))
 
+    def refresh_params_highlight_terms(self):
+        """Recompute encoded params values for all rows using current rules."""
+        for row in self.data:
+            visible_params = self._decode_params_value(row[self.columns["PARAMS_COL"]])
+            row[self.columns["PARAMS_COL"]] = self._encode_params_value(
+                row[self.columns["REF_COL"]],
+                row[self.columns["VALUE_COL"]],
+                row[self.columns["FP_COL"]],
+                visible_params,
+            )
+            self.ItemChanged(self.ObjectToItem(row))
+
     def toggle_bom(self, item):
         """Toggle BOM for a given item."""
         obj = self.ItemToObject(item)

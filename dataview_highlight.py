@@ -18,14 +18,145 @@ _HIGHLIGHT_FG_SELECTED = (255, 215, 64)
 _MIN_HIGHLIGHT_TERM_LENGTH = 2
 _HIGHLIGHT_VALUE_SEPARATOR = "\x1f"
 
-_FOOTPRINT_ALIAS_FORWARD = {
+DEFAULT_FOOTPRINT_ALIAS_FORWARD = {
     "SIOC-8": "SO-8",
     "SOT-23": "TO-236",
 }
-_FOOTPRINT_ALIAS_MAP = dict(_FOOTPRINT_ALIAS_FORWARD)
-_FOOTPRINT_ALIAS_MAP.update(
-    {target: source for source, target in _FOOTPRINT_ALIAS_FORWARD.items()}
-)
+
+DEFAULT_FOOTPRINT_EXTRACTION_RULES = [
+    {
+        "reference_prefix": "",
+        "pattern": r"(?:^|_)([0-9]{4})_[0-9]+Metric\b",
+        "replacement": "$1",
+    },
+    {
+        "reference_prefix": "C",
+        "pattern": r"CP_ELEC_([0-9]+(?:\.[0-9]+)?)X[0-9]+(?:\.[0-9]+)?",
+        "replacement": "SMD,D$1",
+    }
+]
+
+_footprint_highlight_config = {
+    "aliases": dict(DEFAULT_FOOTPRINT_ALIAS_FORWARD),
+    "rules": [*DEFAULT_FOOTPRINT_EXTRACTION_RULES],
+}
+
+
+def _split_alias_tokens(value: str | list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    """Split comma-separated alias text into cleaned tokens."""
+    if isinstance(value, (list, tuple, set)):
+        raw_values = [str(v) for v in value]
+    else:
+        raw_values = [str(value)]
+
+    tokens: list[str] = []
+    for raw_value in raw_values:
+        for token in raw_value.split(","):
+            cleaned = token.strip()
+            if cleaned and cleaned not in tokens:
+                tokens.append(cleaned)
+    return tokens
+
+
+def build_footprint_alias_map(
+    alias_forward: dict[str, str] | dict[str, list[str]] | None = None,
+) -> dict[str, list[str]]:
+    """Build a two-way footprint alias map from one-way alias definitions."""
+    aliases = (
+        DEFAULT_FOOTPRINT_ALIAS_FORWARD
+        if alias_forward is None
+        else dict(alias_forward)
+    )
+    alias_graph: dict[str, set[str]] = {}
+
+    for source_raw, targets_raw in aliases.items():
+        source_tokens = _split_alias_tokens(source_raw)
+        target_tokens = _split_alias_tokens(targets_raw)
+        if not source_tokens or not target_tokens:
+            continue
+
+        for source in source_tokens:
+            alias_graph.setdefault(source, set())
+            for target in target_tokens:
+                if source == target:
+                    continue
+                alias_graph[source].add(target)
+                alias_graph.setdefault(target, set()).add(source)
+
+    return {
+        key: sorted(values, key=str.casefold)
+        for key, values in alias_graph.items()
+    }
+
+
+def set_footprint_highlight_rules(
+    alias_forward: dict[str, str] | dict[str, list[str]] | None = None,
+    extraction_rules: list[dict[str, str]] | None = None,
+):
+    """Set runtime footprint alias and extraction rule configuration."""
+    aliases = (
+        dict(DEFAULT_FOOTPRINT_ALIAS_FORWARD)
+        if alias_forward is None
+        else {
+            str(k): v
+            for k, v in alias_forward.items()
+            if str(k).strip() and str(v).strip()
+        }
+    )
+    _footprint_highlight_config["aliases"].clear()
+    _footprint_highlight_config["aliases"].update(aliases)
+
+    if extraction_rules is None:
+        rules = [*DEFAULT_FOOTPRINT_EXTRACTION_RULES]
+    else:
+        normalized_rules = []
+        for rule in extraction_rules:
+            if not isinstance(rule, dict):
+                continue
+            pattern = str(rule.get("pattern", "")).strip()
+            replacement = str(rule.get("replacement", "")).strip()
+            if not pattern or not replacement:
+                continue
+            normalized_rules.append(
+                {
+                    "reference_prefix": str(rule.get("reference_prefix", "")).strip(),
+                    "pattern": pattern,
+                    "replacement": replacement,
+                }
+            )
+        rules = normalized_rules
+    _footprint_highlight_config["rules"].clear()
+    _footprint_highlight_config["rules"].extend(rules)
+
+
+def get_footprint_highlight_rules(
+) -> tuple[dict[str, str] | dict[str, list[str]], list[dict[str, str]]]:
+    """Return copies of active footprint alias and extraction rule settings."""
+    return (
+        dict(_footprint_highlight_config["aliases"]),
+        [*(_footprint_highlight_config["rules"])],
+    )
+
+
+def _apply_extraction_rule(rule: dict[str, str], reference: str, footprint_name: str) -> str:
+    """Apply one extraction rule and return derived term or empty string."""
+    reference_prefix = rule.get("reference_prefix", "")
+    if reference_prefix and not reference.upper().startswith(reference_prefix.upper()):
+        return ""
+
+    pattern = rule.get("pattern", "")
+    replacement = rule.get("replacement", "")
+    if not pattern or not replacement:
+        return ""
+
+    match = re.search(pattern, footprint_name, flags=re.IGNORECASE)
+    if match is None:
+        return ""
+
+    result = replacement
+    for index, group in enumerate(match.groups(), start=1):
+        result = result.replace(f"${index}", group)
+    return result
 
 
 def normalize_highlight_terms(query: str) -> list[str]:
@@ -158,11 +289,14 @@ def simplify_footprint_name(footprint: str) -> str:
     if not footprint:
         return ""
 
-    match = re.search(r"_([0-9]{4})_\d+Metric\b", footprint)
-    if match:
-        return match.group(1)
-
     footprint_name = str(footprint).split(":")[-1]
+
+    for rule in _footprint_highlight_config["rules"]:
+        if rule.get("reference_prefix", "").strip():
+            continue
+        if extracted := _apply_extraction_rule(rule, "", footprint_name):
+            return extracted
+
     return (
         footprint_name.rsplit("_", maxsplit=1)[-1]
         if "_" in footprint_name
@@ -189,19 +323,15 @@ def expand_footprint(reference: str, footprint: str) -> list[str]:
         variants.append(simplified)
 
     # Common package aliases used by parts databases and footprints.
-    for source, target in _FOOTPRINT_ALIAS_MAP.items():
-        if source in upper_name:
-            variants.append(target)
+    alias_map = build_footprint_alias_map(_footprint_highlight_config["aliases"])
+    for source, targets in alias_map.items():
+        if str(source).upper() in upper_name:
+            variants.extend(targets)
 
-    # Capacitor-specific mapping: CP_Elec_6.3x7.7 -> SMD,D6.3
     ref = "" if reference is None else str(reference).strip()
-    if ref.upper().startswith("C"):
-        match = re.search(
-            r"CP_ELEC_([0-9]+(?:\.[0-9]+)?)X[0-9]+(?:\.[0-9]+)?",
-            upper_name,
-        )
-        if match:
-            variants.append(f"SMD,D{match.group(1)}")
+    for rule in _footprint_highlight_config["rules"]:
+        if extracted := _apply_extraction_rule(rule, ref, footprint_name):
+            variants.append(extracted)
 
     deduped = []
     for variant in variants:
