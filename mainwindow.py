@@ -944,17 +944,16 @@ class JLCPCBTools(wx.Dialog):
     def manage_strict_checks(self, *_):
         """Review strict check failures and manage per-part exemptions."""
         failures = self.get_strict_check_failures()
-        unresolved = [failure for failure in failures if not failure["exempted"]]
-        if not unresolved:
+        if not failures:
             wx.MessageBox(
-                "All strict checks pass or are already exempted.",
+                "All strict checks pass.",
                 "Strict part checks",
                 wx.OK | wx.CENTER,
             )
             return
 
         self.show_strict_check_dialog(
-            unresolved,
+            failures,
             "Apply exemptions",
             "Strict part checks",
         )
@@ -1143,13 +1142,18 @@ class JLCPCBTools(wx.Dialog):
         continue_label: str,
         title: str,
     ) -> int:
-        """Open strict-check dialog and persist selected exemptions when accepted."""
+        """Open strict-check dialog and persist exemption updates when accepted."""
         dialog = StrictCheckDialog(self, failures, continue_label)
         dialog.SetTitle(title)
         result = dialog.ShowModal()
         if result == wx.ID_OK:
-            for reference, lcsc, check_type in dialog.get_selected_exemptions():
-                self.store.set_strict_check_exemption(reference, lcsc, check_type, True)
+            for reference, lcsc, check_type, exempt in dialog.get_exemption_updates():
+                self.store.set_strict_check_exemption(
+                    reference,
+                    lcsc,
+                    check_type,
+                    exempt,
+                )
         return result
 
     def save_settings(self):

@@ -47,12 +47,18 @@ class StrictCheckDialog(wx.Dialog):
                     str(failure.get("params_text", "")),
                 ]
             )
+        self.issue_list.Bind(
+            wx.dataview.EVT_DATAVIEW_ITEM_VALUE_CHANGED,
+            self.on_toggle_changed,
+        )
 
         self.help_text = wx.StaticText(
             self,
             wx.ID_ANY,
             "Select issues to exempt for this reference+LCSC. Unselected issues remain blocking.",
         )
+        self.summary_text = wx.StaticText(self, wx.ID_ANY, "")
+        self.update_summary()
 
         button_sizer = self.CreateSeparatedButtonSizer(wx.OK | wx.CANCEL)
         ok_button = self.FindWindowById(wx.ID_OK)
@@ -61,11 +67,29 @@ class StrictCheckDialog(wx.Dialog):
 
         root = wx.BoxSizer(wx.VERTICAL)
         root.Add(self.help_text, 0, wx.ALL, 8)
+        root.Add(self.summary_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
         root.Add(self.issue_list, 1, wx.ALL | wx.EXPAND, 8)
         if button_sizer is not None:
             root.Add(button_sizer, 0, wx.ALL | wx.EXPAND, 8)
         self.SetSizer(root)
         self.Layout()
+
+    def on_toggle_changed(self, _):
+        """Refresh summary text when exemption checkboxes are edited."""
+        self.update_summary()
+
+    def update_summary(self):
+        """Update selected/remaining issue summary in dialog header area."""
+        total = self.issue_list.GetItemCount()
+        selected = sum(
+            1
+            for row in range(total)
+            if self.issue_list.GetToggleValue(row, 0)
+        )
+        blocking = total - selected
+        self.summary_text.SetLabel(
+            f"{total} issue(s): {selected} exempted, {blocking} still blocking"
+        )
 
     def get_selected_exemptions(self) -> list[tuple[str, str, str]]:
         """Return `(reference, lcsc, check_type)` tuples selected for exemption."""
@@ -82,3 +106,17 @@ class StrictCheckDialog(wx.Dialog):
                 )
             )
         return selected
+
+    def get_exemption_updates(self) -> list[tuple[str, str, str, bool]]:
+        """Return `(reference, lcsc, check_type, exempt)` for every shown row."""
+        updates = []
+        for row in range(self.issue_list.GetItemCount()):
+            updates.append(
+                (
+                    self.issue_list.GetTextValue(row, 1).strip(),
+                    self.issue_list.GetTextValue(row, 2).strip(),
+                    self.issue_list.GetTextValue(row, 3).strip().lower(),
+                    bool(self.issue_list.GetToggleValue(row, 0)),
+                )
+            )
+        return updates
