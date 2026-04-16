@@ -316,10 +316,52 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
     assert round(summary["standard_setup_cost"], 3) == 0.000
     assert round(summary["policy_cost"], 3) == 0.000
     assert round(summary["extended_cost"], 3) == 3.000
+    assert round(summary["standard_part_surcharge_cost"], 3) == 0.000
     assert round(summary["variable_assembly_cost"], 3) == 0.016  # 10 * 0.0016
+    assert summary["smt_joint_count"] == 10
+    assert summary["tht_joint_count"] == 0
     assert round(summary["assembly_cost"], 3) == 12.516
     assert round(summary["total_cost"], 3) == 17.516
     assert round(summary["cost_per_board"], 3) == 3.503
+
+
+def test_standard_surcharge_and_joint_counts_are_reported_separately():
+    """UI-facing summary fields expose joint counts and standard surcharge cleanly."""
+    parts = [
+        {
+            "lcsc": "CSTDUI",
+            "exclude_from_bom": 0,
+            "pad_count": 2,
+            "has_tht": 0,
+            "assembly_process": "SMT",
+            "component_product_type": 2,
+            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+        },
+        {
+            "lcsc": "CTHTUI",
+            "exclude_from_bom": 0,
+            "pad_count": 1,
+            "has_tht": 1,
+            "assembly_process": "Wave soldering",
+            "component_product_type": 2,
+            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+        },
+    ]
+
+    def get_details(_lcsc):
+        return {"price": "1-:1.00", "type": "Basic"}
+
+    summary = calculate_bom_estimate(
+        parts,
+        board_count=2,
+        get_part_details=get_details,
+        board_standard=True,
+        smt_populated_sides=1,
+    )
+
+    assert summary["smt_joint_count"] == 4
+    assert summary["tht_joint_count"] == 2
+    assert round(summary["standard_part_surcharge_cost"], 3) == 1.500
 
 
 def test_dnp_parts_are_excluded_from_bom_estimator_counts():

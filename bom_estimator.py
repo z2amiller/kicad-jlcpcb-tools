@@ -140,6 +140,7 @@ def calculate_bom_estimate(
         "stencil_cost": 0.0,
         "policy_cost": 0.0,
         "extended_cost": 0.0,
+        "standard_part_surcharge_cost": 0.0,
         "variable_assembly_cost": 0.0,
         "assembly_cost": 0.0,
         "total_cost": 0.0,
@@ -147,6 +148,8 @@ def calculate_bom_estimate(
         "missing_prices": 0,
         "bom_part_count": 0,
         "standard_part_count": 0,
+        "smt_joint_count": 0,
+        "tht_joint_count": 0,
     }
 
     bom_parts = []
@@ -252,11 +255,14 @@ def calculate_bom_estimate(
         + summary["policy_cost"]
     )
 
+    summary["smt_joint_count"] = smt_joints
+    summary["tht_joint_count"] = tht_joints
     summary["variable_assembly_cost"] += tht_joints * tht_per_joint_fee
     summary["variable_assembly_cost"] += smt_joints * smt_per_joint_fee
     summary["extended_cost"] += len(extended_lcsc) * extended_part_fee
     if board_is_standard:
-        summary["variable_assembly_cost"] += len(smt_lcsc) * standard_part_fee
+        summary["standard_part_surcharge_cost"] += len(smt_lcsc) * standard_part_fee
+        summary["variable_assembly_cost"] += summary["standard_part_surcharge_cost"]
 
     summary["assembly_cost"] = (
         summary["fixed_cost"]

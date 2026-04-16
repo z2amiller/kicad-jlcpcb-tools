@@ -1041,19 +1041,27 @@ class JLCPCBTools(wx.Dialog):
             f"BOM Estimate ({board_count} boards): Mode {mode} | "
             f"Total ${summary['total_cost']:.2f} | "
             f"Per board ${summary['cost_per_board']:.2f} | "
-            f"Triggers {reason_text}"
+            f"Triggers {reason_text} | "
+            f"Missing prices {summary['missing_prices']}"
+        )
+        displayed_fixed_cost = summary["fixed_cost"] + summary["extended_cost"]
+        displayed_setup_cost = (
+            summary["economic_setup_cost"]
+            + summary["standard_setup_cost"]
+            + summary["policy_cost"]
+        )
+        assembly_suffix = (
+            f", std surcharge ${summary['standard_part_surcharge_cost']:.2f}"
+            if summary["standard_part_surcharge_cost"] > 0
+            else ""
         )
         details_line = (
-            f"Direct BOM ${summary['component_cost']:.2f} | "
-            f"Fixed ${summary['fixed_cost']:.2f} "
-            f"(tht ${summary['tht_setup_cost']:.2f}, eco ${summary['economic_setup_cost']:.2f}, "
-            f"std ${summary['standard_setup_cost']:.2f}, stencil ${summary['stencil_cost']:.2f}, "
-            f"policy ${summary['policy_cost']:.2f}) | "
-            f"Extended ${summary['extended_cost']:.2f} | "
-            f"Assembly var ${summary['variable_assembly_cost']:.2f} | "
-            f"Assembly ${summary['assembly_cost']:.2f} | "
-            f"Missing prices {summary['missing_prices']} | "
-            f"Standard parts {summary['standard_part_count']}"
+            f"Direct BOM Cost: ${summary['component_cost']:.2f} | "
+            f"Fixed ${displayed_fixed_cost:.2f} "
+            f"(extended: ${summary['extended_cost']:.2f}, setup: ${displayed_setup_cost:.2f}, "
+            f"stencil: ${summary['stencil_cost']:.2f}, tht: ${summary['tht_setup_cost']:.2f}) | "
+            f"Assembly ${summary['variable_assembly_cost']:.2f} "
+            f"(smt: {summary['smt_joint_count']} joints, tht: {summary['tht_joint_count']} joints{assembly_suffix})"
         )
         self.bom_estimator_summary.SetLabel(f"{overview_line}\n{details_line}")
 
