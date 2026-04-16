@@ -75,14 +75,13 @@ class PartListDataModel(dv.PyDataViewModel):
 
         ref = str(row[self.columns["REF_COL"]] or "")
         if ref not in self.standard_trigger_refs:
-            # Clear any previously cached custom colours on reused attrs.
-            # NullColour means "use control/theme default".
-            attr.SetBackgroundColour(wx.NullColour)
-            attr.SetColour(wx.NullColour)
-            return True
+            return False
 
-        attr.SetBackgroundColour(wx.Colour(255, 220, 230))
+        # Avoid custom background fills here: on some wx/macOS combinations,
+        # DataView text renderers can leave stale dark text-background blocks
+        # when rows are virtualized/reused during scrolling.
         attr.SetColour(wx.Colour(120, 0, 0))
+        attr.SetBold(True)
         return True
 
     @staticmethod
