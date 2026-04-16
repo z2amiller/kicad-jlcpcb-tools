@@ -156,9 +156,6 @@ class JLCPCBTools(wx.Dialog):
         general_settings["bom_estimator_force_standard"] = (
             self.bom_estimator_force_standard
         )
-        general_settings.pop("bom_order_handling_fee", None)
-        general_settings.pop("bom_panelization_per_board_fee", None)
-        general_settings.pop("bom_panelization_threshold_boards", None)
         self.auto_select_alike = bool(
             self.settings.get("general", {}).get("select_alike_auto", False)
         )
