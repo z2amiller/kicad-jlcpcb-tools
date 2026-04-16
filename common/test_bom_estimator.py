@@ -7,6 +7,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bom_estimator import (
+    AssemblyPricing,
+    DEFAULT_PRICING,
     build_bom_estimate_view_model,
     build_standard_mode_context,
     calculate_bom_estimate,
@@ -53,9 +55,17 @@ def test_calculate_bom_estimate_smt_and_extended_once_per_lcsc():
 
     summary = calculate_bom_estimate(parts, board_count=5, get_part_details=get_details)
 
+    P = DEFAULT_PRICING
+    # $8 setup + $1.5 stencil + $3 extended + 10 smt joints
+    expected_assembly = (
+        P.economic_setup_fee
+        + P.economic_stencil_fee
+        + P.extended_part_fee
+        + 10 * P.smt_per_joint_fee
+    )
     assert round(summary["component_cost"], 3) == 2.000  # qty=10 at $0.20
-    assert round(summary["assembly_cost"], 3) == 12.516  # $8 setup + $1.5 stencil + $3 extended + 10 smt joints
-    assert round(summary["total_cost"], 3) == 14.516
+    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
+    assert round(summary["total_cost"], 3) == round(2.0 + expected_assembly, 3)
     assert summary["missing_prices"] == 0
     assert summary["standard_part_count"] == 0
 
@@ -78,9 +88,16 @@ def test_calculate_bom_estimate_tht_setup_and_no_extended_surcharge_for_tht():
 
     summary = calculate_bom_estimate(parts, board_count=5, get_part_details=get_details)
 
+    P = DEFAULT_PRICING
+    # 8.00 setup + 3.50 tht_setup + (10 * 0.0157) tht joints
+    expected_assembly = (
+        P.economic_setup_fee
+        + P.tht_setup_fee
+        + 10 * P.tht_per_joint_fee
+    )
     assert round(summary["component_cost"], 3) == 2.500
-    assert round(summary["assembly_cost"], 3) == 11.657  # 8.00 + 3.50 + (10 * 0.0157)
-    assert round(summary["total_cost"], 3) == 14.157
+    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
+    assert round(summary["total_cost"], 3) == round(2.5 + expected_assembly, 3)
 
 
 def test_calculate_bom_estimate_missing_price_counts_unknown_lcsc_price():
@@ -175,8 +192,10 @@ def test_standard_fees_apply_for_standard_smt_part():
         smt_populated_sides=1,
     )
 
+    # 4.0 setup + 1.2 stencil + 0.5 standard_part + 4*0.0016 smt joints
+    expected_assembly = 4.0 + 1.2 + 0.5 + 4 * DEFAULT_PRICING.smt_per_joint_fee
     assert round(summary["component_cost"], 3) == 2.000
-    assert round(summary["assembly_cost"], 3) == 5.706  # 4.0 + 1.2 + 0.5 + 4*0.0016
+    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
     assert summary["standard_part_count"] == 1
 
 
@@ -217,8 +236,15 @@ def test_standard_fees_are_orthogonal_to_tht_fees():
         smt_populated_sides=1,
     )
 
+    # 3.5 tht_setup + 2.0 standard_setup + 0.5 stencil + 1.0 standard_part + 6*0.0157 + 3*0.0016
+    expected_assembly = (
+        DEFAULT_PRICING.tht_setup_fee
+        + 2.0 + 0.5 + 1.0
+        + 6 * DEFAULT_PRICING.tht_per_joint_fee
+        + 3 * DEFAULT_PRICING.smt_per_joint_fee
+    )
     assert round(summary["component_cost"], 3) == 4.800
-    assert round(summary["assembly_cost"], 3) == 7.099  # 3.5 + 2.0 + 0.5 + 1.0 + 6*0.0157 + 3*0.0016
+    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
     assert summary["standard_part_count"] == 1
 
 
@@ -248,8 +274,11 @@ def test_standard_fees_do_not_apply_for_non_standard_parts():
         board_standard=False,
     )
 
+    P = DEFAULT_PRICING
+    # 8.0 setup + 1.5 stencil + 4*0.0016 smt joints
+    expected_assembly = P.economic_setup_fee + P.economic_stencil_fee + 4 * P.smt_per_joint_fee
     assert round(summary["component_cost"], 3) == 2.000
-    assert round(summary["assembly_cost"], 3) == 9.506  # 8.0 + 1.5 + 4*0.0016
+    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
     assert summary["standard_part_count"] == 0
 
 
@@ -287,8 +316,15 @@ def test_standard_per_side_base_fees_and_all_smt_surcharge_apply():
         smt_populated_sides=2,
     )
 
+    P = DEFAULT_PRICING
+    # (25+7.8)*2 setup+stencil + 2*1.5 standard_part + 3*0.0016 smt joints
+    expected_assembly = (
+        (P.standard_setup_fee + P.standard_stencil_fee) * 2
+        + 2 * P.standard_part_fee
+        + 3 * P.smt_per_joint_fee
+    )
     assert round(summary["component_cost"], 3) == 2.000
-    assert round(summary["assembly_cost"], 3) == 68.605  # (25+7.8)*2 + 2*1.5 + 3*0.0016
+    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
 
 
 def test_cost_breakdown_fields_sum_to_total_and_per_board():
@@ -315,20 +351,22 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
         board_standard=False,
     )
 
+    P = DEFAULT_PRICING
     assert round(summary["component_cost"], 3) == 5.000
-    assert round(summary["fixed_cost"], 3) == 9.500  # 8.0 setup + 1.5 stencil
-    assert round(summary["economic_setup_cost"], 3) == 8.000
-    assert round(summary["stencil_cost"], 3) == 1.500
+    assert round(summary["fixed_cost"], 3) == round(P.economic_setup_fee + P.economic_stencil_fee, 3)
+    assert round(summary["economic_setup_cost"], 3) == round(P.economic_setup_fee, 3)
+    assert round(summary["stencil_cost"], 3) == round(P.economic_stencil_fee, 3)
     assert round(summary["tht_setup_cost"], 3) == 0.000
     assert round(summary["standard_setup_cost"], 3) == 0.000
-    assert round(summary["extended_cost"], 3) == 3.000
+    assert round(summary["extended_cost"], 3) == round(P.extended_part_fee, 3)
     assert round(summary["standard_part_surcharge_cost"], 3) == 0.000
-    assert round(summary["variable_assembly_cost"], 3) == 0.016  # 10 * 0.0016
+    assert round(summary["variable_assembly_cost"], 3) == round(10 * P.smt_per_joint_fee, 3)
     assert summary["smt_joint_count"] == 10
     assert summary["tht_joint_count"] == 0
-    assert round(summary["assembly_cost"], 3) == 12.516
-    assert round(summary["total_cost"], 3) == 17.516
-    assert round(summary["cost_per_board"], 3) == 3.503
+    expected_assembly = P.economic_setup_fee + P.economic_stencil_fee + P.extended_part_fee + 10 * P.smt_per_joint_fee
+    assert round(summary["assembly_cost"], 3) == round(expected_assembly, 3)
+    assert round(summary["total_cost"], 3) == round(5.0 + expected_assembly, 3)
+    assert round(summary["cost_per_board"], 3) == round((5.0 + expected_assembly) / 5, 3)
 
 
 def test_standard_surcharge_and_joint_counts_are_reported_separately():
@@ -367,7 +405,7 @@ def test_standard_surcharge_and_joint_counts_are_reported_separately():
 
     assert summary["smt_joint_count"] == 4
     assert summary["tht_joint_count"] == 2
-    assert round(summary["standard_part_surcharge_cost"], 3) == 1.500
+    assert round(summary["standard_part_surcharge_cost"], 3) == round(DEFAULT_PRICING.standard_part_fee, 3)
 
 
 def test_dnp_parts_are_excluded_from_bom_estimator_counts():
@@ -707,3 +745,28 @@ def test_prepare_bom_price_labels_skips_parts_without_reference():
     )
 
     assert labels == {}
+
+
+def test_assembly_pricing_custom_instance_overrides_defaults():
+    """Passing a custom AssemblyPricing instance changes the estimate totals."""
+    part = {
+        "lcsc": "C1",
+        "exclude_from_bom": 0,
+        "pad_count": 2,
+        "has_tht": 0,
+        "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+    }
+    cheap = AssemblyPricing(
+        economic_setup_fee=1.0,
+        economic_stencil_fee=0.5,
+        extended_part_fee=0.0,
+        smt_per_joint_fee=0.001,
+    )
+    summary = calculate_bom_estimate(
+        [part],
+        board_count=5,
+        get_part_details=lambda _: {"price": "1-:0.10", "type": "Basic"},
+        pricing=cheap,
+    )
+    expected_assembly = 1.0 + 0.5 + 10 * 0.001
+    assert round(summary["assembly_cost"], 4) == round(expected_assembly, 4)
