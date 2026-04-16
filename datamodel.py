@@ -37,6 +37,7 @@ class PartListDataModel(dv.PyDataViewModel):
             "SIDE_COL": 10,
             "PARAMS_COL": 11,
             "ENRICH_COL": 12,
+            "PRICE_COL": 13,
         }
 
         self.bom_pos_icons = [
@@ -105,6 +106,7 @@ class PartListDataModel(dv.PyDataViewModel):
             "wxDataViewIconText",
             "string",
             "wxDataViewIconText",
+            "string",
             "string",
             "string",
         )
@@ -206,7 +208,7 @@ class PartListDataModel(dv.PyDataViewModel):
 
     def AddEntry(self, data: list):
         """Add a new entry to the data model."""
-        if len(data) <= self.columns["ENRICH_COL"]:
+        while len(data) <= self.columns["PRICE_COL"]:
             data.append("")
 
         data[self.columns["BOM_COL"]] = self.get_bom_pos_icon(
@@ -268,6 +270,7 @@ class PartListDataModel(dv.PyDataViewModel):
         item[self.columns["STOCK_COL"]] = stock
         item[self.columns["PARAMS_COL"]] = params
         item[self.columns["ENRICH_COL"]] = ""
+        item[self.columns["PRICE_COL"]] = ""
         self.ItemChanged(self.ObjectToItem(item))
 
     def set_enrichment_status(self, ref, status):
@@ -278,6 +281,14 @@ class PartListDataModel(dv.PyDataViewModel):
         item[self.columns["ENRICH_COL"]] = status
         self.ItemChanged(self.ObjectToItem(item))
 
+    def set_bom_price(self, ref, price):
+        """Set BOM price contribution text for a given part reference."""
+        if (index := self.find_index(ref)) is None:
+            return
+        item = self.data[index]
+        item[self.columns["PRICE_COL"]] = price
+        self.ItemChanged(self.ObjectToItem(item))
+
     def remove_lcsc_number(self, item):
         """Remove the LCSC number of an item."""
         obj = self.ItemToObject(item)
@@ -286,6 +297,7 @@ class PartListDataModel(dv.PyDataViewModel):
         obj[self.columns["STOCK_COL"]] = ""
         obj[self.columns["PARAMS_COL"]] = ""
         obj[self.columns["ENRICH_COL"]] = ""
+        obj[self.columns["PRICE_COL"]] = ""
         self.ItemChanged(self.ObjectToItem(obj))
 
     def toggle_bom(self, item):
