@@ -2,6 +2,7 @@
 
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 
+from collections.abc import Mapping
 from contextlib import suppress
 from datetime import datetime as dt
 import json
@@ -9,7 +10,6 @@ import logging
 import os
 import re
 import sys
-from threading import Thread
 import time
 
 import pcbnew as kicad_pcbnew
@@ -18,14 +18,13 @@ from wx import adv  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 
 from .assembly_enrichment import (
-    STATUS_PENDING,
     get_enrichment_result_status,
     get_enrichment_status_label,
+    start_assembly_enrichment as start_assembly_enrichment_job,
 )
 from .bom_estimator import (
     build_bom_estimate_view_model,
     build_standard_mode_context,
-    fetch_assembly_processes,
     format_part_bom_price_label,
     prepare_bom_price_labels,
 )
@@ -950,47 +949,31 @@ class JLCPCBTools(wx.Dialog):
 
     def start_assembly_enrichment(self, references=None):
         """Start background enrichment for missing assembly process metadata."""
-        targets = self.store.get_assembly_enrichment_targets(references)
-        targets = {
-            lcsc: refs
-            for lcsc, refs in targets.items()
-            if lcsc not in self.pending_assembly_enrichment
-        }
-        if not targets:
-            return
+        start_assembly_enrichment_job(
+            references,
+            get_targets=self.store.get_assembly_enrichment_targets,
+            pending_lcsc_codes=self.pending_assembly_enrichment,
+            set_pending_status=self._set_enrichment_status,
+            post_progress=self._post_assembly_enrichment_progress,
+            logger=self.logger,
+        )
 
-        self.pending_assembly_enrichment.update(targets.keys())
-        for refs in targets.values():
-            for reference in refs:
-                self.partlist_data_model.set_enrichment_status(reference, STATUS_PENDING)
+    def _set_enrichment_status(self, reference: str, status: str):
+        """Set one row's enrichment status in the data model."""
+        self.partlist_data_model.set_enrichment_status(reference, status)
 
-        Thread(
-            target=self._assembly_enrichment_worker,
-            args=(targets,),
-            daemon=True,
-        ).start()
-
-    def _assembly_enrichment_worker(self, targets: dict):
-        """Fetch assembly metadata values from LCSC API in a worker thread."""
-        next_allowed_request = 0.0
-
-        for lcsc, refs in targets.items():
-            try:
-                delay_seconds = max(0.0, next_allowed_request - time.monotonic())
-                if delay_seconds > 0:
-                    time.sleep(delay_seconds)
-
-                metadata = fetch_assembly_processes([lcsc]).get(lcsc, {})
-                next_allowed_request = time.monotonic() + 1.0
-            except Exception:  # pylint: disable=broad-exception-caught
-                self.logger.exception("Assembly enrichment worker failed for %s", lcsc)
-                metadata = {}
-                next_allowed_request = time.monotonic() + 1.0
-
-            wx.PostEvent(
-                self,
-                AssemblyEnrichmentProgressEvent(lcsc=lcsc, refs=refs, metadata=metadata),
-            )
+    def _post_assembly_enrichment_progress(
+        self, lcsc: str, refs: list[str], metadata: Mapping[str, object]
+    ):
+        """Marshal enrichment progress to the main thread as a wx event."""
+        wx.PostEvent(
+            self,
+            AssemblyEnrichmentProgressEvent(
+                lcsc=lcsc,
+                refs=refs,
+                metadata=dict(metadata),
+            ),
+        )
 
     def on_assembly_enrichment_progress(self, e):
         """Persist one enrichment result and update row-level feedback."""
