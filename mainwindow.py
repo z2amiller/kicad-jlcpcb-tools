@@ -873,21 +873,6 @@ class JLCPCBTools(wx.Dialog):
                 return True
         return str(footprint.GetLayer()) != "0"
 
-    def _board_has_v_cut_drawings(self) -> bool:
-        """Detect whether the board contains drawings on any V-cut layer."""
-        board = self.pcbnew.GetBoard()
-        for drawing in board.GetDrawings():
-            get_layer = getattr(drawing, "GetLayer", None)
-            if not callable(get_layer):
-                continue
-            layer_id = get_layer()
-            with suppress(Exception):  # pylint: disable=broad-exception-caught
-                layer_name = str(board.GetLayerName(layer_id)).upper()
-                normalized = layer_name.replace("-", "_")
-                if "V_CUT" in normalized or "VCUT" in normalized:
-                    return True
-        return False
-
     def _get_board_standard_context(self, parts, board_count: int) -> dict:
         """Collect board facts and build Standard/Economic mode context."""
         board = self.pcbnew.GetBoard()
@@ -931,7 +916,6 @@ class JLCPCBTools(wx.Dialog):
         return build_standard_mode_context(
             manual_enabled=self.bom_estimator_force_standard,
             board_count=board_count,
-            has_v_cut_drawings=self._board_has_v_cut_drawings(),
             populated_refs=populated_refs,
             populated_sides=populated_sides,
             smt_populated_sides=smt_populated_sides,
