@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "kicad_jlcpcb_tools",
+  "project_id": "93534136-1de2-491a-a05f-74a71d3a75c5"
+}
