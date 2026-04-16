@@ -72,9 +72,16 @@ class PartListDataModel(dv.PyDataViewModel):
         row = self.ItemToObject(item)
         if not row:
             return False
+
+        # Always set explicit defaults first.  On some wx/macOS combinations,
+        # reused attribute objects can carry stale colors between rows when
+        # highlight state changes quickly.
+        attr.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_LISTBOX))
+        attr.SetColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_LISTBOXTEXT))
+
         ref = str(row[self.columns["REF_COL"]] or "")
         if ref not in self.standard_trigger_refs:
-            return False
+            return True
 
         attr.SetBackgroundColour(wx.Colour(255, 220, 230))
         attr.SetColour(wx.Colour(120, 0, 0))
