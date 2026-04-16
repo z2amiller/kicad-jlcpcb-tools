@@ -7,12 +7,18 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bom_estimator import (
+    build_bom_estimate_view_model,
+    build_standard_mode_context,
     calculate_bom_estimate,
+    calculate_part_bom_cost,
     fetch_assembly_processes,
     format_bom_estimate_summary,
+    format_part_bom_price_label,
     get_assembly_flags,
     get_unit_price,
     is_tht_part,
+    prepare_bom_price_labels,
+    standard_signal_reasons,
 )
 
 
@@ -315,7 +321,6 @@ def test_cost_breakdown_fields_sum_to_total_and_per_board():
     assert round(summary["stencil_cost"], 3) == 1.500
     assert round(summary["tht_setup_cost"], 3) == 0.000
     assert round(summary["standard_setup_cost"], 3) == 0.000
-    assert round(summary["policy_cost"], 3) == 0.000
     assert round(summary["extended_cost"], 3) == 3.000
     assert round(summary["standard_part_surcharge_cost"], 3) == 0.000
     assert round(summary["variable_assembly_cost"], 3) == 0.016  # 10 * 0.0016
@@ -401,72 +406,6 @@ def test_dnp_parts_are_excluded_from_bom_estimator_counts():
     assert round(summary["component_cost"], 3) == 5.000
     assert summary["standard_part_count"] == 0
 
-
-def test_optional_policy_fees_apply_when_configured():
-    """Optional policy fees contribute to fixed and total costs."""
-    parts = [
-        {
-            "lcsc": "C201",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        }
-    ]
-
-    def get_details(_lcsc):
-        return {"price": "1-:0.50", "type": "Basic"}
-
-    summary = calculate_bom_estimate(
-        parts,
-        board_count=10,
-        get_part_details=get_details,
-        board_standard=False,
-        order_handling_fee=2.0,
-        panelization_per_board_fee=0.1,
-        panelization_threshold_boards=10,
-    )
-
-    assert round(summary["component_cost"], 3) == 5.000
-    assert round(summary["policy_cost"], 3) == 3.000  # 2.0 + (10 * 0.1)
-    assert round(summary["fixed_cost"], 3) == 12.500  # 8.0 + 1.5 + 3.0
-    assert round(summary["assembly_cost"], 3) == 12.516
-    assert round(summary["total_cost"], 3) == 17.516
-
-
-def test_panelization_fee_does_not_apply_below_threshold():
-    """Panelization per-board fee is skipped when board_count is below threshold."""
-    parts = [
-        {
-            "lcsc": "C301",
-            "exclude_from_bom": 0,
-            "pad_count": 1,
-            "has_tht": 0,
-            "assembly_process": "SMT",
-            "component_product_type": 0,
-            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
-        }
-    ]
-
-    def get_details(_lcsc):
-        return {"price": "1-:0.50", "type": "Basic"}
-
-    summary = calculate_bom_estimate(
-        parts,
-        board_count=5,
-        get_part_details=get_details,
-        board_standard=False,
-        order_handling_fee=2.0,
-        panelization_per_board_fee=0.1,
-        panelization_threshold_boards=10,
-    )
-
-    assert round(summary["policy_cost"], 3) == 2.000
-    assert round(summary["fixed_cost"], 3) == 11.500  # 8.0 + 1.5 + 2.0
-
-
 def test_format_bom_estimate_summary_basic():
     """format_bom_estimate_summary produces expected display lines."""
     summary = {
@@ -478,7 +417,6 @@ def test_format_bom_estimate_summary_basic():
         "extended_cost": 3.00,
         "economic_setup_cost": 8.00,
         "standard_setup_cost": 0.00,
-        "policy_cost": 0.00,
         "stencil_cost": 1.50,
         "tht_setup_cost": 0.00,
         "variable_assembly_cost": 7.50,
@@ -516,7 +454,6 @@ def test_format_bom_estimate_summary_with_standard_surcharge():
         "extended_cost": 3.00,
         "economic_setup_cost": 0.00,
         "standard_setup_cost": 25.00,
-        "policy_cost": 0.00,
         "stencil_cost": 7.80,
         "tht_setup_cost": 0.00,
         "variable_assembly_cost": 12.20,
@@ -536,3 +473,237 @@ def test_format_bom_estimate_summary_with_standard_surcharge():
     assert "extended: $3.00, standard: $1.50" in details
     assert "setup: $25.00" in details
     assert "50 joints, tht: 10 joints" in details
+
+
+def test_standard_signal_reasons_orders_labels_consistently():
+    """standard_signal_reasons returns active labels in display order."""
+    reasons = standard_signal_reasons(
+        {
+            "qty_50_plus": True,
+            "manual_enabled": True,
+            "multi_side_populated": True,
+            "v_cut_drawings": False,
+            "standard_part_present": True,
+        }
+    )
+
+    assert reasons == [
+        "manual",
+        "qty≥50",
+        "standard part",
+        "both sides populated",
+    ]
+
+
+def test_standard_signal_reasons_ignores_inactive_flags():
+    """standard_signal_reasons returns an empty list when no triggers are active."""
+    assert standard_signal_reasons({"manual_enabled": False, "qty_50_plus": 0}) == []
+
+
+def test_calculate_part_bom_cost_uses_raw_component_price_only():
+    """Per-part BOM contribution uses only component pricing bands."""
+    part = {"lcsc": "C123", "exclude_from_bom": 0}
+    details = {"price": "1-9:0.30,10-:0.20", "type": "Extended"}
+
+    assert calculate_part_bom_cost(part, details, board_count=10) == 2.0
+
+
+def test_format_part_bom_price_label_handles_missing_and_excluded_parts():
+    """Part BOM label helper preserves UI behavior for excluded and missing-price rows."""
+    assert (
+        format_part_bom_price_label(
+            {"lcsc": "C1", "exclude_from_bom": 1},
+            {"price": "1-:0.10"},
+            board_count=5,
+        )
+        == ""
+    )
+
+
+def test_build_bom_estimate_view_model_handles_empty_parts():
+    """Empty part lists produce the expected empty-state label."""
+    view_model = build_bom_estimate_view_model(
+        parts=[],
+        board_count=5,
+        get_part_details=lambda _lcsc: {},
+        standard_context={"board_standard": False},
+    )
+
+    assert view_model["summary"] is None
+    assert view_model["highlight_refs"] == set()
+    assert view_model["summary_label"] == "BOM Estimate (5 boards): no parts"
+
+
+def test_build_bom_estimate_view_model_handles_no_assigned_bom_parts():
+    """Parts without assigned BOM rows produce the no-assigned state."""
+    view_model = build_bom_estimate_view_model(
+        parts=[
+            {"reference": "R1", "lcsc": "", "exclude_from_bom": 0},
+            {"reference": "R2", "lcsc": "C2", "exclude_from_bom": 1},
+        ],
+        board_count=10,
+        get_part_details=lambda _lcsc: {},
+        standard_context={"board_standard": False},
+    )
+
+    assert view_model["summary"] is None
+    assert view_model["highlight_refs"] == set()
+    assert view_model["summary_label"] == "BOM Estimate (10 boards): no assigned BOM parts"
+
+
+def test_build_bom_estimate_view_model_returns_summary_and_highlights():
+    """Populated BOM rows produce a formatted summary and conditional highlights."""
+    parts = [
+        {
+            "reference": "R1",
+            "lcsc": "C100",
+            "exclude_from_bom": 0,
+            "pad_count": 2,
+            "has_tht": 0,
+            "component_product_type": 2,
+            "assembly_flags": '{"exclude_from_pos": false, "is_dnp": false}',
+        }
+    ]
+
+    view_model = build_bom_estimate_view_model(
+        parts=parts,
+        board_count=5,
+        get_part_details=lambda _lcsc: {"price": "1-:1.00", "type": "Basic"},
+        standard_context={
+            "board_standard": True,
+            "smt_populated_sides": 1,
+            "signals": {"standard_part_present": True},
+            "trigger_references": {"R1"},
+        },
+    )
+
+    assert view_model["summary"] is not None
+    assert view_model["mode"] == "Standard"
+    assert view_model["reason_text"] == "standard part"
+    assert view_model["highlight_refs"] == {"R1"}
+    assert "Mode Standard" in view_model["summary_label"]
+    assert "Triggers standard part" in view_model["summary_label"]
+
+
+def test_build_standard_mode_context_combines_policy_signals():
+    """Standard mode turns on when any pure policy trigger is active."""
+    context = build_standard_mode_context(
+        manual_enabled=False,
+        board_count=50,
+        has_v_cut_drawings=True,
+        populated_refs={"R1", "R2"},
+        populated_sides={"top", "bottom"},
+        smt_populated_sides={"top"},
+        standard_part_refs={"R1"},
+    )
+
+    assert context["board_standard"] is True
+    assert context["signals"] == {
+        "manual_enabled": False,
+        "qty_50_plus": True,
+        "v_cut_drawings": True,
+        "standard_part_present": True,
+        "multi_side_populated": True,
+    }
+    assert context["smt_populated_sides"] == 1
+
+
+def test_build_standard_mode_context_highlights_standard_parts_and_multiside_refs():
+    """Highlight refs include standard parts and all populated refs for multi-side boards."""
+    context = build_standard_mode_context(
+        manual_enabled=False,
+        board_count=5,
+        has_v_cut_drawings=False,
+        populated_refs={"R1", "R2", "R3"},
+        populated_sides={"top", "bottom"},
+        smt_populated_sides={"top", "bottom"},
+        standard_part_refs={"R2"},
+    )
+
+    assert context["trigger_references"] == {"R1", "R2", "R3"}
+
+    single_side_context = build_standard_mode_context(
+        manual_enabled=False,
+        board_count=5,
+        has_v_cut_drawings=False,
+        populated_refs={"R1", "R2", "R3"},
+        populated_sides={"top"},
+        smt_populated_sides={"top"},
+        standard_part_refs={"R2"},
+    )
+
+    assert single_side_context["trigger_references"] == {"R2"}
+    assert (
+        format_part_bom_price_label(
+            {"lcsc": "C1", "exclude_from_bom": 0},
+            {"price": ""},
+            board_count=5,
+        )
+        == "N/A"
+    )
+    assert (
+        format_part_bom_price_label(
+            {"lcsc": "", "exclude_from_bom": 0},
+            {"price": "1-:0.10"},
+            board_count=5,
+        )
+        == ""
+    )
+
+
+def test_prepare_bom_price_labels_returns_reference_to_label_mapping():
+    """prepare_bom_price_labels builds a complete {reference: label} dict."""
+    parts = [
+        {"reference": "R1", "lcsc": "C123", "exclude_from_bom": 0},
+        {"reference": "R2", "lcsc": "C456", "exclude_from_bom": 0},
+    ]
+    details_store = {
+        "C123": {"price": "1-:0.10"},
+        "C456": {"price": "5-:0.20"},
+    }
+
+    labels = prepare_bom_price_labels(
+        parts, board_count=10, get_part_details=lambda lcsc: details_store.get(lcsc, {})
+    )
+
+    assert labels == {"R1": "$1.0000", "R2": "$2.0000"}
+
+
+def test_prepare_bom_price_labels_deduplicates_detail_fetches():
+    """Parts sharing an LCSC code cause only one get_part_details call."""
+    call_count = [0]
+
+    def counting_get(lcsc):
+        call_count[0] += 1
+        return {"price": "1-:0.50"}
+
+    parts = [
+        {"reference": "R1", "lcsc": "C1", "exclude_from_bom": 0},
+        {"reference": "R2", "lcsc": "C1", "exclude_from_bom": 0},
+    ]
+    prepare_bom_price_labels(parts, board_count=5, get_part_details=counting_get)
+
+    assert call_count[0] == 1
+
+
+def test_prepare_bom_price_labels_skips_excluded_and_unassigned_parts():
+    """Excluded and LCSC-less parts produce empty labels, not missing keys."""
+    parts = [
+        {"reference": "R1", "lcsc": "C1", "exclude_from_bom": 1},
+        {"reference": "R2", "lcsc": "", "exclude_from_bom": 0},
+    ]
+    labels = prepare_bom_price_labels(
+        parts, board_count=5, get_part_details=lambda _: {"price": "1-:0.10"}
+    )
+
+    assert labels == {"R1": "", "R2": ""}
+
+
+def test_prepare_bom_price_labels_skips_parts_without_reference():
+    """Parts missing the reference key are silently omitted."""
+    parts = [{"lcsc": "C1", "exclude_from_bom": 0}]
+    labels = prepare_bom_price_labels(
+        parts, board_count=5, get_part_details=lambda _: {"price": "1-:0.10"}
+    )
+
+    assert labels == {}
