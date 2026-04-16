@@ -20,6 +20,7 @@ import wx.dataview as dv  # pylint: disable=import-error
 from .bom_estimator import (
     calculate_bom_estimate,
     fetch_assembly_processes,
+    format_bom_estimate_summary,
     get_unit_price,
 )
 from .corrections import CorrectionManagerDialog
@@ -1037,31 +1038,9 @@ class JLCPCBTools(wx.Dialog):
         )
         self.partlist_data_model.set_standard_trigger_refs(highlight_refs)
         self.footprint_list.Refresh()
-        overview_line = (
-            f"BOM Estimate ({board_count} boards): Mode {mode} | "
-            f"Total ${summary['total_cost']:.2f} | "
-            f"Per board ${summary['cost_per_board']:.2f} | "
-            f"Triggers {reason_text} | "
-            f"Missing prices {summary['missing_prices']}"
-        )
-        displayed_fixed_cost = summary["fixed_cost"] + summary["extended_cost"]
-        displayed_setup_cost = (
-            summary["economic_setup_cost"]
-            + summary["standard_setup_cost"]
-            + summary["policy_cost"]
-        )
-        # Assembly cost includes variable joint fees and surcharges (extended + standard)
-        # We show them separately in the breakdown for clarity
-        surcharge_breakdown = f"extended: ${summary['extended_cost']:.2f}"
-        if summary["standard_part_surcharge_cost"] > 0:
-            surcharge_breakdown += f", standard: ${summary['standard_part_surcharge_cost']:.2f}"
-        details_line = (
-            f"Direct BOM Cost: ${summary['component_cost']:.2f} | "
-            f"Fixed ${displayed_fixed_cost:.2f} "
-            f"({surcharge_breakdown}, setup: ${displayed_setup_cost:.2f}, "
-            f"stencil: ${summary['stencil_cost']:.2f}, tht: ${summary['tht_setup_cost']:.2f}) | "
-            f"Assembly ${summary['variable_assembly_cost']:.2f} "
-            f"(smt: {summary['smt_joint_count']} joints, tht: {summary['tht_joint_count']} joints)"
+
+        overview_line, details_line = format_bom_estimate_summary(
+            summary, board_count, mode, reason_text
         )
         self.bom_estimator_summary.SetLabel(f"{overview_line}\n{details_line}")
 

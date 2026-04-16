@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from bom_estimator import (
     calculate_bom_estimate,
     fetch_assembly_processes,
+    format_bom_estimate_summary,
     get_assembly_flags,
     get_unit_price,
     is_tht_part,
@@ -464,3 +465,74 @@ def test_panelization_fee_does_not_apply_below_threshold():
 
     assert round(summary["policy_cost"], 3) == 2.000
     assert round(summary["fixed_cost"], 3) == 11.500  # 8.0 + 1.5 + 2.0
+
+
+def test_format_bom_estimate_summary_basic():
+    """format_bom_estimate_summary produces expected display lines."""
+    summary = {
+        "total_cost": 25.50,
+        "cost_per_board": 12.75,
+        "missing_prices": 0,
+        "component_cost": 10.00,
+        "fixed_cost": 8.00,
+        "extended_cost": 3.00,
+        "economic_setup_cost": 8.00,
+        "standard_setup_cost": 0.00,
+        "policy_cost": 0.00,
+        "stencil_cost": 1.50,
+        "tht_setup_cost": 0.00,
+        "variable_assembly_cost": 7.50,
+        "standard_part_surcharge_cost": 0.00,
+        "smt_joint_count": 100,
+        "tht_joint_count": 0,
+    }
+
+    overview, details = format_bom_estimate_summary(
+        summary, board_count=2, mode="Economic", reason_text="none"
+    )
+
+    assert "2 boards" in overview
+    assert "Mode Economic" in overview
+    assert "Total $25.50" in overview
+    assert "Per board $12.75" in overview
+    assert "Missing prices 0" in overview
+
+    assert "Direct BOM Cost: $10.00" in details
+    assert "Fixed $11.00" in details  # 8.0 + 3.0
+    assert "extended: $3.00" in details
+    assert "setup: $8.00" in details
+    assert "Assembly $7.50" in details
+    assert "100 joints" in details
+
+
+def test_format_bom_estimate_summary_with_standard_surcharge():
+    """format_bom_estimate_summary shows standard surcharge in breakdown."""
+    summary = {
+        "total_cost": 35.00,
+        "cost_per_board": 17.50,
+        "missing_prices": 2,
+        "component_cost": 10.00,
+        "fixed_cost": 8.00,
+        "extended_cost": 3.00,
+        "economic_setup_cost": 0.00,
+        "standard_setup_cost": 25.00,
+        "policy_cost": 0.00,
+        "stencil_cost": 7.80,
+        "tht_setup_cost": 0.00,
+        "variable_assembly_cost": 12.20,
+        "standard_part_surcharge_cost": 1.50,
+        "smt_joint_count": 50,
+        "tht_joint_count": 10,
+    }
+
+    overview, details = format_bom_estimate_summary(
+        summary, board_count=1, mode="Standard", reason_text="standard parts"
+    )
+
+    assert "Mode Standard" in overview
+    assert "Triggers standard parts" in overview
+    assert "Missing prices 2" in overview
+
+    assert "extended: $3.00, standard: $1.50" in details
+    assert "setup: $25.00" in details
+    assert "50 joints, tht: 10 joints" in details

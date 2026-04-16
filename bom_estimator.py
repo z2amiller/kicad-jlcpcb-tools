@@ -273,3 +273,50 @@ def calculate_bom_estimate(
     if board_count > 0:
         summary["cost_per_board"] = summary["total_cost"] / board_count
     return summary
+
+
+def format_bom_estimate_summary(
+    summary: dict, board_count: int, mode: str, reason_text: str
+) -> tuple[str, str]:
+    """Format BOM estimate summary into display lines.
+
+    Args:
+        summary: BOM estimate dict from calculate_bom_estimate()
+        board_count: Number of boards
+        mode: "Standard" or "Economic" mode string
+        reason_text: Comma-joined reason text for triggers (or "none")
+
+    Returns:
+        (overview_line, details_line) tuple for two-line display
+    """
+    overview_line = (
+        f"BOM Estimate ({board_count} boards): Mode {mode} | "
+        f"Total ${summary['total_cost']:.2f} | "
+        f"Per board ${summary['cost_per_board']:.2f} | "
+        f"Triggers {reason_text} | "
+        f"Missing prices {summary['missing_prices']}"
+    )
+
+    displayed_fixed_cost = summary["fixed_cost"] + summary["extended_cost"]
+    displayed_setup_cost = (
+        summary["economic_setup_cost"]
+        + summary["standard_setup_cost"]
+        + summary["policy_cost"]
+    )
+
+    # Assembly cost includes variable joint fees and surcharges (extended + standard)
+    # We show them separately in the breakdown for clarity
+    surcharge_breakdown = f"extended: ${summary['extended_cost']:.2f}"
+    if summary["standard_part_surcharge_cost"] > 0:
+        surcharge_breakdown += f", standard: ${summary['standard_part_surcharge_cost']:.2f}"
+
+    details_line = (
+        f"Direct BOM Cost: ${summary['component_cost']:.2f} | "
+        f"Fixed ${displayed_fixed_cost:.2f} "
+        f"({surcharge_breakdown}, setup: ${displayed_setup_cost:.2f}, "
+        f"stencil: ${summary['stencil_cost']:.2f}, tht: ${summary['tht_setup_cost']:.2f}) | "
+        f"Assembly ${summary['variable_assembly_cost']:.2f} "
+        f"(smt: {summary['smt_joint_count']} joints, tht: {summary['tht_joint_count']} joints)"
+    )
+
+    return overview_line, details_line
