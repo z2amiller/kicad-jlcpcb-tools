@@ -73,14 +73,12 @@ class PartListDataModel(dv.PyDataViewModel):
         if not row:
             return False
 
-        # Always set explicit defaults first.  On some wx/macOS combinations,
-        # reused attribute objects can carry stale colors between rows when
-        # highlight state changes quickly.
-        attr.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_LISTBOX))
-        attr.SetColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_LISTBOXTEXT))
-
         ref = str(row[self.columns["REF_COL"]] or "")
         if ref not in self.standard_trigger_refs:
+            # Clear any previously cached custom colours on reused attrs.
+            # NullColour means "use control/theme default".
+            attr.SetBackgroundColour(wx.NullColour)
+            attr.SetColour(wx.NullColour)
             return True
 
         attr.SetBackgroundColour(wx.Colour(255, 220, 230))
