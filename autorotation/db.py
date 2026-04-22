@@ -1,17 +1,28 @@
-"""Standalone DB module for the autorotation feature prototype.
+"""DB module for the autorotation feature.
 
-Manages a local SQLite cache of LCSC component rotation/offset corrections.
+Manages a SQLite cache of LCSC component rotation/offset corrections.
 The lookup key is (lcsc_code, kicad_footprint_hash).
+
+The `lcsc_rotation` table coexists in the plugin's existing
+`<project>/jlcpcb/project.db` file alongside `part_info` (managed by
+store.Store) — one DB file per project, two tables. Use
+`db_path_for_project(project_path)` to get the same path that Store uses.
 
 Python 3.9 compatible; stdlib only.
 """
 
 import contextlib
+import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+
+def db_path_for_project(project_path) -> str:
+    """Path to the shared jlcpcb/project.db — matches store.Store.dbfile."""
+    return os.path.join(str(project_path), "jlcpcb", "project.db")
 
 
 # ---------------------------------------------------------------------------
