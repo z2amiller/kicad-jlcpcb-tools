@@ -28,7 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from autorotation.easyeda_api import fetch_easyeda_pads, parse_easyeda_response
-from autorotation.kicad_pcb_parser import footprint_pad_dict, parse_kicad_pcb
+from autorotation.tests.kicad_pcb_parser import footprint_pad_dict, parse_kicad_pcb
 from autorotation.quality import assess_quality
 from autorotation.solver import solve_transform
 

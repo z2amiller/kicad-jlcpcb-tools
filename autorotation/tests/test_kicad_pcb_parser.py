@@ -1,4 +1,4 @@
-"""Tests for autorotation.kicad_pcb_parser.
+"""Tests for the test-only kicad_pcb s-expression parser.
 
 Covers:
   - Synthetic fixture: happy-path tokenizer, parser, footprint extraction.
@@ -10,7 +10,7 @@ import os
 import pytest
 from typing import List
 
-from autorotation.kicad_pcb_parser import (
+from autorotation.tests.kicad_pcb_parser import (
     KiCadFootprint,
     KiCadPad,
     _tokenize,
