@@ -63,6 +63,19 @@ class ParseEasyedaResponseTests(unittest.TestCase):
         span = abs(by_num["1"]["x"] - by_num["3"]["x"])
         self.assertAlmostEqual(span, 2.47, delta=0.02)
 
+        # Width and height fields must be present on all pads.
+        # Raw PAD fields 4/5 for C2132 are 4.2126 and 2.3622, giving
+        # 4.2126 * 0.254 ≈ 1.070 mm and 2.3622 * 0.254 ≈ 0.600 mm.
+        for pad in result.pads:
+            self.assertIn("width", pad)
+            self.assertIn("height", pad)
+        self.assertAlmostEqual(by_num["1"]["width"], 1.070, delta=0.005)
+        self.assertAlmostEqual(by_num["1"]["height"], 0.600, delta=0.005)
+        self.assertAlmostEqual(by_num["2"]["width"], 1.070, delta=0.005)
+        self.assertAlmostEqual(by_num["2"]["height"], 0.600, delta=0.005)
+        self.assertAlmostEqual(by_num["3"]["width"], 1.070, delta=0.005)
+        self.assertAlmostEqual(by_num["3"]["height"], 0.600, delta=0.005)
+
     def test_empty_dict_returns_failure(self):
         result = parse_easyeda_response({})
         self.assertFalse(result.success)
@@ -158,6 +171,9 @@ class ParseEasyedaResponseTests(unittest.TestCase):
         self.assertEqual(result.pads[0]["number"], "A")
         self.assertTrue(math.isclose(result.pads[0]["x"], 10 * 0.254, rel_tol=1e-9))
         self.assertTrue(math.isclose(result.pads[0]["y"], 20 * 0.254, rel_tol=1e-9))
+        # Width (field 4 = 1) and height (field 5 = 1) should be present.
+        self.assertTrue(math.isclose(result.pads[0]["width"], 1 * 0.254, rel_tol=1e-9))
+        self.assertTrue(math.isclose(result.pads[0]["height"], 1 * 0.254, rel_tol=1e-9))
 
 
 class FetchEasyedaPadsTests(unittest.TestCase):

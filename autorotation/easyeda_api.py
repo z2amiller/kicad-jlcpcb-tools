@@ -50,6 +50,10 @@ class FootprintResult:
     pads: List[Dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
 
+    # Pad dict schema (for reference):
+    # {"number": str, "x": float, "y": float, "width": float, "height": float}
+    # All coordinates and dimensions are in footprint-local millimetres.
+
 
 def _failure(error: str, lcsc_code: str = "") -> FootprintResult:
     return FootprintResult(success=False, lcsc_code=lcsc_code, error=error)
@@ -113,12 +117,16 @@ def parse_easyeda_response(json_dict: Any, lcsc_code: str = "") -> FootprintResu
         try:
             cx = float(parts[2])
             cy = float(parts[3])
+            w = float(parts[4])
+            h = float(parts[5])
         except (TypeError, ValueError):
             continue
         number = parts[8]
         x_mm = (cx - origin_x) * _UNIT_MM
         y_mm = (cy - origin_y) * _UNIT_MM
-        pads.append({"number": str(number), "x": x_mm, "y": y_mm})
+        w_mm = w * _UNIT_MM
+        h_mm = h * _UNIT_MM
+        pads.append({"number": str(number), "x": x_mm, "y": y_mm, "width": w_mm, "height": h_mm})
 
     if not pads:
         return _failure("no PAD entries found in shape", lcsc_code)
