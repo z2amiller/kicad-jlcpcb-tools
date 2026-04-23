@@ -1,6 +1,5 @@
 """Contains the settings dialog."""
 
-import contextlib
 import logging
 
 import wx  # pylint: disable=import-error
@@ -106,39 +105,6 @@ class SettingsDialog(wx.Dialog):
         fill_zones_sizer = wx.BoxSizer(wx.HORIZONTAL)
         fill_zones_sizer.Add(self.fill_zones_image, 10, wx.ALL | wx.EXPAND, 5)
         fill_zones_sizer.Add(self.fill_zones_setting, 100, wx.ALL | wx.EXPAND, 5)
-
-        ##### Force DRC before Gerber export #####
-
-        self.force_drc_setting = wx.CheckBox(
-            self,
-            id=wx.ID_ANY,
-            label="Force DRC check before Gerber export - Saves board and fills zones!",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-            style=0,
-            name="gerber_force_drc",
-        )
-
-        self.force_drc_setting.SetToolTip(
-            wx.ToolTip(
-                "Run kicad-cli DRC with error severity before generating Gerbers (Saves board and fills zones!)"
-            )
-        )
-
-        self.force_drc_image = wx.StaticBitmap(
-            self,
-            wx.ID_ANY,
-            loadBitmapScaled("bug-check-outline.png", self.parent.scale_factor, static=True),
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            0,
-        )
-
-        self.force_drc_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
-        force_drc_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        force_drc_sizer.Add(self.force_drc_image, 10, wx.ALL | wx.EXPAND, 5)
-        force_drc_sizer.Add(self.force_drc_setting, 100, wx.ALL | wx.EXPAND, 5)
 
         ##### Plot values #####
 
@@ -407,164 +373,21 @@ class SettingsDialog(wx.Dialog):
             self.library_data_path_setting, 1, wx.ALL | wx.EXPAND, 5
         )
 
-        ##### Generation hooks #####
-
-        pre_hook_label = wx.StaticText(
-            self,
-            id=wx.ID_ANY,
-            label="Pre-generate hook script:",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-        )
-
-        self.pre_script_setting = wx.FilePickerCtrl(
-            self,
-            id=wx.ID_ANY,
-            path="",
-            message="Choose pre-generate hook script",
-            wildcard="All files (*.*)|*.*",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-            style=wx.FLP_DEFAULT_STYLE | wx.FLP_USE_TEXTCTRL,
-            name="hooks_pre_script",
-        )
-        self.pre_script_setting.SetToolTip(
-            wx.ToolTip(
-                "Runs before fabrication generation."
-                " A nonzero exit code shows a Continue/Cancel prompt."
-            )
-        )
-
-        self.pre_script_image = wx.StaticBitmap(
-            self,
-            wx.ID_ANY,
-            loadBitmapScaled("mdi-terminal.png", self.parent.scale_factor, static=True),
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            0,
-        )
-
-        self.pre_script_setting.Bind(wx.EVT_FILEPICKER_CHANGED, self.update_settings)
-
-        pre_hook_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        pre_hook_sizer.Add(
-            self.pre_script_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        pre_hook_sizer.Add(pre_hook_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        pre_hook_sizer.Add(self.pre_script_setting, 1, wx.ALL | wx.EXPAND, 5)
-
-        post_hook_label = wx.StaticText(
-            self,
-            id=wx.ID_ANY,
-            label="Post-generate hook script:",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-        )
-
-        self.post_script_setting = wx.FilePickerCtrl(
-            self,
-            id=wx.ID_ANY,
-            path="",
-            message="Choose post-generate hook script",
-            wildcard="All files (*.*)|*.*",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-            style=wx.FLP_DEFAULT_STYLE | wx.FLP_USE_TEXTCTRL,
-            name="hooks_post_script",
-        )
-        self.post_script_setting.SetToolTip(
-            wx.ToolTip(
-                "Runs only after successful fabrication generation."
-            )
-        )
-
-        self.post_script_image = wx.StaticBitmap(
-            self,
-            wx.ID_ANY,
-            loadBitmapScaled("mdi-terminal.png", self.parent.scale_factor, static=True),
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            0,
-        )
-
-        self.post_script_setting.Bind(wx.EVT_FILEPICKER_CHANGED, self.update_settings)
-
-        post_hook_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        post_hook_sizer.Add(
-            self.post_script_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        post_hook_sizer.Add(post_hook_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        post_hook_sizer.Add(self.post_script_setting, 1, wx.ALL | wx.EXPAND, 5)
-
-        hook_timeout_label = wx.StaticText(
-            self,
-            id=wx.ID_ANY,
-            label="Hook timeout (seconds):",
-            pos=wx.DefaultPosition,
-            size=wx.DefaultSize,
-        )
-
-        self.timeout_seconds_setting = wx.SpinCtrl(
-            self,
-            id=wx.ID_ANY,
-            min=1,
-            max=3600,
-            initial=30,
-            name="hooks_timeout_seconds",
-        )
-        self.timeout_seconds_setting.SetToolTip(
-            wx.ToolTip("Maximum runtime for pre/post hook scripts.")
-        )
-
-        self.timeout_seconds_image = wx.StaticBitmap(
-            self,
-            wx.ID_ANY,
-            loadBitmapScaled("mdi-hourglass-top.png", self.parent.scale_factor, static=True),
-            wx.DefaultPosition,
-            wx.DefaultSize,
-            0,
-        )
-
-        self.timeout_seconds_setting.Bind(wx.EVT_SPINCTRL, self.update_settings)
-
-        timeout_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        timeout_sizer.Add(
-            self.timeout_seconds_image, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        timeout_sizer.Add(
-            hook_timeout_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        timeout_sizer.Add(
-            self.timeout_seconds_setting, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-
-        hooks_box_sizer = wx.StaticBoxSizer(
-            wx.VERTICAL, self, "Generation hooks"
-        )
-        hooks_box_sizer.Add(pre_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        hooks_box_sizer.Add(post_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        hooks_box_sizer.Add(timeout_sizer, 0, wx.ALL | wx.EXPAND, 5)
-
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        settings_grid = wx.GridSizer(12, 2, 0, 0)
-        settings_grid.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
-
-        layout = wx.BoxSizer(wx.VERTICAL)
-        layout.Add(settings_grid, 1, wx.ALL | wx.EXPAND, 5)
-        layout.Add(hooks_box_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout = wx.GridSizer(12, 2, 0, 0)
+        layout.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(layout)
         self.Layout()
         self.Centre(wx.BOTH)
@@ -605,33 +428,6 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
-    def build_force_drc_bitmap(self, enabled):
-        """Build the Force DRC icon, overlaying a red X when disabled."""
-        bitmap = loadBitmapScaled(
-            "bug-check-outline.png", self.parent.scale_factor, static=True
-        )
-        if enabled:
-            return bitmap
-
-        return self.create_disabled_bitmap(bitmap)
-
-    def create_disabled_bitmap(self, bitmap):
-        """Create a disabled-state bitmap by drawing a red X over it."""
-        disabled_bitmap = bitmap.ConvertToImage().ConvertToBitmap()
-        memory_dc = wx.MemoryDC()
-        memory_dc.SelectObject(disabled_bitmap)
-        try:
-            pen_width = max(2, int(round(self.parent.scale_factor * 2)))
-            margin = max(2, int(round(self.parent.scale_factor * 3)))
-            width, height = disabled_bitmap.GetSize()
-            memory_dc.SetPen(wx.Pen(wx.Colour(220, 0, 0), width=pen_width))
-            memory_dc.DrawLine(margin, margin, width - margin, height - margin)
-            memory_dc.DrawLine(margin, height - margin, width - margin, margin)
-        finally:
-            memory_dc.SelectObject(wx.NullBitmap)
-
-        return disabled_bitmap
-
     def update_plot_values(self, plot_values):
         """Update settings dialog according to the settings."""
         if plot_values:
@@ -648,22 +444,6 @@ class SettingsDialog(wx.Dialog):
             self.plot_values_image.SetBitmap(
                 loadBitmapScaled("no_values.png", self.parent.scale_factor, static=True)
             )
-
-    def update_force_drc(self, force_drc):
-        """Update settings dialog according to the settings."""
-        self.force_drc_setting.SetValue(bool(force_drc))
-        self.force_drc_image.SetBitmap(self.build_force_drc_bitmap(bool(force_drc)))
-        if force_drc:
-            self.force_drc_setting.SetLabel(
-                "Force DRC check before Gerber export - Saves board and fills zones!"
-            )
-            self.update_fill_zones(True)
-            self.fill_zones_setting.Disable()
-        else:
-            self.force_drc_setting.SetLabel(
-                "Do not force DRC check before Gerber export"
-            )
-            self.fill_zones_setting.Enable()
 
     def update_plot_references(self, plot_references):
         """Update settings dialog according to the settings."""
@@ -760,9 +540,6 @@ class SettingsDialog(wx.Dialog):
         self.update_fill_zones(
             self.parent.settings.get("gerber", {}).get("fill_zones", True)
         )
-        self.update_force_drc(
-            self.parent.settings.get("gerber", {}).get("force_drc", False)
-        )
         self.update_plot_values(
             self.parent.settings.get("gerber", {}).get("plot_values", True)
         )
@@ -789,13 +566,6 @@ class SettingsDialog(wx.Dialog):
         self.update_data_path(
             self.parent.settings.get("library", {}).get("data_path", "")
         )
-        self.update_pre_script(self.parent.settings.get("hooks", {}).get("pre_script", ""))
-        self.update_post_script(
-            self.parent.settings.get("hooks", {}).get("post_script", "")
-        )
-        self.update_timeout_seconds(
-            self.parent.settings.get("hooks", {}).get("timeout_seconds", 30)
-        )
 
     def update_selected_library(self, library_key):
         """Update settings dialog according to the selected library."""
@@ -808,24 +578,6 @@ class SettingsDialog(wx.Dialog):
         value = data_path.strip() if isinstance(data_path, str) else ""
         effective_path = value if value else self.parent.library.datadir
         self.library_data_path_setting.SetPath(effective_path)
-
-    def update_pre_script(self, script_path):
-        """Update settings dialog according to pre-hook script path."""
-        value = script_path.strip() if isinstance(script_path, str) else ""
-        self.pre_script_setting.SetPath(value)
-
-    def update_post_script(self, script_path):
-        """Update settings dialog according to post-hook script path."""
-        value = script_path.strip() if isinstance(script_path, str) else ""
-        self.post_script_setting.SetPath(value)
-
-    def update_timeout_seconds(self, timeout_seconds):
-        """Update settings dialog according to hook timeout."""
-        with contextlib.suppress(ValueError, TypeError):
-            timeout = int(timeout_seconds)
-            self.timeout_seconds_setting.SetValue(max(1, timeout))
-            return
-        self.timeout_seconds_setting.SetValue(30)
 
     def update_settings(self, event):
         """Update and persist a setting that was changed."""
@@ -847,26 +599,7 @@ class SettingsDialog(wx.Dialog):
                     value = key
                     break
 
-        # If forced DRC is enabled, fill zones must stay enabled.
-        if (
-            section == "gerber"
-            and name == "fill_zones"
-            and self.force_drc_setting.GetValue()
-        ):
-            value = True
-
         getattr(self, f"update_{name}")(value)
-
-        # Turning on forced DRC implies enabling fill zones.
-        if section == "gerber" and name == "force_drc" and value:
-            wx.PostEvent(
-                self.parent,
-                UpdateSetting(
-                    section="gerber",
-                    setting="fill_zones",
-                    value=True,
-                ),
-            )
 
         wx.PostEvent(
             self.parent,
