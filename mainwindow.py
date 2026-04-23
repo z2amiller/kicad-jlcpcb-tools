@@ -17,8 +17,11 @@ import wx.dataview as dv  # pylint: disable=import-error
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
 from .dataview_highlight import (
+    DEFAULT_FOOTPRINT_ALIAS_FORWARD,
+    DEFAULT_FOOTPRINT_EXTRACTION_RULES,
     HighlightedTextRenderer,
     decode_highlighted_value,
+    set_footprint_highlight_rules,
     simplify_footprint_name,
 )
 from .derive_params import params_for_part
@@ -39,6 +42,7 @@ from .events import (
     LogboxAppendEvent,
 )
 from .fabrication import Fabrication
+from .footprint_rules import FootprintRulesManagerDialog
 from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
@@ -57,6 +61,8 @@ from .partselector import PartSelectorDialog
 from .schematicexport import SchematicExport
 from .settings import SettingsDialog
 from .store import Store
+from .strict_check_dialog import StrictCheckDialog
+from .strict_checks import build_strict_check_failures
 
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -78,6 +84,9 @@ ID_HIDE_BOM = 13
 ID_HIDE_POS = 14
 ID_SAVE_MAPPINGS = 15
 ID_EXPORT_TO_SCHEMATIC = 16
+ID_FOOTPRINT_RULES = 17
+ID_STRICT_CHECKS = 18
+FOOTPRINT_HIGHLIGHT_RULES_FILE = "footprint_highlight_rules.json"
 ID_CONTEXT_MENU_COPY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
@@ -210,6 +219,20 @@ class JLCPCBTools(wx.Dialog):
             "Manage part mappings",
         )
 
+        self.footprint_rules_button = self.upper_toolbar.AddTool(
+            ID_FOOTPRINT_RULES,
+            "Footprint Rules",
+            loadBitmapScaled("mdi-text-box-search-outline.png", self.scale_factor),
+            "Manage footprint highlight aliases and extraction regexes",
+        )
+
+        self.strict_checks_button = self.upper_toolbar.AddTool(
+            ID_STRICT_CHECKS,
+            "Strict Checks",
+            loadBitmapScaled("mdi-checkbox-multiple-marked.png", self.scale_factor),
+            "Review strict value/footprint parameter checks",
+        )
+
         self.upper_toolbar.AddSeparator()
 
         self.download_button = self.upper_toolbar.AddTool(
@@ -231,6 +254,8 @@ class JLCPCBTools(wx.Dialog):
         self.Bind(wx.EVT_TOOL, self.generate_fabrication_data, self.generate_button)
         self.Bind(wx.EVT_TOOL, self.manage_corrections, self.correction_button)
         self.Bind(wx.EVT_TOOL, self.manage_mappings, self.mapping_button)
+        self.Bind(wx.EVT_TOOL, self.manage_footprint_rules, self.footprint_rules_button)
+        self.Bind(wx.EVT_TOOL, self.manage_strict_checks, self.strict_checks_button)
         self.Bind(wx.EVT_TOOL, self.update_library, self.download_button)
         self.Bind(wx.EVT_TOOL, self.manage_settings, self.settings_button)
 
@@ -538,6 +563,7 @@ class JLCPCBTools(wx.Dialog):
         self.enable_part_specific_toolbar_buttons(False)
 
         self.init_logger()
+        self.apply_footprint_highlight_rules()
         self.partlist_data_model = PartListDataModel(self.scale_factor)
         self.footprint_list.AssociateModel(self.partlist_data_model)
 
@@ -911,6 +937,27 @@ class JLCPCBTools(wx.Dialog):
         """Manage footprint mappings."""
         PartMapperManagerDialog(self).ShowModal()
 
+    def manage_footprint_rules(self, *_):
+        """Manage footprint highlight aliases and extraction regex rules."""
+        FootprintRulesManagerDialog(self).ShowModal()
+
+    def manage_strict_checks(self, *_):
+        """Review strict check failures and manage per-part exemptions."""
+        failures = self.get_strict_check_failures()
+        if not failures:
+            wx.MessageBox(
+                "All strict checks pass.",
+                "Strict part checks",
+                wx.OK | wx.CENTER,
+            )
+            return
+
+        self.show_strict_check_dialog(
+            failures,
+            "Apply exemptions",
+            "Strict part checks",
+        )
+
     def manage_settings(self, *_):
         """Manage settings."""
         SettingsDialog(self).ShowModal()
@@ -940,6 +987,7 @@ class JLCPCBTools(wx.Dialog):
 
         highlighting_settings = self.settings.setdefault("highlighting", {})
         partselector_settings = self.settings.setdefault("partselector", {})
+        general_settings = self.settings.setdefault("general", {})
         migrated = False
         if "matches" not in highlighting_settings:
             if "highlight_matches" in partselector_settings:
@@ -950,8 +998,87 @@ class JLCPCBTools(wx.Dialog):
             else:
                 highlighting_settings["matches"] = True
                 migrated = True
+
+        if "strict_checks" not in general_settings:
+            general_settings["strict_checks"] = False
+            migrated = True
+
         if migrated:
             self.save_settings()
+
+        self.load_footprint_highlight_rules()
+
+    def footprint_highlight_rules_path(self) -> str:
+        """Return path to dedicated footprint highlight rules JSON file."""
+        return os.path.join(PLUGIN_PATH, FOOTPRINT_HIGHLIGHT_RULES_FILE)
+
+    def load_footprint_highlight_rules(self):
+        """Load footprint aliases and extraction rules from dedicated JSON file."""
+        self.footprint_highlight_rules = {
+            "footprint_aliases": dict(DEFAULT_FOOTPRINT_ALIAS_FORWARD),
+            "footprint_extraction_rules": [*DEFAULT_FOOTPRINT_EXTRACTION_RULES],
+        }
+
+        rules_path = self.footprint_highlight_rules_path()
+        if os.path.exists(rules_path):
+            with open(rules_path, encoding="utf-8") as rules_file:
+                data = json.load(rules_file)
+            if isinstance(data, dict):
+                aliases = data.get("footprint_aliases")
+                rules = data.get("footprint_extraction_rules")
+                if isinstance(aliases, dict):
+                    self.footprint_highlight_rules["footprint_aliases"] = aliases
+                if isinstance(rules, list):
+                    self.footprint_highlight_rules["footprint_extraction_rules"] = rules
+            return
+
+        self.save_footprint_highlight_rules()
+
+    def save_footprint_highlight_rules(self):
+        """Persist footprint aliases and extraction rules in dedicated JSON file."""
+        with open(self.footprint_highlight_rules_path(), "w", encoding="utf-8") as j:
+            json.dump(self.footprint_highlight_rules, j)
+
+    def get_footprint_highlight_rules_config(self) -> tuple[dict, list]:
+        """Return current footprint alias/rule config from dedicated storage."""
+        aliases = self.footprint_highlight_rules.get("footprint_aliases", {})
+        rules = self.footprint_highlight_rules.get("footprint_extraction_rules", [])
+        return dict(aliases), [*rules]
+
+    def set_footprint_highlight_rules_config(
+        self,
+        aliases: dict,
+        rules: list,
+        persist: bool = True,
+    ):
+        """Update active footprint alias/rule config and refresh highlights."""
+        self.footprint_highlight_rules["footprint_aliases"] = dict(aliases)
+        self.footprint_highlight_rules["footprint_extraction_rules"] = [*rules]
+
+        if persist:
+            self.save_footprint_highlight_rules()
+
+        self.apply_footprint_highlight_rules()
+
+    def apply_footprint_highlight_rules(self):
+        """Apply footprint alias and extraction settings to highlight behavior."""
+        aliases = self.footprint_highlight_rules.get("footprint_aliases")
+        rules = self.footprint_highlight_rules.get("footprint_extraction_rules")
+
+        if not isinstance(aliases, dict):
+            aliases = dict(DEFAULT_FOOTPRINT_ALIAS_FORWARD)
+            self.footprint_highlight_rules["footprint_aliases"] = aliases
+
+        if not isinstance(rules, list):
+            rules = [*DEFAULT_FOOTPRINT_EXTRACTION_RULES]
+            self.footprint_highlight_rules["footprint_extraction_rules"] = rules
+
+        set_footprint_highlight_rules(aliases, rules)
+
+        if hasattr(self, "partlist_data_model"):
+            self.partlist_data_model.refresh_params_highlight_terms()
+        if hasattr(self, "footprint_list"):
+            self.footprint_list.Refresh()
 
     def decode_mainwindow_highlight_value(
         self, value: str
@@ -961,6 +1088,34 @@ class JLCPCBTools(wx.Dialog):
         if not self.settings.get("highlighting", {}).get("matches", True):
             return text, []
         return text, terms
+
+    def get_strict_check_failures(self) -> list[dict]:
+        """Return strict-check failures with current exemption status."""
+        return build_strict_check_failures(
+            self.partlist_data_model.get_all(),
+            self.partlist_data_model.columns,
+            self.store.get_strict_check_exemptions,
+        )
+
+    def show_strict_check_dialog(
+        self,
+        failures: list[dict],
+        continue_label: str,
+        title: str,
+    ) -> int:
+        """Open strict-check dialog and persist exemption updates when accepted."""
+        dialog = StrictCheckDialog(self, failures, continue_label)
+        dialog.SetTitle(title)
+        result = dialog.ShowModal()
+        if result == wx.ID_OK:
+            for reference, lcsc, check_type, exempt in dialog.get_exemption_updates():
+                self.store.set_strict_check_exemption(
+                    reference,
+                    lcsc,
+                    check_type,
+                    exempt,
+                )
+        return result
 
     def save_settings(self):
         """Save settings to settings.json."""
@@ -1045,6 +1200,18 @@ class JLCPCBTools(wx.Dialog):
 
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
+        if self.settings.get("general", {}).get("strict_checks", False):
+            failures = self.get_strict_check_failures()
+            unresolved = [failure for failure in failures if not failure["exempted"]]
+            if unresolved:
+                result = self.show_strict_check_dialog(
+                    unresolved,
+                    "Generate Anyway",
+                    "Strict check required",
+                )
+                if result == wx.ID_CANCEL:
+                    return
+
         warnings = self.fabrication.get_part_consistency_warnings()
         if warnings:
             result = wx.MessageBox(

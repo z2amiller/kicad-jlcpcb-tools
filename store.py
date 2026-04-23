@@ -8,20 +8,28 @@ from pathlib import Path
 import sqlite3
 from typing import Union
 
-from .helpers import (
-    dict_factory,
-    get_exclude_from_bom,
-    get_exclude_from_pos,
-    get_lcsc_value,
-    get_valid_footprints,
-    natural_sort_collation,
-)
+try:
+    from .helpers import (
+        dict_factory,
+        get_exclude_from_bom,
+        get_exclude_from_pos,
+        get_lcsc_value,
+        get_valid_footprints,
+        natural_sort_collation,
+    )
+except ImportError:  # pragma: no cover - direct module import in tests
+    from helpers import (  # type: ignore[no-redef]
+        dict_factory,
+        get_exclude_from_bom,
+        get_exclude_from_pos,
+        get_lcsc_value,
+        get_valid_footprints,
+        natural_sort_collation,
+    )
 
 
 class Store:
     """A storage class to get data from a sqlite database and write it back."""
-
-    GENERATION_COUNT_KEY = "generation_count"
 
     def __init__(self, parent, project_path, board):
         self.logger = logging.getLogger(__name__)
@@ -84,53 +92,29 @@ class Store:
                 ")",
             )
             cur.execute(
-                "CREATE TABLE IF NOT EXISTS metadata ("
-                "key TEXT NOT NULL PRIMARY KEY,"
-                "value TEXT NOT NULL"
+                "CREATE TABLE IF NOT EXISTS strict_check_exemptions ("
+                "reference TEXT NOT NULL,"
+                "lcsc TEXT NOT NULL,"
+                "check_type TEXT NOT NULL,"
+                "exempt NUMERIC NOT NULL DEFAULT 1,"
+                "PRIMARY KEY(reference, lcsc, check_type)"
                 ")",
             )
             cur.commit()
 
-    def get_generation_count(self) -> int:
-        """Return the per-project generation counter."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            row = cur.execute(
-                "SELECT value FROM metadata WHERE key = :key",
-                {"key": self.GENERATION_COUNT_KEY},
-            ).fetchone()
-
-        if not row:
-            return 0
-
-        with contextlib.suppress(ValueError, TypeError):
-            return max(0, int(row[0]))
-        return 0
-
-    def increment_generation_count(self) -> int:
-        """Increment and persist the per-project generation counter."""
-        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
-            row = cur.execute(
-                "SELECT value FROM metadata WHERE key = :key",
-                {"key": self.GENERATION_COUNT_KEY},
-            ).fetchone()
-
-            current = 0
-            if row:
-                with contextlib.suppress(ValueError, TypeError):
-                    current = max(0, int(row[0]))
-
-            next_count = current + 1
+    @staticmethod
+    def _clear_strict_check_exemptions_tx(cur, ref: str, lcsc: Union[str, None] = None):
+        """Delete strict-check exemptions for a reference (optionally one LCSC)."""
+        if lcsc is None:
             cur.execute(
-                "INSERT INTO metadata (key, value) VALUES (:key, :value) "
-                "ON CONFLICT(key) DO UPDATE SET value = :value",
-                {
-                    "key": self.GENERATION_COUNT_KEY,
-                    "value": str(next_count),
-                },
+                "DELETE FROM strict_check_exemptions WHERE reference = :reference",
+                {"reference": ref},
             )
-            cur.commit()
-
-        return next_count
+            return
+        cur.execute(
+            "DELETE FROM strict_check_exemptions WHERE reference = :reference AND lcsc = :lcsc",
+            {"reference": ref, "lcsc": lcsc},
+        )
 
     def read_all(self) -> dict:
         """Read all parts from the database."""
@@ -166,10 +150,16 @@ class Store:
     def update_part(self, part: dict):
         """Update a part in the database, overwrite lcsc if supplied."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            old = cur.execute(
+                "SELECT lcsc FROM part_info WHERE reference = :reference",
+                {"reference": part["reference"]},
+            ).fetchone()
             cur.execute(
                 "UPDATE part_info set value = :value, footprint = :footprint, lcsc = :lcsc, exclude_from_bom = :exclude_from_bom, exclude_from_pos = :exclude_from_pos WHERE reference = :reference",
                 part,
             )
+            if old is not None and old[0] != part["lcsc"]:
+                self._clear_strict_check_exemptions_tx(cur, part["reference"])
             cur.commit()
 
     def get_part(self, ref: str) -> dict:
@@ -211,10 +201,75 @@ class Store:
     def set_lcsc(self, ref: str, lcsc: str):
         """Change the LCSC attribute for a part in the database."""
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            old = cur.execute(
+                "SELECT lcsc FROM part_info WHERE reference = :reference",
+                {"reference": ref},
+            ).fetchone()
             cur.execute(
                 "UPDATE part_info SET lcsc = :lcsc WHERE reference = :reference",
                 {"reference": ref, "lcsc": lcsc},
             )
+            if old is not None and old[0] != lcsc:
+                self._clear_strict_check_exemptions_tx(cur, ref)
+            cur.commit()
+
+    def set_strict_check_exemption(
+        self,
+        ref: str,
+        lcsc: str,
+        check_type: str,
+        exempt: bool = True,
+    ):
+        """Set or clear strict-check exemption for one check type."""
+        if check_type not in {"value", "footprint"}:
+            raise ValueError("check_type must be either 'value' or 'footprint'")
+
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            if exempt:
+                cur.execute(
+                    "INSERT OR REPLACE INTO strict_check_exemptions"
+                    " (reference, lcsc, check_type, exempt)"
+                    " VALUES (:reference, :lcsc, :check_type, 1)",
+                    {
+                        "reference": ref,
+                        "lcsc": lcsc,
+                        "check_type": check_type,
+                    },
+                )
+            else:
+                cur.execute(
+                    "DELETE FROM strict_check_exemptions"
+                    " WHERE reference = :reference AND lcsc = :lcsc AND check_type = :check_type",
+                    {
+                        "reference": ref,
+                        "lcsc": lcsc,
+                        "check_type": check_type,
+                    },
+                )
+            cur.commit()
+
+    def get_strict_check_exemptions(self, ref: str, lcsc: str) -> dict[str, bool]:
+        """Get strict-check exemptions for a reference + LCSC pair."""
+        result = {"value": False, "footprint": False}
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            rows = cur.execute(
+                "SELECT check_type, exempt FROM strict_check_exemptions"
+                " WHERE reference = :reference AND lcsc = :lcsc",
+                {"reference": ref, "lcsc": lcsc},
+            ).fetchall()
+        for check_type, exempt in rows:
+            if check_type in result:
+                result[check_type] = bool(exempt)
+        return result
+
+    def clear_strict_check_exemptions(
+        self,
+        ref: str,
+        lcsc: Union[str, None] = None,
+    ):
+        """Clear strict-check exemptions for a reference (and optional LCSC)."""
+        with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
+            self._clear_strict_check_exemptions_tx(cur, ref, lcsc)
             cur.commit()
 
     def update_from_board(self):
@@ -290,6 +345,9 @@ class Store:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             cur.execute(
                 f"DELETE FROM part_info WHERE reference NOT IN ({','.join(refs)})"
+            )
+            cur.execute(
+                f"DELETE FROM strict_check_exemptions WHERE reference NOT IN ({','.join(refs)})"
             )
             cur.commit()
 

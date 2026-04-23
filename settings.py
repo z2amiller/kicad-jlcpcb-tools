@@ -265,6 +265,43 @@ class SettingsDialog(wx.Dialog):
         order_number_sizer.Add(self.order_number_image, 10, wx.ALL | wx.EXPAND, 5)
         order_number_sizer.Add(self.order_number_setting, 100, wx.ALL | wx.EXPAND, 5)
 
+        ##### Strict part checks before generate #####
+
+        self.strict_checks_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Require strict checks before generate",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="general_strict_checks",
+        )
+
+        self.strict_checks_setting.SetToolTip(
+            wx.ToolTip(
+                "Require each assigned part to match value and footprint in LCSC params before generation"
+            )
+        )
+
+        self.strict_checks_image = wx.StaticBitmap(
+            self,
+            wx.ID_ANY,
+            loadBitmapScaled(
+                "mdi-checkbox-multiple-marked.png",
+                self.parent.scale_factor,
+                static=True,
+            ),
+            wx.DefaultPosition,
+            wx.DefaultSize,
+            0,
+        )
+
+        self.strict_checks_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        strict_checks_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        strict_checks_sizer.Add(self.strict_checks_image, 10, wx.ALL | wx.EXPAND, 5)
+        strict_checks_sizer.Add(self.strict_checks_setting, 100, wx.ALL | wx.EXPAND, 5)
+
         ##### Highlight text matches ######
 
         highlight_matches_label = wx.StaticText(
@@ -387,6 +424,7 @@ class SettingsDialog(wx.Dialog):
         layout.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        layout.Add(strict_checks_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -526,6 +564,14 @@ class SettingsDialog(wx.Dialog):
                 )
             )
 
+    def update_strict_checks(self, check):
+        """Update strict-checks setting label and state."""
+        self.strict_checks_setting.SetValue(bool(check))
+        if check:
+            self.strict_checks_setting.SetLabel("Require strict checks before generate")
+        else:
+            self.strict_checks_setting.SetLabel("Do not require strict checks before generate")
+
     def update_highlight_matches(self, enabled):
         """Update settings dialog according to the settings."""
         self.highlight_matches_setting.SetValue(bool(enabled))
@@ -560,6 +606,9 @@ class SettingsDialog(wx.Dialog):
         )
         self.update_order_number(
             self.parent.settings.get("general", {}).get("order_number", True)
+        )
+        self.update_strict_checks(
+            self.parent.settings.get("general", {}).get("strict_checks", False)
         )
         self.update_highlight_matches(
             self.parent.settings.get("highlighting", {}).get("matches", True)
