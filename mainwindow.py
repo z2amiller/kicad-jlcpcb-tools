@@ -16,6 +16,11 @@ import wx.dataview as dv  # pylint: disable=import-error
 
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel
+from .dataview_highlight import (
+    HighlightedTextRenderer,
+    decode_highlighted_value,
+    simplify_footprint_name,
+)
 from .derive_params import params_for_part
 from .events import (
     EVT_ASSIGN_PARTS_EVENT,
@@ -34,7 +39,6 @@ from .events import (
     LogboxAppendEvent,
 )
 from .fabrication import Fabrication
-from .generate_hooks import format_hook_error, run_configured_hook
 from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
@@ -46,7 +50,6 @@ from .helpers import (
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
-from .kicad_drc import DRCViolationCounter
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
@@ -404,13 +407,18 @@ class JLCPCBTools(wx.Dialog):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
-        params = self.footprint_list.AppendTextColumn(
-            "LCSC Params",
-            11,
-            width=150,
-            mode=dv.DATAVIEW_CELL_INERT,
+        params_renderer = HighlightedTextRenderer(
+            value_decoder=self.decode_mainwindow_highlight_value,
             align=wx.ALIGN_CENTER,
         )
+        params = dv.DataViewColumn(
+            "LCSC Params",
+            params_renderer,
+            11,
+            width=150,
+            align=wx.ALIGN_CENTER,
+        )
+        self.footprint_list.AppendColumn(params)
         lcsc = self.footprint_list.AppendTextColumn(
             "LCSC", 3, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
@@ -914,6 +922,9 @@ class JLCPCBTools(wx.Dialog):
         self.settings[e.section][e.setting] = e.value
         self.save_settings()
 
+        if e.section == "highlighting" and e.setting == "matches":
+            self.footprint_list.Refresh()
+
         # Refresh library configuration if relevant library settings changed
         if e.section == "library" and e.setting in ["selected_library", "data_path"]:
             self.library.refresh_library_config()
@@ -927,17 +938,29 @@ class JLCPCBTools(wx.Dialog):
         with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
             self.settings = json.load(j)
 
-        changed = False
-
-        gerber_settings = self.settings.setdefault("gerber", {})
-        if gerber_settings.get("force_drc", False) and not gerber_settings.get(
-            "fill_zones", True
-        ):
-            gerber_settings["fill_zones"] = True
-            changed = True
-
-        if changed:
+        highlighting_settings = self.settings.setdefault("highlighting", {})
+        partselector_settings = self.settings.setdefault("partselector", {})
+        migrated = False
+        if "matches" not in highlighting_settings:
+            if "highlight_matches" in partselector_settings:
+                highlighting_settings["matches"] = partselector_settings.pop(
+                    "highlight_matches"
+                )
+                migrated = True
+            else:
+                highlighting_settings["matches"] = True
+                migrated = True
+        if migrated:
             self.save_settings()
+
+    def decode_mainwindow_highlight_value(
+        self, value: str
+    ) -> tuple[str, list[str]]:
+        """Decode params cell text, optionally disabling highlight terms by setting."""
+        text, terms = decode_highlighted_value(value)
+        if not self.settings.get("highlighting", {}).get("matches", True):
+            return text, []
+        return text, terms
 
     def save_settings(self):
         """Save settings to settings.json."""
@@ -958,9 +981,8 @@ class JLCPCBTools(wx.Dialog):
                 if value.endswith("R") or value.endswith("r") or value.endswith("o"):
                     value = value[:-1]
                 value += "Ω"
-            m = re.search(r"_(\d+)_\d+Metric", footprint)
-            if m:
-                value += f" {m.group(1)}"
+            if simplified_footprint := simplify_footprint_name(footprint):
+                value += f" {simplified_footprint}"
             selection[ref] = value
         PartSelectorDialog(self, selection).ShowModal()
 
@@ -983,8 +1005,10 @@ class JLCPCBTools(wx.Dialog):
                 if (
                     isinstance(drawing, kicad_pcbnew.PCB_SHAPE)
                     and drawing.GetShape() == kicad_pcbnew.S_RECT
-                    and ((hasattr(drawing, "IsFilled") and drawing.IsFilled())
-                    or (hasattr(drawing, "IsSolidFill") and drawing.IsSolidFill()))
+                    and (
+                        (hasattr(drawing, "IsFilled") and drawing.IsFilled())
+                        or (hasattr(drawing, "IsSolidFill") and drawing.IsSolidFill())
+                    )
                 ):
                     corners = drawing.GetRectCorners()
 
@@ -1019,63 +1043,6 @@ class JLCPCBTools(wx.Dialog):
 
         return count
 
-    def build_generate_hook_env(self, stage, placeholder_count, generation_count):
-        """Build environment variables for configured generation hooks."""
-        board_filename = self.pcbnew.GetBoard().GetFileName()
-        artifact_paths = self.fabrication.get_artifact_paths()
-        env = os.environ.copy()
-        env.update(
-            {
-                "JLCPCB_HOOK_STAGE": stage,
-                "JLCPCB_BOARD_PATH": board_filename,
-                "JLCPCB_PROJECT_DIR": self.project_path,
-                "JLCPCB_OUTPUT_DIR": self.fabrication.outputdir,
-                "JLCPCB_GERBER_DIR": self.fabrication.gerberdir,
-                "JLCPCB_GENERATION_COUNT": str(generation_count),
-                "JLCPCB_PLACEHOLDER_COUNT": str(placeholder_count),
-                "JLCPCB_ARTIFACT_GERBER_ZIP": artifact_paths["gerber_zip"],
-                "JLCPCB_ARTIFACT_BOM_CSV": artifact_paths["bom_csv"],
-                "JLCPCB_ARTIFACT_CPL_CSV": artifact_paths["cpl_csv"],
-            }
-        )
-        return env
-
-    def run_generate_hook(self, stage, env, allow_continue):
-        """Run one configured generation hook and handle UI prompts on failures."""
-        hooks_settings = self.settings.get("hooks", {})
-        result = run_configured_hook(
-            stage=stage,
-            hooks_settings=hooks_settings,
-            env_updates=env,
-            working_dir=self.project_path,
-            logger=self.logger,
-        )
-        if not result.command:
-            return True
-
-        if result.succeeded:
-            return True
-
-        error_text = format_hook_error(result)
-        if allow_continue:
-            dialog = wx.MessageDialog(
-                self,
-                f"The {stage}-generate hook failed.\n\n{error_text}\n\nContinue generation anyway?",
-                "Pre-generate hook failed",
-                wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
-            )
-            dialog.SetYesNoLabels("Continue", "Cancel")
-            choice = dialog.ShowModal()
-            dialog.Destroy()
-            return choice == wx.ID_YES
-
-        wx.MessageBox(
-            f"The {stage}-generate hook failed after generation completed.\n\n{error_text}",
-            "Post-generate hook failed",
-            style=wx.ICON_WARNING,
-        )
-        return False
-
     def generate_fabrication_data(self, *_):
         """Generate fabrication data."""
         warnings = self.fabrication.get_part_consistency_warnings()
@@ -1090,10 +1057,8 @@ class JLCPCBTools(wx.Dialog):
             if result == wx.CANCEL:
                 return
 
-        placeholder_count = None
         if self.settings.get("general", {}).get("order_number"):
             count = self.count_order_number_placeholders()
-            placeholder_count = count
             if count == 0:
                 result = wx.MessageBox(
                     "JLC order/serial number placeholder not present! Continue?",
@@ -1110,130 +1075,18 @@ class JLCPCBTools(wx.Dialog):
                 )
                 if result == wx.CANCEL:
                     return
-
-        if placeholder_count is None:
-            placeholder_count = self.count_order_number_placeholders()
-
-        current_generation_count = self.store.get_generation_count()
-        pre_hook_env = self.build_generate_hook_env(
-            stage="pre",
-            placeholder_count=placeholder_count,
-            generation_count=current_generation_count,
-        )
-        if not self.run_generate_hook("pre", pre_hook_env, allow_continue=True):
-            return
-
         self.fabrication.fill_zones()
-
-        if not self.run_drc_before_gerber_export():
-            return
-
         layer_selection = self.layer_selection.GetSelection()
         number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
         if number:
             layer_count = int(number.group(0))
         else:
             layer_count = None
-        try:
-            self.fabrication.generate_geber(layer_count)
-            self.fabrication.generate_excellon()
-            self.fabrication.zip_gerber_excellon()
-            self.fabrication.generate_cpl()
-            self.fabrication.generate_bom()
-        except Exception as exc:
-            self.logger.exception("Unexpected error while generating fabrication data")
-            wx.MessageBox(
-                f"Unexpected error while generating fabrication data: {exc}",
-                "Generation failed",
-                style=wx.ICON_ERROR,
-            )
-            return
-
-        generation_count = self.store.increment_generation_count()
-        post_hook_env = self.build_generate_hook_env(
-            stage="post",
-            placeholder_count=placeholder_count,
-            generation_count=generation_count,
-        )
-        self.run_generate_hook("post", post_hook_env, allow_continue=False)
-
-    def save_board_for_drc(self):
-        """Save the current board so DRC checks operate on latest board state."""
-        board = self.pcbnew.GetBoard()
-        board_filename = board.GetFileName()
-        if not board_filename:
-            raise RuntimeError("Board must be saved before running DRC checks")
-
-        if hasattr(board, "Save"):
-            try:
-                board.Save(board_filename)
-            except TypeError:
-                board.Save()
-            return
-
-        if hasattr(self.pcbnew, "SaveBoard"):
-            self.pcbnew.SaveBoard(board_filename, board)
-            return
-
-        raise RuntimeError("Unable to save board using current KiCad API")
-
-    def run_drc_before_gerber_export(self):
-        """Run optional DRC via KiCad Python API and prompt when violations exist."""
-        if not self.settings.get("gerber", {}).get("force_drc", False):
-            return True
-
-        board_filename = self.pcbnew.GetBoard().GetFileName()
-        if not board_filename:
-            wx.MessageBox(
-                "Board must be saved before DRC can be run.",
-                "DRC check",
-                style=wx.ICON_ERROR,
-            )
-            return False
-
-        try:
-            self.save_board_for_drc()
-        except Exception as exc:
-            wx.MessageBox(
-                f"Failed to save board before DRC: {exc}",
-                "DRC check",
-                style=wx.ICON_ERROR,
-            )
-            return False
-
-        try:
-            drc_counter = DRCViolationCounter(
-                pcbnew_module=self.pcbnew,
-                working_dir=self.project_path,
-            )
-            violation_count = drc_counter.get_violation_count(board_filename)
-
-            if violation_count > 0:
-                dialog = wx.MessageDialog(
-                    self,
-                    f"DRC found {violation_count} error violation(s).\n\n"
-                    "Resolve or exclude DRC errors before manufacturing whenever possible.",
-                    "DRC violations found",
-                    wx.YES_NO
-                    | wx.NO_DEFAULT
-                    | wx.ICON_WARNING
-                    | wx.CENTER,
-                )
-                dialog.SetYesNoLabels("Continue Anyway", "Cancel Export")
-                result = dialog.ShowModal()
-                dialog.Destroy()
-                if result != wx.ID_YES:
-                    return False
-
-            return True
-        except Exception as exc:
-            self.logger.exception("Unexpected error while running forced DRC")
-            wx.MessageBox(
-                f"Unexpected error while running DRC: {exc}",
-                "DRC check",
-                style=wx.ICON_ERROR,
-            )
-            return False
+        self.fabrication.generate_geber(layer_count)
+        self.fabrication.generate_excellon()
+        self.fabrication.zip_gerber_excellon()
+        self.fabrication.generate_cpl()
+        self.fabrication.generate_bom()
 
     def copy_part_lcsc(self, *_):
         """Fetch part details from LCSC and show them in a modal."""
