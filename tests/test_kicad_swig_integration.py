@@ -7,12 +7,14 @@ These tests are intentionally small sanity checks:
 - persist a fake enrichment field for later plugin-side use
 """
 
+import importlib.util
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -24,6 +26,23 @@ kicad_drc = pytest.importorskip("kicad_drc")
 
 get_lcsc_value = helpers.get_lcsc_value
 set_lcsc_value = helpers.set_lcsc_value
+
+
+def _load_store_module():
+    """Load store.py under a synthetic package so relative imports resolve in tests."""
+    root = Path(__file__).resolve().parent.parent
+    pkg = types.ModuleType("kicadplugin")
+    pkg.__path__ = [str(root)]
+    sys.modules["kicadplugin"] = pkg
+    sys.modules["kicadplugin.helpers"] = helpers
+
+    spec = importlib.util.spec_from_file_location("kicadplugin.store", root / "store.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    module.__package__ = "kicadplugin"
+    sys.modules["kicadplugin.store"] = module
+    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    return module
 
 
 def _new_board():
@@ -382,3 +401,55 @@ def test_fake_enrichment_field_can_be_persisted(tmp_path):
     loaded = pcbnew.LoadBoard(str(board_path))
     loaded_footprint = _board_footprints(loaded)[0]
     assert _get_named_field_text(loaded_footprint, "JLC_ENRICHMENT") == "Pending"
+
+
+class _FakeStoreParent:
+    def __init__(self, lcsc_priority=False):
+        self.settings = {"general": {"lcsc_priority": lcsc_priority}}
+
+
+def test_store_imports_fixture_board_into_project_database(tmp_path):
+    """Store should import real fixture footprints into a per-project sqlite database."""
+    store_module = _load_store_module()
+    board_path = _fixture_path_from_id("k9_smoke_full125")
+    board = pcbnew.LoadBoard(str(board_path))
+
+    store = store_module.Store(_FakeStoreParent(), str(tmp_path), board)
+    rows = store.read_all()
+
+    assert rows, "Expected fixture board parts to be imported into sqlite store"
+    assert (tmp_path / "jlcpcb" / "project.db").exists()
+    assert len(rows) == len(helpers.get_valid_footprints(board))
+    assert all(row["reference"] for row in rows)
+    assert all(row["footprint"] for row in rows)
+
+
+def test_store_generation_count_persists_across_reloads(tmp_path):
+    """Store metadata should persist generation counts for a project directory."""
+    store_module = _load_store_module()
+    board_path = _fixture_path_from_id("k9_smoke_full125")
+    board = pcbnew.LoadBoard(str(board_path))
+
+    store = store_module.Store(_FakeStoreParent(), str(tmp_path), board)
+    assert store.get_generation_count() == 0
+    assert store.increment_generation_count() == 1
+    assert store.increment_generation_count() == 2
+
+    reloaded_store = store_module.Store(_FakeStoreParent(), str(tmp_path), board)
+    assert reloaded_store.get_generation_count() == 2
+
+
+def test_store_reads_lcsc_value_from_real_board_footprint(tmp_path):
+    """Store import should capture LCSC values present on real pcbnew footprints."""
+    store_module = _load_store_module()
+    board = _new_board()
+    footprint = _new_footprint(board)
+    _set_reference_value(footprint, reference="R7", value="4k7")
+    set_lcsc_value(footprint, "C424242")
+    _add_footprint(board, footprint)
+
+    store = store_module.Store(_FakeStoreParent(), str(tmp_path), board)
+    part = store.get_part("R7")
+
+    assert part is not None
+    assert part["lcsc"] == "C424242"
