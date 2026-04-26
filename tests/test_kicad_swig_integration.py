@@ -340,7 +340,11 @@ def test_fixture_drc_path_smoke(tmp_path):
     if not hasattr(pcbnew, "WriteDRCReport"):
         pytest.skip("WriteDRCReport not available in this pcbnew build")
 
-    board_path = _fixture_path_from_id("k9_smoke_full125")
+    smoke_fixtures = [fixture for fixture in _fixtures_by_intent("smoke_ok") if _fixture_matches_runtime(fixture)]
+    if not smoke_fixtures:
+        pytest.skip("No runtime-compatible smoke fixture available for DRC path test")
+
+    board_path = _fixture_path(smoke_fixtures[0])
     count, _ = _run_drc_in_subprocess(board_path, tmp_path)
     assert isinstance(count, int)
     assert count >= 0

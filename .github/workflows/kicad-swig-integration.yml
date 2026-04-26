@@ -22,10 +22,10 @@ jobs:
             k_expr: ""
           - lane: kicad10
             experimental: true
-            drc_integration: "0"
+            drc_integration: "1"
             image: ghcr.io/inti-cmnb/kicad_auto_full@sha256:a3a52fba4144e2ac72a893845409f316e9f64eb843d1cbbe91b8f51a8758865a
             verify_label: "KiCad 10"
-            k_expr: "fixture_manifest_paths_exist or all_smoke_fixtures_load_and_enumerate"
+            k_expr: "fixture_manifest_paths_exist or all_smoke_fixtures_load_and_enumerate or fixture_drc_path_smoke or drc_fail_fixtures_match_expected_patterns"
     container:
       image: ${{ matrix.image }}
     env:
