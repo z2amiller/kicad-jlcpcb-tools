@@ -3,6 +3,7 @@
 # ruff: noqa: D103, I001
 
 import importlib
+import json
 from pathlib import Path
 import sys
 import types
@@ -55,5 +56,32 @@ def test_main_dialog_constructs_with_fake_provider(wx_app, monkeypatch):
         assert dialog.footprint_list is not None
         assert dialog.partlist_data_model is not None
         assert dialog.footprint_list.GetColumnCount() >= 12
+    finally:
+        dialog.Destroy()
+
+
+def test_main_dialog_materializes_local_settings_from_default(
+    wx_app, monkeypatch, tmp_path
+):
+    _ = pytest.importorskip("pcbnew")
+    mainwindow = _load_mainwindow_module()
+
+    settings_path = tmp_path / "settings.json"
+    default_path = tmp_path / "settings.default.json"
+    expected = {
+        "gerber": {"force_drc": True, "fill_zones": True},
+        "general": {"select_alike_auto": False},
+    }
+    default_path.write_text(json.dumps(expected), encoding="utf-8")
+
+    monkeypatch.setattr(mainwindow, "SETTINGS_PATH", str(settings_path))
+    monkeypatch.setattr(mainwindow, "SETTINGS_DEFAULT_PATH", str(default_path))
+    monkeypatch.setattr(mainwindow.JLCPCBTools, "init_data", lambda self: None)
+
+    dialog = mainwindow.JLCPCBTools(None, kicad_provider=_FakeProvider())
+    try:
+        assert dialog.settings == expected
+        assert settings_path.exists()
+        assert json.loads(settings_path.read_text(encoding="utf-8")) == expected
     finally:
         dialog.Destroy()

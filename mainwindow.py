@@ -63,6 +63,9 @@ from .store import Store
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
+SETTINGS_PATH = os.path.join(PLUGIN_PATH, "settings.json")
+SETTINGS_DEFAULT_PATH = os.path.join(PLUGIN_PATH, "settings.default.json")
+
 ID_GENERATE = 0
 ID_LAYERS = 1
 ID_CORRECTIONS = 2
@@ -988,7 +991,11 @@ class JLCPCBTools(wx.Dialog):
 
     def load_settings(self):
         """Load settings from settings.json."""
-        with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
+        settings_path = SETTINGS_PATH
+        if not os.path.exists(settings_path):
+            settings_path = SETTINGS_DEFAULT_PATH
+
+        with open(settings_path, encoding="utf-8") as j:
             self.settings = json.load(j)
 
         gerber_settings = self.settings.setdefault("gerber", {})
@@ -1012,7 +1019,10 @@ class JLCPCBTools(wx.Dialog):
             gerber_settings["fill_zones"] = True
             migrated = True
 
-        if migrated:
+        if settings_path != SETTINGS_PATH:
+            changed = True
+
+        if changed:
             self.save_settings()
 
     def decode_mainwindow_highlight_value(
@@ -1026,9 +1036,7 @@ class JLCPCBTools(wx.Dialog):
 
     def save_settings(self):
         """Save settings to settings.json."""
-        with open(
-            os.path.join(PLUGIN_PATH, "settings.json"), "w", encoding="utf-8"
-        ) as j:
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as j:
             json.dump(self.settings, j)
 
     def select_part(self, *_):
