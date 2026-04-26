@@ -16,16 +16,20 @@ jobs:
         include:
           - lane: kicad9
             experimental: false
+            drc_integration: "1"
             image: ghcr.io/inti-cmnb/kicad9_auto_full:dev_1.8.6-b15f04d_k9.0.7_d13.2_b4.2.4lts
             verify_label: "KiCad 9"
             k_expr: ""
           - lane: kicad10
             experimental: true
+            drc_integration: "0"
             image: ghcr.io/inti-cmnb/kicad_auto_full@sha256:a3a52fba4144e2ac72a893845409f316e9f64eb843d1cbbe91b8f51a8758865a
             verify_label: "KiCad 10"
             k_expr: "fixture_manifest_paths_exist or all_smoke_fixtures_load_and_enumerate"
     container:
       image: ${{ matrix.image }}
+    env:
+      KICAD_DRC_INTEGRATION: ${{ matrix.drc_integration }}
 
     steps:
       - name: Checkout code
