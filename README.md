@@ -321,6 +321,8 @@ The SWIG workflow now runs as a version matrix:
 - KiCad 9 lane: full `kicad_integration` suite
 - KiCad 10 lane (experimental): smoke-focused subset
 
+The KiCad 9 CI image is pinned to an explicit `kicad9_auto_full` tag (instead of `latest`) for more stable and reproducible runs.
+
 During rollout, experimental lanes remain non-blocking to allow fixture and compatibility expansion without gating all PRs.
 
 An additional non-blocking experimental KiCad 10 lane is included, currently sourced from:

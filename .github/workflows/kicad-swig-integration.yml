@@ -9,13 +9,14 @@ jobs:
   kicad-swig-tests-matrix:
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - lane: kicad9
             experimental: false
-            image: ghcr.io/inti-cmnb/kicad9_auto_full:latest
+            image: ghcr.io/inti-cmnb/kicad9_auto_full:dev_1.8.6-b15f04d_k9.0.7_d13.2_b4.2.4lts
             verify_label: "KiCad 9"
             k_expr: ""
           - lane: kicad10
@@ -41,19 +42,26 @@ jobs:
           python3 -m pip install pytest
           python3 -m pip install .
 
+      - name: Show runtime diagnostics
+        run: |
+          python3 -c "import sys; print('python:', sys.version)"
+          python3 -c "import pcbnew; print('pcbnew:', pcbnew.GetBuildVersion())"
+          python3 -m pip freeze | sort | sed -n '1,120p'
+
       - name: Run KiCad SWIG integration tests
         run: |
           if [ -n "${{ matrix.k_expr }}" ]; then
-            pytest -m kicad_integration tests/test_kicad_swig_integration.py -k "${{ matrix.k_expr }}"
+            pytest -ra -m kicad_integration tests/test_kicad_swig_integration.py -k "${{ matrix.k_expr }}"
           else
-            pytest -m kicad_integration tests/test_kicad_swig_integration.py
+            pytest -ra -m kicad_integration tests/test_kicad_swig_integration.py
           fi
 
   ui-smoke-tests:
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 20
     container:
-      image: ghcr.io/inti-cmnb/kicad9_auto_full:latest
+      image: ghcr.io/inti-cmnb/kicad9_auto_full:dev_1.8.6-b15f04d_k9.0.7_d13.2_b4.2.4lts
 
     steps:
       - name: Checkout code
