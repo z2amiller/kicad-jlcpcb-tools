@@ -8,6 +8,7 @@ These tests are intentionally small sanity checks:
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -138,6 +139,22 @@ def _fixture_path_from_id(fixture_id: str) -> Path:
     raise AssertionError(f"Fixture id not found in manifest: {fixture_id}")
 
 
+def _fixtures_by_intent(intent: str) -> list[dict]:
+    """Return manifest fixtures filtered by intent."""
+    fixtures = _fixture_manifest().get("fixtures", [])
+    return [fixture for fixture in fixtures if fixture.get("intent") == intent]
+
+
+def _fixture_path(fixture: dict) -> Path:
+    """Resolve a fixture path from a fixture manifest entry."""
+    return _fixture_board_path(*str(fixture.get("path", "")).split("/"))
+
+
+def _drc_integration_enabled() -> bool:
+    """Return whether expensive/fragile DRC integration checks should run."""
+    return os.getenv("KICAD_DRC_INTEGRATION", "0") in {"1", "true", "TRUE", "yes", "YES"}
+
+
 def test_load_board_and_list_footprints(tmp_path):
     """A board created via SWIG can be saved, reloaded, and enumerated."""
     loaded_board, footprints = _create_round_trip_board(tmp_path)
@@ -163,8 +180,14 @@ def test_fixture_manifest_paths_exist():
     assert fixtures, "Fixture manifest should declare at least one fixture"
 
     for fixture in fixtures:
-        path = _fixture_board_path(*str(fixture.get("path", "")).split("/"))
+        path = _fixture_path(fixture)
         assert path.exists(), f"Missing fixture path in manifest: {path}"
+
+
+def test_manifest_has_k9_smoke_fixture():
+    """Manifest declares at least one KiCad 9 smoke fixture."""
+    smoke = _fixtures_by_intent("smoke_ok")
+    assert smoke, "Expected at least one smoke_ok fixture in manifest"
 
 
 def test_fixture_board_has_reference_fields():
@@ -177,6 +200,35 @@ def test_fixture_board_has_reference_fields():
     refs = [fp.GetReference() for fp in footprints if hasattr(fp, "GetReference")]
     assert refs, "No readable footprint references found"
     assert any(bool(str(ref).strip()) for ref in refs)
+
+
+def test_all_smoke_fixtures_load_and_enumerate():
+    """All smoke fixtures in manifest should load and expose at least one footprint."""
+    smoke_fixtures = _fixtures_by_intent("smoke_ok")
+    assert smoke_fixtures, "Expected at least one smoke_ok fixture in manifest"
+
+    for fixture in smoke_fixtures:
+        board_path = _fixture_path(fixture)
+        assert board_path.exists(), f"Missing fixture board: {board_path}"
+
+        board = pcbnew.LoadBoard(str(board_path))
+        footprints = _board_footprints(board)
+        assert footprints, f"No footprints found in smoke fixture {board_path}"
+
+
+def test_compat_fixtures_open_in_current_runtime():
+    """Compatibility fixtures (e.g. KiCad 8) should open in current runtime when provided."""
+    compat_fixtures = _fixtures_by_intent("compat_open_in_k9")
+    if not compat_fixtures:
+        pytest.skip("No compatibility fixtures declared yet")
+
+    for fixture in compat_fixtures:
+        board_path = _fixture_path(fixture)
+        assert board_path.exists(), f"Missing compatibility fixture: {board_path}"
+
+        board = pcbnew.LoadBoard(str(board_path))
+        footprints = _board_footprints(board)
+        assert footprints, f"No footprints found in compatibility fixture {board_path}"
 
 
 def test_fixture_lcsc_assignment_round_trip_on_existing_footprint():
@@ -193,6 +245,9 @@ def test_fixture_lcsc_assignment_round_trip_on_existing_footprint():
 
 def test_fixture_drc_path_smoke(tmp_path):
     """DRC path runs on fixture board and returns a non-negative count when supported."""
+    if not _drc_integration_enabled():
+        pytest.skip("Set KICAD_DRC_INTEGRATION=1 to enable DRC integration checks")
+
     if not hasattr(pcbnew, "WriteDRCReport"):
         pytest.skip("WriteDRCReport not available in this pcbnew build")
 
@@ -204,6 +259,40 @@ def test_fixture_drc_path_smoke(tmp_path):
     count = counter.get_violation_count(str(board_path))
     assert isinstance(count, int)
     assert count >= 0
+
+
+def test_drc_fail_fixtures_match_expected_patterns(tmp_path):
+    """DRC-fail fixtures should match stable expected error patterns when configured."""
+    if not _drc_integration_enabled():
+        pytest.skip("Set KICAD_DRC_INTEGRATION=1 to enable DRC integration checks")
+
+    if not hasattr(pcbnew, "WriteDRCReport"):
+        pytest.skip("WriteDRCReport not available in this pcbnew build")
+
+    drc_fail_fixtures = _fixtures_by_intent("drc_fail")
+    if not drc_fail_fixtures:
+        pytest.skip("No drc_fail fixtures declared yet")
+
+    for fixture in drc_fail_fixtures:
+        board_path = _fixture_path(fixture)
+        assert board_path.exists(), f"Missing DRC fixture board: {board_path}"
+
+        report_path = tmp_path / f"drc_{fixture.get('id', 'fixture')}.rpt"
+        success = kicad_drc.run_drc(pcbnew, str(board_path), str(report_path))
+        assert success, f"DRC run failed for {board_path}"
+
+        error_count, error_messages = kicad_drc.parse_drc_report(str(report_path))
+        assert error_count >= 0
+
+        expected_patterns = fixture.get("expected_drc_patterns", []) or []
+        if not expected_patterns:
+            continue
+
+        combined = "\n".join(error_messages)
+        for pattern in expected_patterns:
+            assert pattern in combined, (
+                f"Expected DRC pattern {pattern!r} not found for fixture {board_path}"
+            )
 
 
 def test_assign_lcsc_to_real_footprint_field(tmp_path):

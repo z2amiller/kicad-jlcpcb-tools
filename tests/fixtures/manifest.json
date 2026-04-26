@@ -5,7 +5,20 @@
       "path": "k9_smoke_ok/fx-Full125B.kicad_pcb",
       "format": "kicad9",
       "intent": "smoke_ok",
-      "description": "Real-world KiCad 9 board used for headless SWIG smoke tests"
+      "description": "Real-world KiCad 9 board used for headless SWIG smoke tests",
+      "compatibility_target": "native_k9",
+      "expected_drc_patterns": []
+    },
+    {
+      "id": "k9_drcfail_normal125",
+      "path": "k9_drc_fail/Normal125B-DRCFail.kicad_pcb",
+      "format": "kicad9",
+      "intent": "drc_fail",
+      "description": "Real-world KiCad 9 board expected to fail DRC checks",
+      "compatibility_target": "native_k9",
+      "expected_drc_patterns": [
+        "[clearance]:"
+      ]
     }
   ]
 }

@@ -22,8 +22,24 @@ This folder holds small board fixtures used by `pytest -m kicad_integration`.
 ## Current checked-in fixtures
 
 - `k9_smoke_ok/fx-Full125B.kicad_pcb` – initial real-world KiCad 9 smoke fixture.
+- `k9_drc_fail/Normal125B-DRCFail.kicad_pcb` – real-world KiCad 9 fixture intended to fail DRC.
 
 Fixture metadata is tracked in `tests/fixtures/manifest.json` and consumed by integration tests.
+
+### Manifest conventions
+
+- `intent: "smoke_ok"` for basic load/enumeration fixtures.
+- `intent: "compat_open_in_k9"` for cross-version open tests (e.g. KiCad 8 -> KiCad 9).
+- `intent: "drc_fail"` for intentional DRC-failing fixtures.
+- `expected_drc_patterns` can optionally list stable substrings that should appear in parsed DRC error messages.
+
+### DRC integration execution
+
+DRC integration checks are opt-in by default. Enable them with:
+
+```sh
+KICAD_DRC_INTEGRATION=1 pytest -m kicad_integration tests/test_kicad_swig_integration.py
+```
 
 ## Notes
 

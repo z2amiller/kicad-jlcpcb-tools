@@ -282,6 +282,12 @@ You can iterate locally before checking in fixture boards:
 
 3. Keep assertions stable across KiCad versions by checking categories/paths, not exact DRC counts.
 
+If you want to include DRC integration checks locally, enable:
+
+```sh
+KICAD_DRC_INTEGRATION=1 pytest -m kicad_integration tests/test_kicad_swig_integration.py
+```
+
 ### CI workflow
 
 The SWIG lane is implemented in [.github/workflows/kicad-swig-integration.yml](.github/workflows/kicad-swig-integration.yml).
