@@ -31,6 +31,34 @@ class _FakeProvider:
         return _FakePcbnew()
 
 
+class _FakeToolbarButton:
+    def __init__(self):
+        self.labels = []
+        self.bitmaps = []
+
+    def SetNormalBitmap(self, bitmap):
+        self.bitmaps.append(bitmap)
+
+    def SetLabel(self, label):
+        self.labels.append(label)
+
+
+class _FakeToggleEvent:
+    def __init__(self, checked):
+        self.checked = checked
+
+    def IsChecked(self):
+        return self.checked
+
+
+class _FakeFootprintList:
+    def __init__(self, selected_count):
+        self.selected_count = selected_count
+
+    def GetSelectedItemsCount(self):
+        return self.selected_count
+
+
 def _load_mainwindow_module():
     """Import mainwindow.py under a synthetic package for relative imports."""
     pkg = types.ModuleType("kicadplugin")
@@ -85,3 +113,48 @@ def test_main_dialog_materializes_local_settings_from_default(
         assert json.loads(settings_path.read_text(encoding="utf-8")) == expected
     finally:
         dialog.Destroy()
+
+
+def test_hide_bom_toggle_updates_label_and_refreshes(wx_app, monkeypatch):
+    _ = pytest.importorskip("pcbnew")
+    mainwindow = _load_mainwindow_module()
+
+    dialog = mainwindow.JLCPCBTools.__new__(mainwindow.JLCPCBTools)
+    dialog.hide_bom_parts = False
+    dialog.scale_factor = 1.0
+    dialog.hide_bom_button = _FakeToolbarButton()
+
+    refresh_calls = []
+    dialog.populate_footprint_list = lambda: refresh_calls.append("refresh")
+    monkeypatch.setattr(mainwindow, "loadBitmapScaled", lambda name, scale: (name, scale))
+
+    dialog.OnBomHide()
+    assert dialog.hide_bom_parts is True
+    assert dialog.hide_bom_button.labels[-1] == "Show excluded BOM"
+
+    dialog.OnBomHide()
+    assert dialog.hide_bom_parts is False
+    assert dialog.hide_bom_button.labels[-1] == "Hide excluded BOM"
+    assert refresh_calls == ["refresh", "refresh"]
+
+
+def test_toggle_select_alike_persists_setting_and_triggers_selection(wx_app):
+    _ = pytest.importorskip("pcbnew")
+    mainwindow = _load_mainwindow_module()
+
+    dialog = mainwindow.JLCPCBTools.__new__(mainwindow.JLCPCBTools)
+    dialog.auto_select_alike = False
+    dialog.settings = {"general": {}}
+    dialog.footprint_list = _FakeFootprintList(selected_count=1)
+
+    saved = []
+    selected = []
+    dialog.save_settings = lambda: saved.append(True)
+    dialog.select_alike_parts = lambda: selected.append(True)
+
+    dialog.toggle_select_alike(_FakeToggleEvent(True))
+
+    assert dialog.auto_select_alike is True
+    assert dialog.settings["general"]["select_alike_auto"] is True
+    assert saved == [True]
+    assert selected == [True]
