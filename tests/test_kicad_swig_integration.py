@@ -10,6 +10,7 @@ These tests are intentionally small sanity checks:
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -147,6 +148,27 @@ def _fixtures_by_intent(intent: str) -> list[dict]:
     return [fixture for fixture in fixtures if fixture.get("intent") == intent]
 
 
+def _runtime_major() -> int:
+    """Best-effort extraction of current KiCad runtime major version."""
+    version_text = ""
+    if hasattr(pcbnew, "GetBuildVersion"):
+        version_text = str(pcbnew.GetBuildVersion())
+    match = re.search(r"(\d+)", version_text)
+    return int(match.group(1)) if match else 0
+
+
+def _fixture_matches_runtime(fixture: dict) -> bool:
+    """Return whether a fixture is declared compatible with current runtime major."""
+    major = _runtime_major()
+    min_major = fixture.get("min_runtime_major")
+    max_major = fixture.get("max_runtime_major")
+    if min_major is not None and major < int(min_major):
+        return False
+    if max_major is not None and major > int(max_major):
+        return False
+    return True
+
+
 def _fixture_path(fixture: dict) -> Path:
     """Resolve a fixture path from a fixture manifest entry."""
     return _fixture_board_path(*str(fixture.get("path", "")).split("/"))
@@ -250,7 +272,7 @@ def test_fixture_board_has_reference_fields():
 
 def test_all_smoke_fixtures_load_and_enumerate():
     """All smoke fixtures in manifest should load and expose at least one footprint."""
-    smoke_fixtures = _fixtures_by_intent("smoke_ok")
+    smoke_fixtures = [f for f in _fixtures_by_intent("smoke_ok") if _fixture_matches_runtime(f)]
     assert smoke_fixtures, "Expected at least one smoke_ok fixture in manifest"
 
     for fixture in smoke_fixtures:
@@ -264,7 +286,9 @@ def test_all_smoke_fixtures_load_and_enumerate():
 
 def test_compat_fixtures_open_in_current_runtime():
     """Compatibility fixtures (e.g. KiCad 8) should open in current runtime when provided."""
-    compat_fixtures = _fixtures_by_intent("compat_open_in_k9")
+    compat_fixtures = [
+        fixture for fixture in _fixtures_by_intent("compat_open_in_k9") if _fixture_matches_runtime(fixture)
+    ]
     if not compat_fixtures:
         pytest.skip("No compatibility fixtures declared yet")
 
@@ -311,7 +335,7 @@ def test_drc_fail_fixtures_match_expected_patterns(tmp_path):
     if not hasattr(pcbnew, "WriteDRCReport"):
         pytest.skip("WriteDRCReport not available in this pcbnew build")
 
-    drc_fail_fixtures = _fixtures_by_intent("drc_fail")
+    drc_fail_fixtures = [f for f in _fixtures_by_intent("drc_fail") if _fixture_matches_runtime(f)]
     if not drc_fail_fixtures:
         pytest.skip("No drc_fail fixtures declared yet")
 

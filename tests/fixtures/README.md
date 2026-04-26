@@ -25,6 +25,8 @@ This folder holds small board fixtures used by `pytest -m kicad_integration`.
 - `k9_drc_fail/Normal125B-DRCFail.kicad_pcb` – real-world KiCad 9 fixture intended to fail DRC.
 - `k8_compat_ok/KiCad8-project.kicad_pcb` – KiCad 8 board for open-in-KiCad-9 compatibility checks.
 - `k8_drc_fail/KiCad8-project-fail-DRC.kicad_pcb` – KiCad 8 board intended to fail DRC checks.
+- `k10_smoke_ok/util-curvetracer.kicad_pcb` – KiCad 10 smoke fixture (native KiCad 10 runtime).
+- `k10_drc_fail/util-curvetracer-fail-drc.kicad_pcb` – KiCad 10 DRC-fail fixture.
 
 Fixture metadata is tracked in `tests/fixtures/manifest.json` and consumed by integration tests.
 
@@ -34,6 +36,7 @@ Fixture metadata is tracked in `tests/fixtures/manifest.json` and consumed by in
 - `intent: "compat_open_in_k9"` for cross-version open tests (e.g. KiCad 8 -> KiCad 9).
 - `intent: "drc_fail"` for intentional DRC-failing fixtures.
 - `expected_drc_patterns` can optionally list stable substrings that should appear in parsed DRC error messages.
+- `min_runtime_major` / `max_runtime_major` can constrain fixtures to matching KiCad runtimes.
 
 ### DRC integration execution
 

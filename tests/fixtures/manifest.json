@@ -37,6 +37,26 @@
       "description": "KiCad 8 board expected to fail DRC when opened in newer runtime",
       "compatibility_target": "open_in_k9",
       "expected_drc_patterns": []
+    },
+    {
+      "id": "k10_smoke_util_curvetracer",
+      "path": "k10_smoke_ok/util-curvetracer.kicad_pcb",
+      "format": "kicad10",
+      "intent": "smoke_ok",
+      "description": "KiCad 10 board used for native KiCad 10 smoke checks",
+      "compatibility_target": "native_k10",
+      "min_runtime_major": 10,
+      "expected_drc_patterns": []
+    },
+    {
+      "id": "k10_drcfail_util_curvetracer",
+      "path": "k10_drc_fail/util-curvetracer-fail-drc.kicad_pcb",
+      "format": "kicad10",
+      "intent": "drc_fail",
+      "description": "KiCad 10 board expected to fail DRC in native KiCad 10 runtime",
+      "compatibility_target": "native_k10",
+      "min_runtime_major": 10,
+      "expected_drc_patterns": []
     }
   ]
 }

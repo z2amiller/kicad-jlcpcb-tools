@@ -288,7 +288,13 @@ You can iterate locally before checking in fixture boards:
    ./scripts/run_kicad8_swig_tests.sh
    ```
 
-4. Keep assertions stable across KiCad versions by checking categories/paths, not exact DRC counts.
+4. If validating KiCad 10-native fixtures/runtime, use:
+
+   ```sh
+   ./scripts/run_kicad10_swig_tests.sh
+   ```
+
+5. Keep assertions stable across KiCad versions by checking categories/paths, not exact DRC counts.
 
 By default this helper runs with KiCad 9 Python and enables DRC integration checks.
 
