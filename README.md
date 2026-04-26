@@ -318,6 +318,22 @@ The SWIG lane is implemented in [.github/workflows/kicad-swig-integration.yml](.
 
 During rollout this lane is non-blocking (`continue-on-error: true`) to allow fixture and compatibility expansion without gating all PRs.
 
+### UI smoke tests (non-pixel)
+
+This repository also includes a lightweight UI marker for basic wx dialog wiring checks:
+
+```sh
+pytest -m ui_smoke
+```
+
+For local macOS runs, prefer KiCad's embedded Python:
+
+```sh
+/Applications/KiCad9/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m pytest -m ui_smoke tests/test_ui_smoke_harness.py
+```
+
+The CI job for this lane is currently non-blocking and runs in the KiCad container image, so it can validate wx + `pcbnew` availability without gating all PRs while coverage is still expanding.
+
 For example on Windows:
 
 ```cmd

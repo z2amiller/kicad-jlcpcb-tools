@@ -30,3 +30,29 @@ jobs:
       - name: Run KiCad SWIG integration tests
         run: |
           pytest -m kicad_integration tests/test_kicad_swig_integration.py
+
+  ui-smoke-tests:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: ghcr.io/inti-cmnb/kicad9_auto_full:latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Verify wx + KiCad runtime
+        run: |
+          python3 -V
+          python3 -c "import wx; print('wx import ok')"
+          python3 -c "import pcbnew; print('pcbnew import ok')"
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest
+          python3 -m pip install .
+
+      - name: Run UI smoke tests
+        run: |
+          pytest -m ui_smoke tests/test_ui_smoke_harness.py
