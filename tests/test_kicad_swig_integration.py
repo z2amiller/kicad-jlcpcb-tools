@@ -116,9 +116,25 @@ def _create_round_trip_board(tmp_path: Path):
     return loaded, _board_footprints(loaded)
 
 
+def _fixture_board_path(*parts: str) -> Path:
+    """Build an absolute path to a checked-in board fixture."""
+    return Path(__file__).parent / "fixtures" / Path(*parts)
+
+
 def test_load_board_and_list_footprints(tmp_path):
     """A board created via SWIG can be saved, reloaded, and enumerated."""
     loaded_board, footprints = _create_round_trip_board(tmp_path)
+    assert loaded_board is not None
+    assert len(footprints) >= 1
+
+
+def test_load_checked_in_k9_fixture_board():
+    """A real KiCad 9 fixture board can be loaded and enumerated headlessly."""
+    board_path = _fixture_board_path("k9_smoke_ok", "fx-Full125B.kicad_pcb")
+    assert board_path.exists(), f"Missing fixture board: {board_path}"
+
+    loaded_board = pcbnew.LoadBoard(str(board_path))
+    footprints = _board_footprints(loaded_board)
     assert loaded_board is not None
     assert len(footprints) >= 1
 

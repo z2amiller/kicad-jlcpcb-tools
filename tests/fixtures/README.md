@@ -19,6 +19,10 @@ This folder holds small board fixtures used by `pytest -m kicad_integration`.
 - `k9_drc_fail/` – small KiCad 9 board with intentional DRC issues.
 - `k8_compat_ok/` – KiCad 8 board expected to open in KiCad 9 runtime.
 
+## Current checked-in fixtures
+
+- `k9_smoke_ok/fx-Full125B.kicad_pcb` – initial real-world KiCad 9 smoke fixture.
+
 ## Notes
 
 - Store only non-sensitive board data.
