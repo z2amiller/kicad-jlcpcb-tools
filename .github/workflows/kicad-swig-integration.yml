@@ -6,11 +6,25 @@ on: # yamllint disable-line rule:truthy
   workflow_dispatch:
 
 jobs:
-  kicad-swig-tests:
+  kicad-swig-tests-matrix:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: kicad9
+            experimental: false
+            image: ghcr.io/inti-cmnb/kicad9_auto_full:latest
+            verify_label: "KiCad 9"
+            k_expr: ""
+          - lane: kicad10
+            experimental: true
+            image: ghcr.io/inti-cmnb/kicad_auto_full@sha256:a3a52fba4144e2ac72a893845409f316e9f64eb843d1cbbe91b8f51a8758865a
+            verify_label: "KiCad 10"
+            k_expr: "fixture_manifest_paths_exist or all_smoke_fixtures_load_and_enumerate"
     container:
-      image: ghcr.io/inti-cmnb/kicad9_auto_full:latest
+      image: ${{ matrix.image }}
 
     steps:
       - name: Checkout code
@@ -19,7 +33,7 @@ jobs:
       - name: Verify KiCad pcbnew bindings
         run: |
           python3 -V
-          python3 -c "import pcbnew; print('pcbnew import ok')"
+          python3 -c "import pcbnew; print('${{ matrix.verify_label }} pcbnew import ok:', pcbnew.GetBuildVersion())"
 
       - name: Install test dependencies
         run: |
@@ -29,7 +43,11 @@ jobs:
 
       - name: Run KiCad SWIG integration tests
         run: |
-          pytest -m kicad_integration tests/test_kicad_swig_integration.py
+          if [ -n "${{ matrix.k_expr }}" ]; then
+            pytest -m kicad_integration tests/test_kicad_swig_integration.py -k "${{ matrix.k_expr }}"
+          else
+            pytest -m kicad_integration tests/test_kicad_swig_integration.py
+          fi
 
   ui-smoke-tests:
     runs-on: ubuntu-latest
@@ -57,29 +75,3 @@ jobs:
         run: |
           pytest -m ui_smoke tests/test_ui_smoke_harness.py
 
-  kicad10-swig-tests-experimental:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    container:
-      # Source: ghcr.io/inti-cmnb/kicad_auto_full:dev_k10
-      # Pinned digest from package manifest for reproducibility.
-      image: ghcr.io/inti-cmnb/kicad_auto_full@sha256:a3a52fba4144e2ac72a893845409f316e9f64eb843d1cbbe91b8f51a8758865a
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Verify KiCad 10 pcbnew bindings
-        run: |
-          python3 -V
-          python3 -c "import pcbnew; print('pcbnew import ok:', pcbnew.GetBuildVersion())"
-
-      - name: Install test dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install pytest
-          python3 -m pip install .
-
-      - name: Run KiCad 10 smoke-focused SWIG tests
-        run: |
-          pytest -m kicad_integration tests/test_kicad_swig_integration.py -k "fixture_manifest_paths_exist or all_smoke_fixtures_load_and_enumerate"

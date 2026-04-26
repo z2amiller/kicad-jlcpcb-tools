@@ -316,7 +316,12 @@ Note: KiCad 10's embedded Python may behave differently for SWIG DRC calls; use 
 
 The SWIG lane is implemented in [.github/workflows/kicad-swig-integration.yml](.github/workflows/kicad-swig-integration.yml).
 
-During rollout this lane is non-blocking (`continue-on-error: true`) to allow fixture and compatibility expansion without gating all PRs.
+The SWIG workflow now runs as a version matrix:
+
+- KiCad 9 lane: full `kicad_integration` suite
+- KiCad 10 lane (experimental): smoke-focused subset
+
+During rollout, experimental lanes remain non-blocking to allow fixture and compatibility expansion without gating all PRs.
 
 An additional non-blocking experimental KiCad 10 lane is included, currently sourced from:
 
