@@ -19,6 +19,24 @@
       "expected_drc_patterns": [
         "[clearance]:"
       ]
+    },
+    {
+      "id": "k8_compat_project",
+      "path": "k8_compat_ok/KiCad8-project.kicad_pcb",
+      "format": "kicad8",
+      "intent": "compat_open_in_k9",
+      "description": "KiCad 8 board expected to open in KiCad 9 runtime",
+      "compatibility_target": "open_in_k9",
+      "expected_drc_patterns": []
+    },
+    {
+      "id": "k8_drcfail_project",
+      "path": "k8_drc_fail/KiCad8-project-fail-DRC.kicad_pcb",
+      "format": "kicad8",
+      "intent": "drc_fail",
+      "description": "KiCad 8 board expected to fail DRC when opened in newer runtime",
+      "compatibility_target": "open_in_k9",
+      "expected_drc_patterns": []
     }
   ]
 }

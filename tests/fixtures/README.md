@@ -23,6 +23,8 @@ This folder holds small board fixtures used by `pytest -m kicad_integration`.
 
 - `k9_smoke_ok/fx-Full125B.kicad_pcb` – initial real-world KiCad 9 smoke fixture.
 - `k9_drc_fail/Normal125B-DRCFail.kicad_pcb` – real-world KiCad 9 fixture intended to fail DRC.
+- `k8_compat_ok/KiCad8-project.kicad_pcb` – KiCad 8 board for open-in-KiCad-9 compatibility checks.
+- `k8_drc_fail/KiCad8-project-fail-DRC.kicad_pcb` – KiCad 8 board intended to fail DRC checks.
 
 Fixture metadata is tracked in `tests/fixtures/manifest.json` and consumed by integration tests.
 
