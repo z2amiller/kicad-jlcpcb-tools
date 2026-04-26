@@ -56,3 +56,30 @@ jobs:
       - name: Run UI smoke tests
         run: |
           pytest -m ui_smoke tests/test_ui_smoke_harness.py
+
+  kicad10-swig-tests-experimental:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      # Source: ghcr.io/inti-cmnb/kicad_auto_full:dev_k10
+      # Pinned digest from package manifest for reproducibility.
+      image: ghcr.io/inti-cmnb/kicad_auto_full@sha256:a3a52fba4144e2ac72a893845409f316e9f64eb843d1cbbe91b8f51a8758865a
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Verify KiCad 10 pcbnew bindings
+        run: |
+          python3 -V
+          python3 -c "import pcbnew; print('pcbnew import ok:', pcbnew.GetBuildVersion())"
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest
+          python3 -m pip install .
+
+      - name: Run KiCad 10 smoke-focused SWIG tests
+        run: |
+          pytest -m kicad_integration tests/test_kicad_swig_integration.py -k "fixture_manifest_paths_exist or all_smoke_fixtures_load_and_enumerate"

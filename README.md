@@ -318,6 +318,12 @@ The SWIG lane is implemented in [.github/workflows/kicad-swig-integration.yml](.
 
 During rollout this lane is non-blocking (`continue-on-error: true`) to allow fixture and compatibility expansion without gating all PRs.
 
+An additional non-blocking experimental KiCad 10 lane is included, currently sourced from:
+
+`ghcr.io/inti-cmnb/kicad_auto_full:dev_k10`
+
+The workflow pins this image by digest for reproducibility.
+
 ### UI smoke tests (non-pixel)
 
 This repository also includes a lightweight UI marker for basic wx dialog wiring checks:
