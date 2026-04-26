@@ -1,0 +1,11 @@
+{
+  "fixtures": [
+    {
+      "id": "k9_smoke_full125",
+      "path": "k9_smoke_ok/fx-Full125B.kicad_pcb",
+      "format": "kicad9",
+      "intent": "smoke_ok",
+      "description": "Real-world KiCad 9 board used for headless SWIG smoke tests"
+    }
+  ]
+}

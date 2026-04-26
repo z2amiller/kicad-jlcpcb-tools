@@ -7,6 +7,7 @@ These tests are intentionally small sanity checks:
 - persist a fake enrichment field for later plugin-side use
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ pytestmark = pytest.mark.kicad_integration
 
 pcbnew = pytest.importorskip("pcbnew")
 helpers = pytest.importorskip("helpers")
+kicad_drc = pytest.importorskip("kicad_drc")
 
 get_lcsc_value = helpers.get_lcsc_value
 set_lcsc_value = helpers.set_lcsc_value
@@ -121,6 +123,21 @@ def _fixture_board_path(*parts: str) -> Path:
     return Path(__file__).parent / "fixtures" / Path(*parts)
 
 
+def _fixture_manifest() -> dict:
+    """Load fixture manifest from tests/fixtures."""
+    manifest_path = _fixture_board_path("manifest.json")
+    with open(manifest_path, encoding="utf-8") as manifest_file:
+        return json.load(manifest_file)
+
+
+def _fixture_path_from_id(fixture_id: str) -> Path:
+    """Resolve a fixture board path by manifest fixture id."""
+    for fixture in _fixture_manifest().get("fixtures", []):
+        if fixture.get("id") == fixture_id:
+            return _fixture_board_path(*str(fixture.get("path", "")).split("/"))
+    raise AssertionError(f"Fixture id not found in manifest: {fixture_id}")
+
+
 def test_load_board_and_list_footprints(tmp_path):
     """A board created via SWIG can be saved, reloaded, and enumerated."""
     loaded_board, footprints = _create_round_trip_board(tmp_path)
@@ -130,13 +147,63 @@ def test_load_board_and_list_footprints(tmp_path):
 
 def test_load_checked_in_k9_fixture_board():
     """A real KiCad 9 fixture board can be loaded and enumerated headlessly."""
-    board_path = _fixture_board_path("k9_smoke_ok", "fx-Full125B.kicad_pcb")
+    board_path = _fixture_path_from_id("k9_smoke_full125")
     assert board_path.exists(), f"Missing fixture board: {board_path}"
 
     loaded_board = pcbnew.LoadBoard(str(board_path))
     footprints = _board_footprints(loaded_board)
     assert loaded_board is not None
     assert len(footprints) >= 1
+
+
+def test_fixture_manifest_paths_exist():
+    """All fixture files declared in manifest exist in the repository."""
+    manifest = _fixture_manifest()
+    fixtures = manifest.get("fixtures", [])
+    assert fixtures, "Fixture manifest should declare at least one fixture"
+
+    for fixture in fixtures:
+        path = _fixture_board_path(*str(fixture.get("path", "")).split("/"))
+        assert path.exists(), f"Missing fixture path in manifest: {path}"
+
+
+def test_fixture_board_has_reference_fields():
+    """Loaded fixture exposes non-empty footprint reference strings."""
+    board_path = _fixture_path_from_id("k9_smoke_full125")
+    loaded_board = pcbnew.LoadBoard(str(board_path))
+    footprints = _board_footprints(loaded_board)
+    assert footprints, "Fixture board should contain at least one footprint"
+
+    refs = [fp.GetReference() for fp in footprints if hasattr(fp, "GetReference")]
+    assert refs, "No readable footprint references found"
+    assert any(bool(str(ref).strip()) for ref in refs)
+
+
+def test_fixture_lcsc_assignment_round_trip_on_existing_footprint():
+    """LCSC helper functions work on a real footprint from checked-in fixture."""
+    board_path = _fixture_path_from_id("k9_smoke_full125")
+    loaded_board = pcbnew.LoadBoard(str(board_path))
+    footprints = _board_footprints(loaded_board)
+    assert footprints, "Fixture board should contain at least one footprint"
+
+    footprint = footprints[0]
+    set_lcsc_value(footprint, "C999999")
+    assert get_lcsc_value(footprint) == "C999999"
+
+
+def test_fixture_drc_path_smoke(tmp_path):
+    """DRC path runs on fixture board and returns a non-negative count when supported."""
+    if not hasattr(pcbnew, "WriteDRCReport"):
+        pytest.skip("WriteDRCReport not available in this pcbnew build")
+
+    board_path = _fixture_path_from_id("k9_smoke_full125")
+    counter = kicad_drc.DRCViolationCounter(
+        pcbnew_module=pcbnew,
+        working_dir=str(tmp_path),
+    )
+    count = counter.get_violation_count(str(board_path))
+    assert isinstance(count, int)
+    assert count >= 0
 
 
 def test_assign_lcsc_to_real_footprint_field(tmp_path):

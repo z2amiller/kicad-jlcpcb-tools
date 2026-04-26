@@ -23,6 +23,8 @@ This folder holds small board fixtures used by `pytest -m kicad_integration`.
 
 - `k9_smoke_ok/fx-Full125B.kicad_pcb` – initial real-world KiCad 9 smoke fixture.
 
+Fixture metadata is tracked in `tests/fixtures/manifest.json` and consumed by integration tests.
+
 ## Notes
 
 - Store only non-sensitive board data.
