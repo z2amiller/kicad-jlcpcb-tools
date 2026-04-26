@@ -320,7 +320,7 @@ def test_drc_fail_fixtures_match_expected_patterns(tmp_path):
         assert board_path.exists(), f"Missing DRC fixture board: {board_path}"
 
         error_count, error_messages = _run_drc_in_subprocess(board_path, tmp_path)
-        assert error_count >= 0
+        assert error_count > 0, f"Expected DRC errors for fixture {board_path}"
 
         expected_patterns = fixture.get("expected_drc_patterns", []) or []
         if not expected_patterns:
