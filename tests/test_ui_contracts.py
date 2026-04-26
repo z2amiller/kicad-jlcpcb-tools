@@ -56,6 +56,31 @@ def _extract_partlist_columns_dict() -> dict[str, int]:
     raise AssertionError("Unable to locate PartListDataModel.columns in datamodel.py")
 
 
+def _extract_partlist_column_types() -> tuple[str, ...]:
+    """Parse ``PartListDataModel.GetColumnType`` and return ``columntypes`` tuple."""
+    source = DATAMODEL_PATH.read_text(encoding="utf-8")
+    module = ast.parse(source)
+
+    for node in module.body:
+        if not isinstance(node, ast.ClassDef) or node.name != "PartListDataModel":
+            continue
+        for item in node.body:
+            if not isinstance(item, ast.FunctionDef) or item.name != "GetColumnType":
+                continue
+            for stmt in item.body:
+                if not isinstance(stmt, ast.Assign):
+                    continue
+                if len(stmt.targets) != 1:
+                    continue
+                target = stmt.targets[0]
+                if not isinstance(target, ast.Name) or target.id != "columntypes":
+                    continue
+                value = ast.literal_eval(stmt.value)
+                return tuple(value)
+
+    raise AssertionError("Unable to locate PartListDataModel columntypes in datamodel.py")
+
+
 def test_mainwindow_dataview_column_indices_are_stable():
     """Main table column labels should map to the expected model indices."""
     actual = dict(_extract_mainwindow_columns())
@@ -92,3 +117,23 @@ def test_mainwindow_columns_and_model_indices_stay_in_sync():
     model_indices = set(_extract_partlist_columns_dict().values())
 
     assert mainwindow_indices == model_indices
+
+
+def test_partlist_model_column_types_match_ui_schema():
+    """Part list model column types should remain aligned with UI expectations."""
+    expected = (
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "string",
+        "wxDataViewIconText",
+        "wxDataViewIconText",
+        "wxDataViewIconText",
+        "string",
+        "wxDataViewIconText",
+        "string",
+    )
+
+    assert _extract_partlist_column_types() == expected
