@@ -259,6 +259,35 @@ For example on Linux:
 cd ~/.local/share/kicad/8.0/scripting/plugins/ && python -m kicad-jlcpcb-tools
 ```
 
+## KiCad SWIG integration tests (headless)
+
+This repository includes a dedicated pytest marker for SWIG-backed integration tests:
+
+```sh
+pytest -m kicad_integration
+```
+
+These tests are intended to run in a KiCad-capable environment (typically a container image with `pcbnew` bindings available).
+
+### Local-first workflow
+
+You can iterate locally before checking in fixture boards:
+
+1. Add or update fixture boards under [tests/fixtures](tests/fixtures).
+2. Run only the SWIG lane locally:
+
+   ```sh
+   pytest -m kicad_integration tests/test_kicad_swig_integration.py
+   ```
+
+3. Keep assertions stable across KiCad versions by checking categories/paths, not exact DRC counts.
+
+### CI workflow
+
+The SWIG lane is implemented in [.github/workflows/kicad-swig-integration.yml](.github/workflows/kicad-swig-integration.yml).
+
+During rollout this lane is non-blocking (`continue-on-error: true`) to allow fixture and compatibility expansion without gating all PRs.
+
 For example on Windows:
 
 ```cmd

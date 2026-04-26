@@ -8,6 +8,7 @@ on: # yamllint disable-line rule:truthy
 jobs:
   kicad-swig-tests:
     runs-on: ubuntu-latest
+    continue-on-error: true
     container:
       image: ghcr.io/inti-cmnb/kicad9_auto_full:latest
 
