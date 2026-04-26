@@ -1,0 +1,31 @@
+---
+name: KiCad SWIG Integration
+
+on: # yamllint disable-line rule:truthy
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  kicad-swig-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/inti-cmnb/kicad9_auto_full:latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Verify KiCad pcbnew bindings
+        run: |
+          python3 -V
+          python3 -c "import pcbnew; print('pcbnew import ok')"
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest
+          python3 -m pip install .
+
+      - name: Run KiCad SWIG integration tests
+        run: |
+          pytest -m kicad_integration tests/test_kicad_swig_integration.py
