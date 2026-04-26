@@ -277,16 +277,26 @@ You can iterate locally before checking in fixture boards:
 2. Run only the SWIG lane locally:
 
    ```sh
-   pytest -m kicad_integration tests/test_kicad_swig_integration.py
+   ./scripts/run_kicad9_swig_tests.sh
    ```
 
 3. Keep assertions stable across KiCad versions by checking categories/paths, not exact DRC counts.
 
-If you want to include DRC integration checks locally, enable:
+By default this helper runs with KiCad 9 Python and enables DRC integration checks.
+
+If you want to run manually, prefer KiCad 9's interpreter path on macOS:
 
 ```sh
-KICAD_DRC_INTEGRATION=1 pytest -m kicad_integration tests/test_kicad_swig_integration.py
+/Applications/KiCad9/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m pytest -m kicad_integration tests/test_kicad_swig_integration.py
 ```
+
+To include DRC integration checks explicitly, enable:
+
+```sh
+PYTHON_FOR_DRC=/Applications/KiCad9/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 KICAD_DRC_INTEGRATION=1 /Applications/KiCad9/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m pytest -m kicad_integration tests/test_kicad_swig_integration.py
+```
+
+Note: KiCad 10's embedded Python may behave differently for SWIG DRC calls; use KiCad 9 Python for local KiCad 9 fixture checks.
 
 ### CI workflow
 
