@@ -38,9 +38,8 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install pytest
-          python3 -m pip install .
+          python3 -m pip install --break-system-packages pytest
+          python3 -m pip install --break-system-packages .
 
       - name: Show runtime diagnostics
         run: |
@@ -75,9 +74,8 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install pytest
-          python3 -m pip install .
+          python3 -m pip install --break-system-packages pytest
+          python3 -m pip install --break-system-packages .
 
       - name: Run UI smoke tests
         run: |
