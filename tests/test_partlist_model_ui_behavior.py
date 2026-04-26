@@ -8,8 +8,31 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).parent.parent
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubbed_modules():
+    """Restore temporarily stubbed modules after each test."""
+    keys = [
+        "wx",
+        "wx.dataview",
+        "kicadplugin",
+        "kicadplugin.helpers",
+        "kicadplugin.datamodel",
+    ]
+    previous = {key: sys.modules.get(key) for key in keys}
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                sys.modules.pop(key, None)
+            else:
+                sys.modules[key] = value
 
 
 class _FakePyDataViewModel:
