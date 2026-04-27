@@ -1209,10 +1209,21 @@ class JLCPCBTools(wx.Dialog):
             violation_count = drc_counter.get_violation_count(board_filename)
 
             if violation_count > 0:
+                if drc_counter.exclusions_cleared:
+                    # KiCad 10.0.0/10.0.1 UAF workaround cleared all markers including
+                    # any that the user had previously right-clicked and excluded.
+                    detail_text = (
+                        "Note: this KiCad version (10.0.0/10.0.1) requires clearing all "
+                        "DRC markers before each run, including any you had previously "
+                        "excluded.\n\n"
+                        "Please verify that any remaining violations are intentional "
+                        "before continuing."
+                    )
+                else:
+                    detail_text = "Resolve or exclude DRC errors before manufacturing whenever possible."
                 dialog = wx.MessageDialog(
                     self,
-                    f"DRC found {violation_count} error violation(s).\n\n"
-                    "Resolve or exclude DRC errors before manufacturing whenever possible.",
+                    f"DRC found {violation_count} error violation(s).\n\n{detail_text}",
                     "DRC violations found",
                     wx.YES_NO
                     | wx.NO_DEFAULT

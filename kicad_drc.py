@@ -53,29 +53,37 @@ def _load_board_from_path(pcbnew_module: Any, board_filename: str):
     raise RuntimeError("KiCad Python module does not expose GetBoard() or LoadBoard()")
 
 
-def run_drc(pcbnew_module: Any, board_filename: str, output_path: str) -> bool:
-    """Run DRC using `pcbnew.WriteDRCReport` and write a text report."""
+def run_drc(pcbnew_module: Any, board_filename: str, output_path: str) -> tuple[bool, bool]:
+    """Run DRC using `pcbnew.WriteDRCReport` and write a text report.
+
+    Returns:
+        (success, exclusions_cleared) where exclusions_cleared is True when the
+        KiCad 10.0.0/10.0.1 UAF workaround forced all markers (including user
+        exclusions) to be deleted before the run.
+    """
     if not hasattr(pcbnew_module, "WriteDRCReport"):
         raise RuntimeError("KiCad Python module does not expose WriteDRCReport()")
 
     board = _load_board_from_path(pcbnew_module, board_filename)
-    # Workaround for KiCad 10.0.1 use-after-free in DRC_ENGINE::InitEngine().
-    # Existing PCB_MARKER objects may retain pointers to DRC_RULE objects that are
-    # destroyed/rebuilt by WriteDRCReport, which can crash in affected versions.
+    # Workaround for KiCad 10.0.x use-after-free in DRC_ENGINE::InitEngine().
+    # ALL PCB_MARKER objects (including user-excluded ones) retain raw DRC_RULE*
+    # pointers that become dangling when WriteDRCReport rebuilds the rule set.
+    # Excluded markers are regenerated as non-excluded by the new DRC run anyway.
     # See upstream fixes: c9d1775e / 038f9b30 (expected in 10.0.2).
-    # Keep user exclusions intact by clearing only warning/error markers.
+    exclusions_cleared = False
     if _should_clear_markers_workaround(pcbnew_module) and hasattr(board, "DeleteMARKERs"):
         logger.info(
-            "Applying KiCad 10.0.0/10.0.1 marker workaround: clearing warning/error markers before DRC"
+            "Applying KiCad 10.0.0/10.0.1 marker workaround: clearing all markers (including exclusions) before DRC"
         )
-        board.DeleteMARKERs(True, False)
+        board.DeleteMARKERs(True, True)
+        exclusions_cleared = True
 
     logger.info(
         "Running SWIG DRC: WriteDRCReport(board=%s, report=%s, units=EDA_UNITS_MM, report_all_track_errors=False)",
         board_filename,
         output_path,
     )
-    return bool(
+    success = bool(
         pcbnew_module.WriteDRCReport(
             board,
             output_path,
@@ -83,6 +91,7 @@ def run_drc(pcbnew_module: Any, board_filename: str, output_path: str) -> bool:
             False,
         )
     )
+    return success, exclusions_cleared
 
 
 def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
@@ -158,6 +167,8 @@ class DRCViolationCounter:
     ):
         self._pcbnew_module = pcbnew_module
         self._working_dir = working_dir
+        self.exclusions_cleared: bool = False
+        """True after get_violation_count() if the UAF workaround cleared user exclusions."""
 
     def get_violation_count(self, board_filename: str) -> int:
         """Run DRC and return violation count, raising RuntimeError on failure."""
@@ -176,7 +187,7 @@ class DRCViolationCounter:
             ) as report_file:
                 report_path = report_file.name
 
-            success = run_drc(self._pcbnew_module, board_filename, report_path)
+            success, self.exclusions_cleared = run_drc(self._pcbnew_module, board_filename, report_path)
 
             if not success:
                 raise RuntimeError("WriteDRCReport returned failure")
