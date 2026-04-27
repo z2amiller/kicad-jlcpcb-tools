@@ -12,6 +12,31 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _parse_build_version_triplet(version_text: str) -> tuple[int, int, int] | None:
+    """Extract major/minor/patch from a KiCad build version string."""
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", version_text)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def _should_clear_markers_workaround(pcbnew_module: Any) -> bool:
+    """Return True only for KiCad versions affected by marker UAF in InitEngine."""
+    if not hasattr(pcbnew_module, "GetBuildVersion"):
+        return False
+
+    version_text = str(pcbnew_module.GetBuildVersion())
+    version_triplet = _parse_build_version_triplet(version_text)
+    if version_triplet is None:
+        logger.warning(
+            "Could not parse KiCad build version %r; skipping marker-clearing workaround",
+            version_text,
+        )
+        return False
+
+    return version_triplet in {(10, 0, 0), (10, 0, 1)}
+
+
 def _load_board_from_path(pcbnew_module: Any, board_filename: str):
     """Load or reuse a board object suitable for `WriteDRCReport`."""
     if hasattr(pcbnew_module, "GetBoard"):
@@ -39,7 +64,10 @@ def run_drc(pcbnew_module: Any, board_filename: str, output_path: str) -> bool:
     # destroyed/rebuilt by WriteDRCReport, which can crash in affected versions.
     # See upstream fixes: c9d1775e / 038f9b30 (expected in 10.0.2).
     # Keep user exclusions intact by clearing only warning/error markers.
-    if hasattr(board, "DeleteMARKERs"):
+    if _should_clear_markers_workaround(pcbnew_module) and hasattr(board, "DeleteMARKERs"):
+        logger.info(
+            "Applying KiCad 10.0.0/10.0.1 marker workaround: clearing warning/error markers before DRC"
+        )
         board.DeleteMARKERs(True, False)
 
     logger.info(
