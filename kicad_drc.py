@@ -34,6 +34,14 @@ def run_drc(pcbnew_module: Any, board_filename: str, output_path: str) -> bool:
         raise RuntimeError("KiCad Python module does not expose WriteDRCReport()")
 
     board = _load_board_from_path(pcbnew_module, board_filename)
+    # Workaround for KiCad 10.0.1 use-after-free in DRC_ENGINE::InitEngine().
+    # Existing PCB_MARKER objects may retain pointers to DRC_RULE objects that are
+    # destroyed/rebuilt by WriteDRCReport, which can crash in affected versions.
+    # See upstream fixes: c9d1775e / 038f9b30 (expected in 10.0.2).
+    # Keep user exclusions intact by clearing only warning/error markers.
+    if hasattr(board, "DeleteMARKERs"):
+        board.DeleteMARKERs(True, False)
+
     logger.info(
         "Running SWIG DRC: WriteDRCReport(board=%s, report=%s, units=EDA_UNITS_MM, report_all_track_errors=False)",
         board_filename,
