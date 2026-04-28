@@ -6,6 +6,7 @@ import contextlib
 import logging
 import os
 import re
+import shutil
 import tempfile
 from typing import Any
 
@@ -33,20 +34,43 @@ def run_drc(pcbnew_module: Any, board_filename: str, output_path: str) -> bool:
     if not hasattr(pcbnew_module, "WriteDRCReport"):
         raise RuntimeError("KiCad Python module does not expose WriteDRCReport()")
 
-    board = _load_board_from_path(pcbnew_module, board_filename)
-    logger.info(
-        "Running SWIG DRC: WriteDRCReport(board=%s, report=%s, units=EDA_UNITS_MM, report_all_track_errors=False)",
-        board_filename,
-        output_path,
-    )
-    return bool(
-        pcbnew_module.WriteDRCReport(
-            board,
+    if not hasattr(pcbnew_module, "LoadBoard"):
+        raise RuntimeError("KiCad Python module does not expose LoadBoard()")
+
+    # Experimental approach: run DRC on a temporary board copy so we avoid
+    # mutating marker state on the currently loaded board.
+    board_dir = os.path.dirname(board_filename) or None
+    temp_board_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            suffix=".kicad_pcb",
+            delete=False,
+            dir=board_dir,
+        ) as temp_board:
+            temp_board_path = temp_board.name
+
+        shutil.copy2(board_filename, temp_board_path)
+        drc_board = pcbnew_module.LoadBoard(temp_board_path)
+
+        logger.info(
+            "Running SWIG DRC on temporary board copy: WriteDRCReport(source=%s, copy=%s, report=%s, units=EDA_UNITS_MM, report_all_track_errors=False)",
+            board_filename,
+            temp_board_path,
             output_path,
-            pcbnew_module.EDA_UNITS_MM,
-            False,
         )
-    )
+        return bool(
+            pcbnew_module.WriteDRCReport(
+                drc_board,
+                output_path,
+                pcbnew_module.EDA_UNITS_MM,
+                False,
+            )
+        )
+    finally:
+        if temp_board_path and os.path.exists(temp_board_path):
+            with contextlib.suppress(OSError):
+                os.remove(temp_board_path)
 
 
 def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
