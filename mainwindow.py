@@ -51,7 +51,11 @@ from .helpers import (
     toggle_exclude_from_bom,
     toggle_exclude_from_pos,
 )
-from .kicad_drc import DRCViolationCounter
+from .kicad_drc import (
+    DRCViolationCounter,
+    board_has_drc_markers,
+    is_affected_kicad_marker_uaf,
+)
 from .library import Library, LibraryState
 from .partdetails import PartDetailsDialog
 from .partmapper import PartMapperManagerDialog
@@ -1343,6 +1347,35 @@ class JLCPCBTools(wx.Dialog):
                 style=wx.ICON_ERROR,
             )
             return False
+
+        board = self.pcbnew.GetBoard()
+        if is_affected_kicad_marker_uaf(self.pcbnew) and board_has_drc_markers(board):
+            # In KiCad 10.0.0/10.0.1, pre-existing DRC markers can trigger a
+            # marker-rule pointer UAF inside WriteDRCReport(). Let user choose
+            # whether to continue with DRC, skip DRC for this export, or cancel.
+            preflight = wx.MessageDialog(
+                self,
+                "This board already has DRC markers from a previous run.\n\n"
+                "In KiCad 10.0.0/10.0.1 this can crash forced DRC.\n\n"
+                "Choose an action:",
+                "DRC preflight",
+                wx.YES_NO | wx.CANCEL | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
+            )
+            preflight.SetYesNoCancelLabels(
+                "Continue with DRC",
+                "Skip DRC",
+                "Cancel Export",
+            )
+            preflight_result = preflight.ShowModal()
+            preflight.Destroy()
+
+            if preflight_result == wx.ID_CANCEL:
+                return False
+            if preflight_result == wx.ID_NO:
+                self.logger.warning(
+                    "Skipping forced DRC by user choice because existing DRC markers were detected on KiCad 10.0.0/10.0.1"
+                )
+                return True
 
         try:
             drc_counter = DRCViolationCounter(

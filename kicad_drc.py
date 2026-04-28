@@ -12,6 +12,51 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _parse_build_version_triplet(version_text: str) -> tuple[int, int, int] | None:
+    """Extract major/minor/patch from a KiCad build version string."""
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", version_text)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def is_affected_kicad_marker_uaf(pcbnew_module: Any) -> bool:
+    """Return True only for KiCad versions affected by marker UAF in InitEngine."""
+    if not hasattr(pcbnew_module, "GetBuildVersion"):
+        return False
+
+    version_text = str(pcbnew_module.GetBuildVersion())
+    version_triplet = _parse_build_version_triplet(version_text)
+    if version_triplet is None:
+        logger.warning(
+            "Could not parse KiCad build version %r; skipping marker-UAF preflight",
+            version_text,
+        )
+        return False
+
+    return version_triplet in {(10, 0, 0), (10, 0, 1)}
+
+
+def board_has_drc_markers(board: Any) -> bool:
+    """Best-effort check for existing DRC markers on a board."""
+    marker_getters = ("GetDRCMarkers", "Markers", "GetMARKERs")
+    for getter_name in marker_getters:
+        if not hasattr(board, getter_name):
+            continue
+
+        markers = getattr(board, getter_name)()
+        if markers is None:
+            continue
+
+        with contextlib.suppress(TypeError):
+            return len(markers) > 0
+
+        with contextlib.suppress(TypeError):
+            return any(True for _ in markers)
+
+    return False
+
+
 def _load_board_from_path(pcbnew_module: Any, board_filename: str):
     """Load or reuse a board object suitable for `WriteDRCReport`."""
     if hasattr(pcbnew_module, "GetBoard"):
@@ -62,7 +107,9 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
     violations_section = section_match.group(1) if section_match else report_text
 
     header_matches = list(
-        re.finditer(r"(?m)^\[(?P<code>[^\]]+)\]:\s*(?P<message>.*)$", violations_section)
+        re.finditer(
+            r"(?m)^\[(?P<code>[^\]]+)\]:\s*(?P<message>.*)$", violations_section
+        )
     )
 
     if header_matches:
@@ -78,7 +125,9 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
                 else len(violations_section)
             )
             block = violations_section[start:end]
-            severity_match = re.search(r";\s*(error|warning)\b", block, flags=re.IGNORECASE)
+            severity_match = re.search(
+                r";\s*(error|warning)\b", block, flags=re.IGNORECASE
+            )
 
             if not severity_match:
                 unknown_count += 1
@@ -149,7 +198,9 @@ class DRCViolationCounter:
                 try:
                     error_count, error_messages = parse_drc_report(report_path)
                     if error_messages:
-                        logger.warning("First %d DRC error(s):", min(10, len(error_messages)))
+                        logger.warning(
+                            "First %d DRC error(s):", min(10, len(error_messages))
+                        )
                         for message in error_messages[:10]:
                             logger.warning("  %s", message)
                     return error_count
