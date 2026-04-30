@@ -1,0 +1,62 @@
+{
+  "fixtures": [
+    {
+      "id": "k9_smoke_full125",
+      "path": "k9_smoke_ok/fx-Full125B.kicad_pcb",
+      "format": "kicad9",
+      "intent": "smoke_ok",
+      "description": "Real-world KiCad 9 board used for headless SWIG smoke tests",
+      "compatibility_target": "native_k9",
+      "expected_drc_patterns": []
+    },
+    {
+      "id": "k9_drcfail_normal125",
+      "path": "k9_drc_fail/Normal125B-DRCFail.kicad_pcb",
+      "format": "kicad9",
+      "intent": "drc_fail",
+      "description": "Real-world KiCad 9 board expected to fail DRC checks",
+      "compatibility_target": "native_k9",
+      "expected_drc_patterns": [
+        "[clearance]:"
+      ]
+    },
+    {
+      "id": "k8_compat_project",
+      "path": "k8_compat_ok/KiCad8-project.kicad_pcb",
+      "format": "kicad8",
+      "intent": "compat_open_in_k9",
+      "description": "KiCad 8 board expected to open in KiCad 9 runtime",
+      "compatibility_target": "open_in_k9",
+      "expected_drc_patterns": []
+    },
+    {
+      "id": "k8_drcfail_project",
+      "path": "k8_drc_fail/KiCad8-project-fail-DRC.kicad_pcb",
+      "format": "kicad8",
+      "intent": "drc_fail",
+      "description": "KiCad 8 board expected to fail DRC when opened in newer runtime",
+      "compatibility_target": "open_in_k9",
+      "expected_drc_patterns": []
+    },
+    {
+      "id": "k10_smoke_util_curvetracer",
+      "path": "k10_smoke_ok/util-curvetracer.kicad_pcb",
+      "format": "kicad10",
+      "intent": "smoke_ok",
+      "description": "KiCad 10 board used for native KiCad 10 smoke checks",
+      "compatibility_target": "native_k10",
+      "min_runtime_major": 10,
+      "expected_drc_patterns": []
+    },
+    {
+      "id": "k10_drcfail_util_curvetracer",
+      "path": "k10_drc_fail/util-curvetracer-fail-drc.kicad_pcb",
+      "format": "kicad10",
+      "intent": "drc_fail",
+      "description": "KiCad 10 board expected to fail DRC in native KiCad 10 runtime",
+      "compatibility_target": "native_k10",
+      "min_runtime_major": 10,
+      "expected_drc_patterns": []
+    }
+  ]
+}

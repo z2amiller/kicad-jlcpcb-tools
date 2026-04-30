@@ -1,0 +1,87 @@
+---
+name: KiCad SWIG Integration
+
+on: # yamllint disable-line rule:truthy
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  kicad-swig-tests-matrix:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: kicad9
+            experimental: false
+            drc_integration: "1"
+            image: ghcr.io/inti-cmnb/kicad9_auto_full:dev_1.8.6-b15f04d_k9.0.7_d13.2_b4.2.4lts
+            verify_label: "KiCad 9"
+            k_expr: ""
+          - lane: kicad10
+            experimental: true
+            drc_integration: "1"
+            image: ghcr.io/inti-cmnb/kicad_auto_full@sha256:a3a52fba4144e2ac72a893845409f316e9f64eb843d1cbbe91b8f51a8758865a
+            verify_label: "KiCad 10"
+            k_expr: "fixture_manifest_paths_exist or all_smoke_fixtures_load_and_enumerate or fixture_drc_path_smoke or drc_fail_fixtures_match_expected_patterns"
+    container:
+      image: ${{ matrix.image }}
+    env:
+      KICAD_DRC_INTEGRATION: ${{ matrix.drc_integration }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Verify KiCad pcbnew bindings
+        run: |
+          python3 -V
+          python3 -c "import pcbnew; print('${{ matrix.verify_label }} pcbnew import ok:', pcbnew.GetBuildVersion())"
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --break-system-packages pytest
+          python3 -m pip install --break-system-packages .
+
+      - name: Show runtime diagnostics
+        run: |
+          python3 -c "import sys; print('python:', sys.version)"
+          python3 -c "import pcbnew; print('pcbnew:', pcbnew.GetBuildVersion())"
+          python3 -m pip freeze | sort | sed -n '1,120p'
+
+      - name: Run KiCad SWIG integration tests
+        run: |
+          if [ -n "${{ matrix.k_expr }}" ]; then
+            pytest -ra -m kicad_integration tests/test_kicad_swig_integration.py -k "${{ matrix.k_expr }}"
+          else
+            pytest -ra -m kicad_integration tests/test_kicad_swig_integration.py
+          fi
+
+  ui-smoke-tests:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    container:
+      image: ghcr.io/inti-cmnb/kicad9_auto_full:dev_1.8.6-b15f04d_k9.0.7_d13.2_b4.2.4lts
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Verify wx + KiCad runtime
+        run: |
+          python3 -V
+          python3 -c "import wx; print('wx import ok')"
+          python3 -c "import pcbnew; print('pcbnew import ok')"
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --break-system-packages pytest
+          python3 -m pip install --break-system-packages .
+
+      - name: Run UI smoke tests
+        run: |
+          pytest -m ui_smoke tests/test_ui_smoke_harness.py
+

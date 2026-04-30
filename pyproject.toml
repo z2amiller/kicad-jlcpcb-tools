@@ -140,6 +140,10 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "common", "dblib"]
+markers = [
+    "kicad_integration: tests requiring KiCad pcbnew SWIG bindings",
+    "ui_smoke: lightweight wx UI smoke tests",
+]
 
 [tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false

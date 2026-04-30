@@ -259,6 +259,94 @@ For example on Linux:
 cd ~/.local/share/kicad/8.0/scripting/plugins/ && python -m kicad-jlcpcb-tools
 ```
 
+## KiCad SWIG integration tests (headless)
+
+This repository includes a dedicated pytest marker for SWIG-backed integration tests:
+
+```sh
+pytest -m kicad_integration
+```
+
+These tests are intended to run in a KiCad-capable environment (typically a container image with `pcbnew` bindings available).
+
+### Local-first workflow
+
+You can iterate locally before checking in fixture boards:
+
+1. Add or update fixture boards under [tests/fixtures](tests/fixtures).
+2. Run only the SWIG lane locally:
+
+   ```sh
+   ./scripts/run_kicad9_swig_tests.sh
+   ```
+
+   This is the preferred local runner for KiCad 9 fixture validation.
+
+3. If validating with a local KiCad 8 runtime, use:
+
+   ```sh
+   ./scripts/run_kicad8_swig_tests.sh
+   ```
+
+4. If validating KiCad 10-native fixtures/runtime, use:
+
+   ```sh
+   ./scripts/run_kicad10_swig_tests.sh
+   ```
+
+5. Keep assertions stable across KiCad versions by checking categories/paths, not exact DRC counts.
+
+By default this helper runs with KiCad 9 Python and enables DRC integration checks.
+
+If you want to run manually, prefer KiCad 9's interpreter path on macOS:
+
+```sh
+/Applications/KiCad9/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m pytest -m kicad_integration tests/test_kicad_swig_integration.py
+```
+
+To include DRC integration checks explicitly, enable:
+
+```sh
+PYTHON_FOR_DRC=/Applications/KiCad9/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 KICAD_DRC_INTEGRATION=1 /Applications/KiCad9/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m pytest -m kicad_integration tests/test_kicad_swig_integration.py
+```
+
+Note: KiCad 10's embedded Python may behave differently for SWIG DRC calls; use KiCad 9 Python for local KiCad 9 fixture checks.
+
+### CI workflow
+
+The SWIG lane is implemented in [.github/workflows/kicad-swig-integration.yml](.github/workflows/kicad-swig-integration.yml).
+
+The SWIG workflow now runs as a version matrix:
+
+- KiCad 9 lane: full `kicad_integration` suite
+- KiCad 10 lane (experimental): smoke-focused subset
+
+The KiCad 9 CI image is pinned to an explicit `kicad9_auto_full` tag (instead of `latest`) for more stable and reproducible runs.
+
+During rollout, experimental lanes remain non-blocking to allow fixture and compatibility expansion without gating all PRs.
+
+An additional non-blocking experimental KiCad 10 lane is included, currently sourced from:
+
+`ghcr.io/inti-cmnb/kicad_auto_full:dev_k10`
+
+The workflow pins this image by digest for reproducibility.
+
+### UI smoke tests (non-pixel)
+
+This repository also includes a lightweight UI marker for basic wx dialog wiring checks:
+
+```sh
+pytest -m ui_smoke
+```
+
+For local macOS runs, prefer KiCad's embedded Python:
+
+```sh
+/Applications/KiCad9/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3 -m pytest -m ui_smoke tests/test_ui_smoke_harness.py
+```
+
+The CI job for this lane is currently non-blocking and runs in the KiCad container image, so it can validate wx + `pcbnew` availability without gating all PRs while coverage is still expanding.
+
 For example on Windows:
 
 ```cmd
