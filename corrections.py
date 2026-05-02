@@ -1,5 +1,7 @@
 """Contains the corrections manager."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 import csv
 import logging
 import os

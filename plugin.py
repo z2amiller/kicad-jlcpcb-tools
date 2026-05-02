@@ -1,5 +1,7 @@
 """Contains the Action Plugin."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 import os
 
 from pcbnew import ActionPlugin  # pylint: disable=import-error

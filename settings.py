@@ -1,5 +1,7 @@
 """Contains the settings dialog."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 import contextlib
 import logging
 

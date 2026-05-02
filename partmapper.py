@@ -1,5 +1,7 @@
 """Contains the part mapper."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 import csv
 import logging
 import os

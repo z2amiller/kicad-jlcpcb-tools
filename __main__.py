@@ -1,6 +1,8 @@
 """Entry point for running the plugin in standalone mode."""
 
-import wx
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
+import wx  # pylint: disable=import-error
 
 from . import standalone_impl
 from .mainwindow import JLCPCBTools

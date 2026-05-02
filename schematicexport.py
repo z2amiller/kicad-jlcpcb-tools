@@ -1,5 +1,7 @@
 """Module for exporting LCSC data to schematic."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 import logging
 import os
 import os.path

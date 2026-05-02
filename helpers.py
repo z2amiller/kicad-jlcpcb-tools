@@ -1,5 +1,7 @@
 """Contains helper function used all over the plugin."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 import os
 from pathlib import Path
 import re

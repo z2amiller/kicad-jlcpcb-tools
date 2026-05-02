@@ -1,9 +1,11 @@
 """Implementation of the Datamodel for the parts list with natural sort."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 import logging
 import re
 
-import wx.dataview as dv
+import wx.dataview as dv  # pylint: disable=import-error
 
 from .dataview_highlight import (
     decode_highlighted_value,

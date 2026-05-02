@@ -1,6 +1,8 @@
 #!/bin/env python3
 """Module for unziping and merging split db zip file."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 import logging
 import os
 from zipfile import ZipFile

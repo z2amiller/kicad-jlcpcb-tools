@@ -1,5 +1,7 @@
 """Handles the generation of the Gerber files, the BOM and the POS file."""
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 import csv
 from importlib import import_module
 import logging
