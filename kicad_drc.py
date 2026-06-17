@@ -54,15 +54,8 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
     with open(report_path, encoding="utf-8") as report_file:
         report_text = report_file.read()
 
-    section_match = re.search(
-        r"\*\* Found \d+ DRC violations \*\*(.*?)(?:\n\*\* Found \d+ unconnected pads \*\*|\n\*\* End of Report \*\*)",
-        report_text,
-        flags=re.DOTALL,
-    )
-    violations_section = section_match.group(1) if section_match else report_text
-
     header_matches = list(
-        re.finditer(r"(?m)^\[(?P<code>[^\]]+)\]:\s*(?P<message>.*)$", violations_section)
+        re.finditer(r"(?m)^\[(?P<code>[^\]]+)\]:\s*(?P<message>.*)$", report_text)
     )
 
     if header_matches:
@@ -75,9 +68,9 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
             end = (
                 header_matches[index + 1].start()
                 if index + 1 < len(header_matches)
-                else len(violations_section)
+                else len(report_text)
             )
-            block = violations_section[start:end]
+            block = report_text[start:end]
             severity_match = re.search(r";\s*(error|warning)\b", block, flags=re.IGNORECASE)
 
             if not severity_match:
@@ -101,15 +94,21 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
         )
         return len(error_messages), error_messages
 
-    match = re.search(r"\*\* Found (\d+) DRC violations \*\*", report_text)
-    if not match:
+    drc_match = re.search(r"\*\* Found (\d+) DRC violations \*\*", report_text)
+    unconnected_match = re.search(
+        r"\*\* Found (\d+) unconnected (?:pads|items) \*\*",
+        report_text,
+    )
+    if not drc_match and not unconnected_match:
         raise RuntimeError("Could not parse DRC violation count from report")
 
     logger.warning(
         "DRC report did not contain per-item severity fields; falling back to total violations count"
     )
 
-    return int(match.group(1)), []
+    drc_count = int(drc_match.group(1)) if drc_match else 0
+    unconnected_count = int(unconnected_match.group(1)) if unconnected_match else 0
+    return drc_count + unconnected_count, []
 
 
 class DRCViolationCounter:
