@@ -108,6 +108,7 @@ def _load_mainwindow(monkeypatch):
         monkeypatch,
         f"{package_name}.datamodel",
         PartListDataModel=type("PartListDataModel", (), {"columns": {}}),
+        STANDARD_ONLY_TOOLTIP="",
     )
     _stub_module(
         monkeypatch,

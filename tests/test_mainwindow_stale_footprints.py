@@ -130,7 +130,9 @@ def _load_mainwindow_module():
             f"{_PACKAGE}.corrections", CorrectionManagerDialog=object
         ),
         f"{_PACKAGE}.datamodel": _module(
-            f"{_PACKAGE}.datamodel", PartListDataModel=object
+            f"{_PACKAGE}.datamodel",
+            PartListDataModel=object,
+            STANDARD_ONLY_TOOLTIP="",
         ),
         f"{_PACKAGE}.dataview_highlight": _module(
             f"{_PACKAGE}.dataview_highlight",
