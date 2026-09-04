@@ -77,6 +77,11 @@ def _load_mainwindow(monkeypatch):
     bom_estimation.__path__ = []
     _stub_module(
         monkeypatch,
+        f"{package_name}.bom_estimation.assembly_mode",
+        classify_component_product_type=MagicMock(),
+    )
+    _stub_module(
+        monkeypatch,
         f"{package_name}.bom_estimation.help_text",
         show_bom_estimator_help=MagicMock(),
     )
