@@ -199,6 +199,7 @@ def _load_mainwindow(monkeypatch):
         ("schematicexport", "SchematicExport"),
         ("settings", "SettingsDialog"),
         ("store", "Store"),
+        ("why_standard_dialog", "WhyStandardDialog"),
     ):
         _stub_module(
             monkeypatch,

@@ -193,6 +193,9 @@ def _load_mainwindow_module():
         ),
         f"{_PACKAGE}.settings": _module(f"{_PACKAGE}.settings", SettingsDialog=object),
         f"{_PACKAGE}.store": _module(f"{_PACKAGE}.store", Store=object),
+        f"{_PACKAGE}.why_standard_dialog": _module(
+            f"{_PACKAGE}.why_standard_dialog", WhyStandardDialog=object
+        ),
     }
 
     module_name = f"{_PACKAGE}.mainwindow"
