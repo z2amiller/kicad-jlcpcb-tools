@@ -1357,11 +1357,18 @@ class JLCPCBTools(wx.Dialog):
             self.logger.warning("Select only one component, please.")
             return
         selected_item = self.footprint_list.GetSelection()
+        alike = dv.DataViewItemArray()
+        for alike_item in self.partlist_data_model.select_alike(selected_item):
+            alike.append(alike_item)
         self.select_alike_in_progress = True
         try:
-            for alike_item in self.partlist_data_model.select_alike(selected_item):
-                if not self.footprint_list.IsSelected(alike_item):
-                    self.footprint_list.Select(alike_item)
+            self.footprint_list.SetSelections(alike)
+            # SetSelections() leaves the last row of the new selection focused,
+            # and the list scrolls the focused row into view once the click has
+            # been handled - dragging the row the user clicked out from under
+            # the mouse pointer. Focusing the clicked row instead points that
+            # scroll at a row that is already on screen, so nothing moves.
+            self.footprint_list.SetCurrentItem(selected_item)
         finally:
             self.select_alike_in_progress = False
 
