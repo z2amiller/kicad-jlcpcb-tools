@@ -214,6 +214,12 @@ def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path):
     assert store.set_assembly_metadata("R1", "SMT updated", None, expected_lcsc="C1")
     assert _part_state(store) == ("C1", "12k", "SMT updated", 2)
 
+    for missing_process in ("", None):
+        assert store.set_assembly_metadata(
+            "R1", missing_process, None, expected_lcsc="C1"
+        )
+        assert _part_state(store) == ("C1", "12k", "SMT updated", 2)
+
     assert not store.set_assembly_metadata(
         "R1", "Wave soldering", 0, expected_lcsc="COLD"
     )
