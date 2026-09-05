@@ -1,232 +1,31 @@
 """Tests for empty-zone warnings during fabrication-data generation."""
 
-import importlib.util
-import logging
-from pathlib import Path
-import sys
-import types
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-from uuid import uuid4
 
 import pytest
 
-_ROOT = Path(__file__).parent.parent
+from .wx_harness import load_mainwindow, wx_stubs
 
-
-class _WxModule(types.ModuleType):
-    """Minimal wx module whose unused attributes resolve to harmless constants."""
-
-    def __getattr__(self, name):
-        """Return a harmless constant for an unused wx attribute."""
-        value = 0
-        setattr(self, name, value)
-        return value
-
-
-class _Dialog:
-    """Stand-in base class used while importing the main window."""
-
-
-def _stub_module(monkeypatch, name, **attributes):
-    """Install a module stub with the requested attributes."""
-    module = types.ModuleType(name)
-    for attribute, value in attributes.items():
-        setattr(module, attribute, value)
-    monkeypatch.setitem(sys.modules, name, module)
-    return module
-
-
-def _load_mainwindow(monkeypatch):
-    """Load mainwindow.py under an isolated package with wx dependencies stubbed."""
-    wx = _WxModule("wx")
-    wx.__path__ = []
-    wx.Dialog = _Dialog
-    wx.NewIdRef = MagicMock(side_effect=object)
-    wx.ID_YES = 1
-    wx.ID_NO = 2
-    wx.ID_CANCEL = 3
-    wx.CANCEL = wx.ID_CANCEL
-    wx.OK = 4
-    wx.YES_NO = 8
-    wx.NO_DEFAULT = 16
-    wx.ICON_WARNING = 32
-    wx.ICON_ERROR = 64
-    wx.CENTER = 128
-    wx.BeginBusyCursor = MagicMock()
-    wx.EndBusyCursor = MagicMock()
-    wx.IsBusy = MagicMock(return_value=True)
-    wx.MessageBox = MagicMock()
-    wx.MessageDialog = MagicMock()
-    monkeypatch.setitem(sys.modules, "wx", wx)
-
-    dataview = _WxModule("wx.dataview")
-    adv = _WxModule("wx.adv")
-    wx.dataview = dataview
-    wx.adv = adv
-    monkeypatch.setitem(sys.modules, "wx.dataview", dataview)
-    monkeypatch.setitem(sys.modules, "wx.adv", adv)
-    monkeypatch.setitem(sys.modules, "pcbnew", MagicMock())
-
-    package_name = f"mainwindow_test_{uuid4().hex}"
-    package = types.ModuleType(package_name)
-    package.__path__ = [str(_ROOT)]
-    monkeypatch.setitem(sys.modules, package_name, package)
-
-    bom_estimation = _stub_module(monkeypatch, f"{package_name}.bom_estimation")
-    bom_estimation.__path__ = []
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.bom_estimation.assembly_mode",
-        classify_component_product_type=MagicMock(),
-    )
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.bom_estimation.help_text",
-        show_bom_estimator_help=MagicMock(),
-    )
-    enrichment = _stub_module(monkeypatch, f"{package_name}.enrichment")
-    enrichment.__path__ = []
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.enrichment.providers",
-        LCSCAssemblyMetadataProvider=type("LCSCAssemblyMetadataProvider", (), {}),
-    )
-
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.bom_widget",
-        BomEstimatorController=type("BomEstimatorController", (), {}),
-        BomEstimatorWidget=type("BomEstimatorWidget", (), {}),
-    )
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.corrections",
-        CorrectionManagerDialog=type("CorrectionManagerDialog", (), {}),
-    )
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.datamodel",
-        PartListDataModel=type("PartListDataModel", (), {"columns": {}}),
-        STANDARD_ONLY_TOOLTIP="",
-    )
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.dataview_highlight",
-        HighlightedTextRenderer=type("HighlightedTextRenderer", (), {}),
-        decode_highlighted_value=MagicMock(),
-        simplify_footprint_name=MagicMock(),
-    )
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.derive_params",
-        params_for_part=MagicMock(),
-    )
-
-    events = {
-        name: object()
-        for name in (
-            "EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT",
-            "EVT_ASSEMBLY_ENRICHMENT_PROGRESS_EVENT",
-            "EVT_ASSIGN_PARTS_EVENT",
-            "EVT_BOM_DATA_CHANGED_EVENT",
-            "EVT_DOWNLOAD_COMPLETED_EVENT",
-            "EVT_DOWNLOAD_PROGRESS_EVENT",
-            "EVT_DOWNLOAD_STARTED_EVENT",
-            "EVT_LOGBOX_APPEND_EVENT",
-            "EVT_MESSAGE_EVENT",
-            "EVT_POPULATE_FOOTPRINT_LIST_EVENT",
-            "EVT_UNZIP_COMBINING_PROGRESS_EVENT",
-            "EVT_UNZIP_COMBINING_STARTED_EVENT",
-            "EVT_UNZIP_EXTRACTING_COMPLETED_EVENT",
-            "EVT_UNZIP_EXTRACTING_PROGRESS_EVENT",
-            "EVT_UNZIP_EXTRACTING_STARTED_EVENT",
-            "EVT_UPDATE_SETTING",
-            "AssemblyEnrichmentCompletedEvent",
-            "AssemblyEnrichmentProgressEvent",
-            "BomDataChangedEvent",
-            "LogboxAppendEvent",
-        )
-    }
-    _stub_module(monkeypatch, f"{package_name}.events", **events)
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.fabrication",
-        Fabrication=type("Fabrication", (), {}),
-    )
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.footprint_helpers",
-        get_is_dnp=MagicMock(),
-        set_lcsc_value=MagicMock(),
-        toggle_exclude_from_bom=MagicMock(),
-        toggle_exclude_from_pos=MagicMock(),
-    )
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.generate_hooks",
-        format_hook_error=MagicMock(),
-        run_configured_hook=MagicMock(),
-    )
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.helpers",
-        PLUGIN_PATH=str(_ROOT),
-        GetScaleFactor=MagicMock(),
-        HighResWxSize=MagicMock(),
-        getVersion=MagicMock(return_value="test"),
-        loadBitmapScaled=MagicMock(),
-    )
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.kicad_drc",
-        DRCViolationCounter=type("DRCViolationCounter", (), {}),
-    )
-
-    class _LibraryState:
-        INITIALIZED = object()
-
-    _stub_module(
-        monkeypatch,
-        f"{package_name}.library",
-        Library=type("Library", (), {}),
-        LibraryState=_LibraryState,
-    )
-    for module_name, class_name in (
-        ("partdetails", "PartDetailsDialog"),
-        ("partmapper", "PartMapperManagerDialog"),
-        ("partselector", "PartSelectorDialog"),
-        ("schematicexport", "SchematicExport"),
-        ("settings", "SettingsDialog"),
-        ("store", "Store"),
-        ("why_standard_dialog", "WhyStandardDialog"),
-    ):
-        _stub_module(
-            monkeypatch,
-            f"{package_name}.{module_name}",
-            **{class_name: type(class_name, (), {})},
-        )
-
-    module_name = f"{package_name}.mainwindow"
-    spec = importlib.util.spec_from_file_location(module_name, _ROOT / "mainwindow.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, module_name, module)
-    spec.loader.exec_module(module)
-    return module, wx
+_PACKAGE = "mainwindow_empty_zone_tests"
 
 
 @pytest.fixture
-def mainwindow_module(monkeypatch):
+def mainwindow_module():
     """Provide an isolated mainwindow module and its wx stub."""
-    requests_logger = logging.getLogger("requests")
-    urllib3_logger = logging.getLogger("urllib3")
-    previous_levels = (requests_logger.level, urllib3_logger.level)
-    try:
-        yield _load_mainwindow(monkeypatch)
-    finally:
-        requests_logger.setLevel(previous_levels[0])
-        urllib3_logger.setLevel(previous_levels[1])
+    module = load_mainwindow(
+        _PACKAGE,
+        wx=wx_stubs(
+            Dialog=type("Dialog", (), {}),
+            NewIdRef=MagicMock(side_effect=object),
+            BeginBusyCursor=MagicMock(),
+            EndBusyCursor=MagicMock(),
+            IsBusy=MagicMock(return_value=True),
+            MessageBox=MagicMock(),
+            MessageDialog=MagicMock(),
+        ),
+    )
+    return module, module.wx
 
 
 def _make_window(empty_pours, fill_zones=None):

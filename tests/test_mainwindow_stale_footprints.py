@@ -1,223 +1,29 @@
 """Regression tests for main-window actions targeting deleted footprints.
 
 ``mainwindow.py`` normally runs inside KiCad and imports wxPython/pcbnew at
-module load time.  These tests load it under a private synthetic package and
-provide only the dependency surface needed by the handlers under test.  The
-handlers themselves are invoked directly against small capturing fakes, so the
-tests exercise production control flow without requiring a GUI event loop.
+module load time.  The shared harness loads it under a private synthetic
+package instead.  The handlers themselves are invoked directly against small
+capturing fakes, so the tests exercise production control flow without
+requiring a GUI event loop.
 """
 
-from contextlib import contextmanager
-import importlib.util
 from itertools import count
-import logging
-from pathlib import Path
-import sys
 import types
 from unittest.mock import MagicMock, call
 
 import pytest
 
-_ROOT = Path(__file__).parent.parent
-_PACKAGE = "pr782_stale_footprint_tests"
-_MISSING = object()
+from .wx_harness import load_mainwindow, wx_stubs
 
-
-def _module(name, **symbols):
-    """Create a module containing the explicitly supplied symbols."""
-    module = types.ModuleType(name)
-    module.__dict__.update(symbols)
-    return module
-
-
-@contextmanager
-def _temporary_modules(replacements):
-    """Install import stubs temporarily and restore prior modules afterward."""
-    previous = {name: sys.modules.get(name, _MISSING) for name in replacements}
-    sys.modules.update(replacements)
-    try:
-        yield
-    finally:
-        for name, module in previous.items():
-            if module is _MISSING:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
-
-
-def _load_mainwindow_module():
-    """Load mainwindow with deterministic stubs for its GUI dependencies."""
-    package = _module(_PACKAGE)
-    package.__path__ = [str(_ROOT)]
-
-    bom_estimation_package = _module(f"{_PACKAGE}.bom_estimation")
-    bom_estimation_package.__path__ = []
-    enrichment_package = _module(f"{_PACKAGE}.enrichment")
-    enrichment_package.__path__ = []
-
-    class _Dialog:
-        pass
-
-    ids = count(1)
-    wx = _module(
-        "wx",
-        Dialog=_Dialog,
-        NewIdRef=lambda: next(ids),
+_ids = count(1)
+mainwindow = load_mainwindow(
+    "mainwindow_stale_footprint_tests",
+    wx=wx_stubs(
+        Dialog=type("Dialog", (), {}),
+        NewIdRef=lambda: next(_ids),
         PostEvent=lambda *_args, **_kwargs: None,
-    )
-    wx.__path__ = []
-    wx_dataview = _module("wx.dataview")
-    wx_adv = _module("wx.adv")
-    wx.dataview = wx_dataview
-    wx.adv = wx_adv
-
-    def event_factory(**values):
-        return types.SimpleNamespace(**values)
-
-    event_names = (
-        "EVT_ASSEMBLY_ENRICHMENT_COMPLETED_EVENT",
-        "EVT_ASSEMBLY_ENRICHMENT_PROGRESS_EVENT",
-        "EVT_ASSIGN_PARTS_EVENT",
-        "EVT_BOM_DATA_CHANGED_EVENT",
-        "EVT_DOWNLOAD_COMPLETED_EVENT",
-        "EVT_DOWNLOAD_PROGRESS_EVENT",
-        "EVT_DOWNLOAD_STARTED_EVENT",
-        "EVT_LOGBOX_APPEND_EVENT",
-        "EVT_MESSAGE_EVENT",
-        "EVT_POPULATE_FOOTPRINT_LIST_EVENT",
-        "EVT_UNZIP_COMBINING_PROGRESS_EVENT",
-        "EVT_UNZIP_COMBINING_STARTED_EVENT",
-        "EVT_UNZIP_EXTRACTING_COMPLETED_EVENT",
-        "EVT_UNZIP_EXTRACTING_PROGRESS_EVENT",
-        "EVT_UNZIP_EXTRACTING_STARTED_EVENT",
-        "EVT_UPDATE_SETTING",
-    )
-    events = {name: object() for name in event_names}
-    events.update(
-        {
-            "AssemblyEnrichmentCompletedEvent": event_factory,
-            "AssemblyEnrichmentProgressEvent": event_factory,
-            "BomDataChangedEvent": event_factory,
-            "LogboxAppendEvent": event_factory,
-        }
-    )
-
-    library_state = types.SimpleNamespace(
-        INITIALIZED=object(),
-        UPDATE_NEEDED=object(),
-    )
-    replacements = {
-        "pcbnew": _module("pcbnew"),
-        "wx": wx,
-        "wx.dataview": wx_dataview,
-        "wx.adv": wx_adv,
-        _PACKAGE: package,
-        f"{_PACKAGE}.bom_estimation": bom_estimation_package,
-        f"{_PACKAGE}.bom_estimation.assembly_mode": _module(
-            f"{_PACKAGE}.bom_estimation.assembly_mode",
-            classify_component_product_type=lambda _value: None,
-        ),
-        f"{_PACKAGE}.bom_estimation.help_text": _module(
-            f"{_PACKAGE}.bom_estimation.help_text",
-            show_bom_estimator_help=lambda *_args, **_kwargs: None,
-        ),
-        f"{_PACKAGE}.bom_widget": _module(
-            f"{_PACKAGE}.bom_widget",
-            BomEstimatorController=object,
-            BomEstimatorWidget=object,
-        ),
-        f"{_PACKAGE}.corrections": _module(
-            f"{_PACKAGE}.corrections", CorrectionManagerDialog=object
-        ),
-        f"{_PACKAGE}.datamodel": _module(
-            f"{_PACKAGE}.datamodel",
-            PartListDataModel=object,
-            STANDARD_ONLY_TOOLTIP="",
-        ),
-        f"{_PACKAGE}.dataview_highlight": _module(
-            f"{_PACKAGE}.dataview_highlight",
-            HighlightedTextRenderer=object,
-            decode_highlighted_value=lambda value: (value, []),
-            simplify_footprint_name=lambda value: value,
-        ),
-        f"{_PACKAGE}.derive_params": _module(
-            f"{_PACKAGE}.derive_params",
-            params_for_part=lambda _details: "params",
-        ),
-        f"{_PACKAGE}.enrichment": enrichment_package,
-        f"{_PACKAGE}.enrichment.providers": _module(
-            f"{_PACKAGE}.enrichment.providers",
-            LCSCAssemblyMetadataProvider=object,
-        ),
-        f"{_PACKAGE}.events": _module(f"{_PACKAGE}.events", **events),
-        f"{_PACKAGE}.fabrication": _module(
-            f"{_PACKAGE}.fabrication", Fabrication=object
-        ),
-        f"{_PACKAGE}.footprint_helpers": _module(
-            f"{_PACKAGE}.footprint_helpers",
-            get_is_dnp=lambda _footprint: False,
-            set_lcsc_value=lambda *_args: None,
-            toggle_exclude_from_bom=lambda _footprint: None,
-            toggle_exclude_from_pos=lambda _footprint: None,
-        ),
-        f"{_PACKAGE}.generate_hooks": _module(
-            f"{_PACKAGE}.generate_hooks",
-            format_hook_error=lambda result: str(result),
-            run_configured_hook=lambda **_kwargs: None,
-        ),
-        f"{_PACKAGE}.helpers": _module(
-            f"{_PACKAGE}.helpers",
-            PLUGIN_PATH=str(_ROOT),
-            GetScaleFactor=lambda _window: 1,
-            HighResWxSize=lambda _window, size: size,
-            getVersion=lambda: "test",
-            loadBitmapScaled=lambda *_args: None,
-        ),
-        f"{_PACKAGE}.kicad_drc": _module(
-            f"{_PACKAGE}.kicad_drc", DRCViolationCounter=object
-        ),
-        f"{_PACKAGE}.library": _module(
-            f"{_PACKAGE}.library", Library=object, LibraryState=library_state
-        ),
-        f"{_PACKAGE}.partdetails": _module(
-            f"{_PACKAGE}.partdetails", PartDetailsDialog=object
-        ),
-        f"{_PACKAGE}.partmapper": _module(
-            f"{_PACKAGE}.partmapper", PartMapperManagerDialog=object
-        ),
-        f"{_PACKAGE}.partselector": _module(
-            f"{_PACKAGE}.partselector", PartSelectorDialog=object
-        ),
-        f"{_PACKAGE}.schematicexport": _module(
-            f"{_PACKAGE}.schematicexport", SchematicExport=object
-        ),
-        f"{_PACKAGE}.settings": _module(f"{_PACKAGE}.settings", SettingsDialog=object),
-        f"{_PACKAGE}.store": _module(f"{_PACKAGE}.store", Store=object),
-        f"{_PACKAGE}.why_standard_dialog": _module(
-            f"{_PACKAGE}.why_standard_dialog", WhyStandardDialog=object
-        ),
-    }
-
-    module_name = f"{_PACKAGE}.mainwindow"
-    spec = importlib.util.spec_from_file_location(module_name, _ROOT / "mainwindow.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    module.__package__ = _PACKAGE
-    replacements[module_name] = module
-
-    logger_levels = {
-        name: logging.getLogger(name).level for name in ("requests", "urllib3")
-    }
-    try:
-        with _temporary_modules(replacements):
-            spec.loader.exec_module(module)
-    finally:
-        for name, level in logger_levels.items():
-            logging.getLogger(name).setLevel(level)
-    return module
-
-
-mainwindow = _load_mainwindow_module()
+    ),
+)
 JLCPCBTools = mainwindow.JLCPCBTools
 
 
