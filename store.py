@@ -275,7 +275,7 @@ class Store:
         with contextlib.closing(sqlite3.connect(self.dbfile)) as con, con as cur:
             result = cur.execute(
                 "UPDATE part_info SET "
-                "assembly_process = :assembly_process, "
+                "assembly_process = COALESCE(NULLIF(:assembly_process, ''), assembly_process), 
                 "component_product_type = COALESCE("
                 ":component_product_type, component_product_type) "
                 "WHERE reference = :reference "
