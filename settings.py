@@ -17,6 +17,19 @@ LCSC_PRIORITY_DATABASE = "Database"
 LCSC_PRIORITY_CHOICES = [LCSC_PRIORITY_SCHEMATIC, LCSC_PRIORITY_DATABASE]
 
 
+def _add_setting_row(grid, image, control, flags=wx.ALIGN_CENTER_VERTICAL):
+    """Add an icon | control pair to the settings grid so the controls line up.
+
+    Every row gets an icon cell, empty when the setting has no icon, so the
+    checkboxes and captions share one left edge regardless of icon size.
+    """
+    if image is None:
+        grid.Add((0, 0))
+    else:
+        grid.Add(image, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+    grid.Add(control, 0, wx.ALL | flags, 5)
+
+
 class SettingsDialog(wx.Dialog):
     """Dialog for plugin settings."""
 
@@ -76,10 +89,6 @@ class SettingsDialog(wx.Dialog):
 
         self.tented_vias_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        tented_vias_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        tented_vias_sizer.Add(self.tented_vias_image, 10, wx.ALL | wx.EXPAND, 5)
-        tented_vias_sizer.Add(self.tented_vias_setting, 100, wx.ALL | wx.EXPAND, 5)
-
         ##### Fill zones #####
 
         self.fill_zones_setting = wx.CheckBox(
@@ -106,10 +115,6 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.fill_zones_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
-        fill_zones_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        fill_zones_sizer.Add(self.fill_zones_image, 10, wx.ALL | wx.EXPAND, 5)
-        fill_zones_sizer.Add(self.fill_zones_setting, 100, wx.ALL | wx.EXPAND, 5)
 
         ##### Force DRC before Gerber export #####
 
@@ -142,10 +147,6 @@ class SettingsDialog(wx.Dialog):
 
         self.force_drc_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        force_drc_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        force_drc_sizer.Add(self.force_drc_image, 10, wx.ALL | wx.EXPAND, 5)
-        force_drc_sizer.Add(self.force_drc_setting, 100, wx.ALL | wx.EXPAND, 5)
-
         ##### Plot values #####
 
         self.plot_values_setting = wx.CheckBox(
@@ -172,10 +173,6 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.plot_values_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
-        plot_values_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        plot_values_sizer.Add(self.plot_values_image, 10, wx.ALL | wx.EXPAND, 5)
-        plot_values_sizer.Add(self.plot_values_setting, 100, wx.ALL | wx.EXPAND, 5)
 
         ##### Plot references #####
 
@@ -204,12 +201,6 @@ class SettingsDialog(wx.Dialog):
 
         self.plot_references_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        plot_references_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        plot_references_sizer.Add(self.plot_references_image, 10, wx.ALL | wx.EXPAND, 5)
-        plot_references_sizer.Add(
-            self.plot_references_setting, 100, wx.ALL | wx.EXPAND, 5
-        )
-
         ##### Subtract mask from silkscreen #####
 
         self.subtract_mask_from_silk_setting = wx.CheckBox(
@@ -229,11 +220,6 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.subtract_mask_from_silk_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
-        subtract_mask_from_silk_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        subtract_mask_from_silk_sizer.Add(
-            self.subtract_mask_from_silk_setting, 100, wx.ALL | wx.EXPAND, 5
-        )
 
         ##### LCSC priority #####
 
@@ -274,14 +260,10 @@ class SettingsDialog(wx.Dialog):
         self.lcsc_priority_setting.Bind(wx.EVT_COMBOBOX, self.update_settings)
 
         lcsc_priority_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        lcsc_priority_sizer.Add(self.lcsc_priority_image, 10, wx.ALL | wx.EXPAND, 5)
         lcsc_priority_sizer.Add(
-            lcsc_priority_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+            lcsc_priority_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
         )
-        lcsc_priority_sizer.Add(
-            self.lcsc_priority_setting, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
-        )
-        lcsc_priority_sizer.AddStretchSpacer(100)
+        lcsc_priority_sizer.Add(self.lcsc_priority_setting, 0, wx.ALIGN_CENTER_VERTICAL)
 
         ##### Only parts with LCSC number in BOM/CPL #####
 
@@ -310,10 +292,6 @@ class SettingsDialog(wx.Dialog):
 
         self.lcsc_bom_cpl_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        lcsc_bom_cpl_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_image, 10, wx.ALL | wx.EXPAND, 5)
-        lcsc_bom_cpl_sizer.Add(self.lcsc_bom_cpl_setting, 100, wx.ALL | wx.EXPAND, 5)
-
         ##### Check if order/serial number placeholder is present #####
 
         self.order_number_setting = wx.CheckBox(
@@ -341,10 +319,6 @@ class SettingsDialog(wx.Dialog):
 
         self.order_number_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
 
-        order_number_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        order_number_sizer.Add(self.order_number_image, 10, wx.ALL | wx.EXPAND, 5)
-        order_number_sizer.Add(self.order_number_setting, 100, wx.ALL | wx.EXPAND, 5)
-
         ##### Highlight text matches ######
 
         self.highlight_matches_setting = wx.CheckBox(
@@ -364,11 +338,6 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.highlight_matches_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
-
-        highlight_matches_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        highlight_matches_sizer.Add(
-            self.highlight_matches_setting, 100, wx.ALL | wx.EXPAND, 5
-        )
 
         ##### Library Selection #####
 
@@ -399,8 +368,8 @@ class SettingsDialog(wx.Dialog):
         self.library_selected_setting.Bind(wx.EVT_COMBOBOX, self.update_settings)
 
         library_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        library_sizer.Add(library_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        library_sizer.Add(self.library_selected_setting, 1, wx.ALL | wx.EXPAND, 5)
+        library_sizer.Add(library_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5)
+        library_sizer.Add(self.library_selected_setting, 1, wx.EXPAND)
 
         ##### Library Data Directory #####
 
@@ -438,11 +407,9 @@ class SettingsDialog(wx.Dialog):
 
         library_data_path_sizer = wx.BoxSizer(wx.HORIZONTAL)
         library_data_path_sizer.Add(
-            library_data_path_label, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5
+            library_data_path_label, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
         )
-        library_data_path_sizer.Add(
-            self.library_data_path_setting, 1, wx.ALL | wx.EXPAND, 5
-        )
+        library_data_path_sizer.Add(self.library_data_path_setting, 1, wx.EXPAND)
 
         ##### Generation hooks #####
 
@@ -621,39 +588,53 @@ class SettingsDialog(wx.Dialog):
 
         bom_estimator_show_sizer = wx.BoxSizer(wx.HORIZONTAL)
         bom_estimator_show_sizer.Add(
-            self.bom_estimator_show_image, 10, wx.ALL | wx.EXPAND, 5
+            self.bom_estimator_show_setting, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
         )
+        bom_estimator_show_sizer.AddStretchSpacer()
         bom_estimator_show_sizer.Add(
-            self.bom_estimator_show_setting, 100, wx.ALL | wx.EXPAND, 5
-        )
-        bom_estimator_show_sizer.Add(
-            self.bom_estimator_help_button,
-            0,
-            wx.ALL | wx.ALIGN_CENTER_VERTICAL,
-            5,
+            self.bom_estimator_help_button, 0, wx.ALIGN_CENTER_VERTICAL
         )
 
         # ---------------------------------------------------------------------
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        settings_grid = wx.GridSizer(0, 2, 0, 0)
-        settings_grid.Add(tented_vias_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(fill_zones_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(force_drc_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(plot_values_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(plot_references_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(subtract_mask_from_silk_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(lcsc_priority_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(lcsc_bom_cpl_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(order_number_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(highlight_matches_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(bom_estimator_show_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(library_sizer, 0, wx.ALL | wx.EXPAND, 5)
-        settings_grid.Add(library_data_path_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        # Two settings columns, each an icon cell plus a control cell, so the
+        # checkboxes line up whatever the icon size (or absence of an icon).
+        settings_grid = wx.FlexGridSizer(0, 4, 0, 0)
+        settings_grid.AddGrowableCol(1, 1)
+        settings_grid.AddGrowableCol(3, 1)
+        _add_setting_row(
+            settings_grid, self.tented_vias_image, self.tented_vias_setting
+        )
+        _add_setting_row(settings_grid, self.fill_zones_image, self.fill_zones_setting)
+        _add_setting_row(settings_grid, self.force_drc_image, self.force_drc_setting)
+        _add_setting_row(
+            settings_grid, self.plot_values_image, self.plot_values_setting
+        )
+        _add_setting_row(
+            settings_grid, self.plot_references_image, self.plot_references_setting
+        )
+        _add_setting_row(settings_grid, None, self.subtract_mask_from_silk_setting)
+        _add_setting_row(settings_grid, self.lcsc_priority_image, lcsc_priority_sizer)
+        _add_setting_row(
+            settings_grid, self.lcsc_bom_cpl_image, self.lcsc_bom_cpl_setting
+        )
+        _add_setting_row(
+            settings_grid, self.order_number_image, self.order_number_setting
+        )
+        _add_setting_row(settings_grid, None, self.highlight_matches_setting)
+        _add_setting_row(
+            settings_grid,
+            self.bom_estimator_show_image,
+            bom_estimator_show_sizer,
+            wx.EXPAND,
+        )
+        _add_setting_row(settings_grid, None, library_sizer, wx.EXPAND)
+        _add_setting_row(settings_grid, None, library_data_path_sizer, wx.EXPAND)
 
         layout = wx.BoxSizer(wx.VERTICAL)
-        layout.Add(settings_grid, 1, wx.ALL | wx.EXPAND, 5)
+        layout.Add(settings_grid, 0, wx.ALL | wx.EXPAND, 5)
         layout.Add(hooks_box_sizer, 0, wx.ALL | wx.EXPAND, 5)
 
         self.SetSizer(layout)
