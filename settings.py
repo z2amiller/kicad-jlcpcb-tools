@@ -17,17 +17,8 @@ LCSC_PRIORITY_DATABASE = "Database"
 LCSC_PRIORITY_CHOICES = [LCSC_PRIORITY_SCHEMATIC, LCSC_PRIORITY_DATABASE]
 
 
-def _add_setting_row(grid, image, control, flags=wx.ALIGN_CENTER_VERTICAL):
-    """Add an icon | control pair to the settings grid so the controls line up.
-
-    Every row gets an icon cell, empty when the setting has no icon, so the
-    checkboxes and captions share one left edge regardless of icon size.
-    """
-    if image is None:
-        grid.Add((0, 0))
-    else:
-        grid.Add(image, 0, wx.ALL | wx.ALIGN_CENTER, 5)
-    grid.Add(control, 0, wx.ALL | flags, 5)
+# Side of the square icon cell in every settings row (largest icon is 48 px).
+ICON_CELL_SIZE = 48
 
 
 class SettingsDialog(wx.Dialog):
@@ -599,39 +590,46 @@ class SettingsDialog(wx.Dialog):
         # ---------------------- Main Layout Sizer ----------------------------
         # ---------------------------------------------------------------------
 
-        # Two settings columns, each an icon cell plus a control cell, so the
-        # checkboxes line up whatever the icon size (or absence of an icon).
+        # Two settings columns, each a fixed-size icon cell plus a control cell,
+        # so the controls line up and every row has the same height whatever
+        # the icon size (or absence of an icon).
         settings_grid = wx.FlexGridSizer(0, 4, 0, 0)
         settings_grid.AddGrowableCol(1, 1)
         settings_grid.AddGrowableCol(3, 1)
-        _add_setting_row(
+        self._add_setting_row(
             settings_grid, self.tented_vias_image, self.tented_vias_setting
         )
-        _add_setting_row(settings_grid, self.fill_zones_image, self.fill_zones_setting)
-        _add_setting_row(settings_grid, self.force_drc_image, self.force_drc_setting)
-        _add_setting_row(
+        self._add_setting_row(
+            settings_grid, self.fill_zones_image, self.fill_zones_setting
+        )
+        self._add_setting_row(
+            settings_grid, self.force_drc_image, self.force_drc_setting
+        )
+        self._add_setting_row(
             settings_grid, self.plot_values_image, self.plot_values_setting
         )
-        _add_setting_row(
+        self._add_setting_row(
             settings_grid, self.plot_references_image, self.plot_references_setting
         )
-        _add_setting_row(settings_grid, None, self.subtract_mask_from_silk_setting)
-        _add_setting_row(settings_grid, self.lcsc_priority_image, lcsc_priority_sizer)
-        _add_setting_row(
+        self._add_setting_row(settings_grid, None, self.subtract_mask_from_silk_setting)
+        self._add_setting_row(
+            settings_grid, self.lcsc_priority_image, lcsc_priority_sizer
+        )
+        self._add_setting_row(
             settings_grid, self.lcsc_bom_cpl_image, self.lcsc_bom_cpl_setting
         )
-        _add_setting_row(
+        self._add_setting_row(
             settings_grid, self.order_number_image, self.order_number_setting
         )
-        _add_setting_row(settings_grid, None, self.highlight_matches_setting)
-        _add_setting_row(
+        self._add_setting_row(settings_grid, None, self.highlight_matches_setting)
+        self._add_setting_row(
             settings_grid,
             self.bom_estimator_show_image,
             bom_estimator_show_sizer,
             wx.EXPAND,
         )
-        _add_setting_row(settings_grid, None, library_sizer, wx.EXPAND)
-        _add_setting_row(settings_grid, None, library_data_path_sizer, wx.EXPAND)
+        self._add_setting_row(settings_grid, None, library_sizer, wx.EXPAND)
+        self._add_setting_row(settings_grid, None, library_data_path_sizer, wx.EXPAND)
 
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(settings_grid, 0, wx.ALL | wx.EXPAND, 5)
@@ -642,6 +640,23 @@ class SettingsDialog(wx.Dialog):
         self.Centre(wx.BOTH)
 
         self.load_settings()
+
+    def _add_setting_row(self, grid, image, control, flags=wx.ALIGN_CENTER_VERTICAL):
+        """Add an icon | control pair to the settings grid.
+
+        The icon sits centred in a square cell of fixed size (empty when the
+        setting has no icon), so controls share one left edge and rows share
+        one pitch regardless of icon size.
+        """
+        side = int(round(ICON_CELL_SIZE * self.parent.scale_factor))
+        icon_cell = wx.BoxSizer(wx.HORIZONTAL)
+        icon_cell.SetMinSize(side, side)
+        if image is not None:
+            icon_cell.AddStretchSpacer()
+            icon_cell.Add(image, 0, wx.ALIGN_CENTER_VERTICAL)
+            icon_cell.AddStretchSpacer()
+        grid.Add(icon_cell, 0, wx.ALL, 5)
+        grid.Add(control, 0, wx.ALL | flags, 5)
 
     def update_tented_vias(self, tented):
         """Update settings dialog according to the settings."""
