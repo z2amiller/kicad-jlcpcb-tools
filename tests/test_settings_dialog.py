@@ -263,7 +263,7 @@ _EXPECTED_LABELS = {
     "plot_references_setting": "Plot references on silkscreen",
     "subtract_mask_from_silk_setting": "Subtract soldermask from silkscreen",
     "lcsc_bom_cpl_setting": "Add parts without LCSC number to BOM/CPL",
-    "order_number_setting": ("Check for an order/serial number placeholder on export"),
+    "order_number_setting": "Check for an order/serial number placeholder on export",
     "highlight_matches_setting": "Highlight search matches",
     "bom_estimator_show_setting": "Show BOM cost estimator",
 }
