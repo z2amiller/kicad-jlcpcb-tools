@@ -163,6 +163,45 @@ class TestWritingTheField:
         assert [f.GetName() for f in footprint.GetFields()] == ["LCSC Part #"]
         assert field.GetText() == "C99999"
 
+    def test_it_writes_the_field_that_reading_will_use(self):
+        """Assignment lands in the field get_lcsc_value reads back.
+
+        A footprint can carry more than one matching field -- the duplicate
+        pair the old set_lcsc_value created is exactly that. Reading took the
+        first match and writing took the last, so on those boards an
+        assignment went into a field nothing read, and the part silently
+        reverted to its stale value on the next reload.
+        """
+        footprint = FakeFootprint(
+            FakeField("LCSC Part #", "C12345 "),
+            FakeField("LCSC", "C99999"),
+        )
+        set_lcsc_value(footprint, "C77777")
+        assert get_lcsc_value(footprint) == "C77777"
+
+    def test_it_writes_the_first_matching_field(self):
+        """The user's own field is written, not a later duplicate."""
+        user_field = FakeField("LCSC Part #", "C12345 ")
+        stale = FakeField("LCSC", "C99999")
+        set_lcsc_value(FakeFootprint(user_field, stale), "C77777")
+        assert user_field.GetText() == "C77777"
+        assert stale.GetText() == "C99999"
+
+    def test_clearing_removes_every_claim_on_the_part(self):
+        """Removal clears all matching fields, not just the first.
+
+        remove_lcsc_number exists to say "this part has no LCSC number". A
+        duplicate field left over from an older version still claiming one
+        would put the part straight back on the next reload, since the store
+        is rebuilt from the board.
+        """
+        footprint = FakeFootprint(
+            FakeField("LCSC Part #", "C12345 "),
+            FakeField("LCSC", "C99999"),
+        )
+        set_lcsc_value(footprint, "")
+        assert get_lcsc_value(footprint) == ""
+
     def test_the_written_value_is_canonical(self):
         """A part number is stored trimmed and upper case."""
         footprint = FakeFootprint(FakeField("LCSC Part #", "C12345"))

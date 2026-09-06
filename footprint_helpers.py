@@ -17,14 +17,27 @@ def is_lcsc_part(value):
     return bool(re.match(r"^C\d+$", normalize_lcsc(value)))
 
 
+def find_lcsc_field(fp):
+    """Return the field holding this footprint's LCSC part number, or None.
+
+    Reading and writing must agree on which field that is. A footprint can
+    carry more than one field whose name matches, and picking a different one
+    on each side means an assignment lands somewhere the next read ignores.
+    """
+    for field in fp.GetFields():
+        if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and is_lcsc_part(
+            field.GetText()
+        ):
+            return field
+    return None
+
+
 def get_lcsc_value(fp):
     """Get the first lcsc number (C123456 for example) from the properties of the footprint."""
     try:
-        for field in fp.GetFields():
-            if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and is_lcsc_part(
-                field.GetText()
-            ):
-                return normalize_lcsc(field.GetText())
+        field = find_lcsc_field(fp)
+        if field is not None:
+            return normalize_lcsc(field.GetText())
     except AttributeError:
         for key, value in fp.GetProperties().items():
             if re.match(r"lcsc|jlc", key, re.IGNORECASE) and is_lcsc_part(value):
@@ -37,12 +50,17 @@ def set_lcsc_value(fp, lcsc: str):
     if not fp:
         return
     lcsc = normalize_lcsc(lcsc)
-    lcsc_field = None
-    for field in fp.GetFields():
-        if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and is_lcsc_part(
-            field.GetText()
-        ):
-            lcsc_field = field
+    lcsc_field = find_lcsc_field(fp)
+
+    if not lcsc:
+        # Removing a part number has to clear every field claiming one, or a
+        # duplicate left over from an older version keeps the part assigned.
+        for field in fp.GetFields():
+            if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and is_lcsc_part(
+                field.GetText()
+            ):
+                fp.SetField(field.GetName(), "")
+        return
 
     if lcsc_field:
         fp.SetField(lcsc_field.GetName(), lcsc)
