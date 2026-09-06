@@ -113,6 +113,10 @@ def _load_mainwindow_module():
         "wx.adv": wx_adv,
         _PACKAGE: package,
         f"{_PACKAGE}.bom_estimation": bom_estimation_package,
+        f"{_PACKAGE}.bom_estimation.assembly_mode": _module(
+            f"{_PACKAGE}.bom_estimation.assembly_mode",
+            classify_component_product_type=lambda _value: None,
+        ),
         f"{_PACKAGE}.bom_estimation.help_text": _module(
             f"{_PACKAGE}.bom_estimation.help_text",
             show_bom_estimator_help=lambda *_args, **_kwargs: None,
@@ -126,7 +130,9 @@ def _load_mainwindow_module():
             f"{_PACKAGE}.corrections", CorrectionManagerDialog=object
         ),
         f"{_PACKAGE}.datamodel": _module(
-            f"{_PACKAGE}.datamodel", PartListDataModel=object
+            f"{_PACKAGE}.datamodel",
+            PartListDataModel=object,
+            STANDARD_ONLY_TOOLTIP="",
         ),
         f"{_PACKAGE}.dataview_highlight": _module(
             f"{_PACKAGE}.dataview_highlight",
@@ -185,10 +191,11 @@ def _load_mainwindow_module():
         f"{_PACKAGE}.schematicexport": _module(
             f"{_PACKAGE}.schematicexport", SchematicExport=object
         ),
-        f"{_PACKAGE}.settings": _module(
-            f"{_PACKAGE}.settings", SettingsDialog=object
-        ),
+        f"{_PACKAGE}.settings": _module(f"{_PACKAGE}.settings", SettingsDialog=object),
         f"{_PACKAGE}.store": _module(f"{_PACKAGE}.store", Store=object),
+        f"{_PACKAGE}.why_standard_dialog": _module(
+            f"{_PACKAGE}.why_standard_dialog", WhyStandardDialog=object
+        ),
     }
 
     module_name = f"{_PACKAGE}.mainwindow"
