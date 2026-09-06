@@ -60,6 +60,7 @@ from .footprint_helpers import (
     toggle_exclude_from_pos,
 )
 from .generate_hooks import format_hook_error, run_configured_hook
+from .lcsc import extract_lcsc, normalize_lcsc
 from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
@@ -1161,8 +1162,9 @@ class JLCPCBTools(wx.Dialog):
                 continue
             is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
-            if part["lcsc"] and part["lcsc"] not in details:
-                details[part["lcsc"]] = self.library.get_part_details(part["lcsc"])
+            lcsc = normalize_lcsc(part["lcsc"])
+            if lcsc and lcsc not in details:
+                details[lcsc] = self.library.get_part_details(lcsc)
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
                 continue
@@ -1175,14 +1177,14 @@ class JLCPCBTools(wx.Dialog):
                     part["value"],
                     part["footprint"],
                     part["lcsc"],
-                    details.get(part["lcsc"], {}).get("type", ""),  # type
-                    details.get(part["lcsc"], {}).get("stock", ""),  # stock
+                    details.get(lcsc, {}).get("type", ""),  # type
+                    details.get(lcsc, {}).get("stock", ""),  # stock
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
                     int(is_dnp),
                     str(self.get_correction(part, corrections)),
                     str(fp.GetLayer()),
-                    params_for_part(details.get(part["lcsc"], {})),
+                    params_for_part(details.get(lcsc, {})),
                     self._get_enrichment_status_label(part),  # enrichment
                     "",  # bom price label
                 ]
@@ -1875,7 +1877,7 @@ class JLCPCBTools(wx.Dialog):
             success = wx.TheClipboard.GetData(text_data)
             wx.TheClipboard.Close()
         if success:
-            if (lcsc := self.sanitize_lcsc(text_data.GetText())) != "":
+            if (lcsc := extract_lcsc(text_data.GetText())) != "":
                 updated_references = []
                 for item in self.footprint_list.GetSelections():
                     details = self.library.get_part_details(lcsc)
@@ -1964,13 +1966,6 @@ class JLCPCBTools(wx.Dialog):
                     )
                     self.start_assembly_enrichment([reference])
         self.recompute_bom_estimate()
-
-    def sanitize_lcsc(self, lcsc_PN):
-        """Sanitize a given LCSC number using a regex."""
-        m = re.search("C\\d+", lcsc_PN, re.IGNORECASE)
-        if m:
-            return m.group(0)
-        return ""
 
     def OnRightDown(self, *_):
         """Right click context menu for action on parts table."""

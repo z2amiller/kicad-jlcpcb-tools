@@ -22,6 +22,7 @@ from .events import (
     MessageEvent,
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
+from .lcsc import normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
@@ -499,7 +500,12 @@ class Library:
                 "First Category" as category, "Price" as price
                 FROM parts WHERE parts MATCH :number"""
             cur.execute(query, {"number": number})
-            return next((n for n in cur.fetchall() if n["lcsc"] == number), {})
+            # The FTS5 match is not exact, so the row still has to be confirmed;
+            # compare canonically or a differently spelled number finds nothing.
+            wanted = normalize_lcsc(number)
+            return next(
+                (n for n in cur.fetchall() if normalize_lcsc(n["lcsc"]) == wanted), {}
+            )
 
     def update(self):
         """Update the sqlite parts database from the JLCPCB CSV."""
