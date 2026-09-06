@@ -33,7 +33,7 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
-from .footprint_helpers import get_is_dnp, get_lcsc_value
+from .footprint_helpers import get_is_dnp
 
 # Compatibility hack for V6 / V7 / V7.99
 try:
@@ -166,20 +166,23 @@ class Fabrication:
                 return rotation, offset
         return None
 
-    def _find_lcsc_correction(self, footprint):
-        """Return (rotation, offset) for the footprint's exact LCSC part, if any.
+    def _find_lcsc_correction(self, lcsc):
+        """Return (rotation, offset) for this exact LCSC part, if any.
 
         Per-part corrections win over the regex table: two parts can share a
         KiCad footprint name and still need different rotations, because the
         package JLC assembles is a property of the LCSC number, not of the
         name we happened to give the footprint.
+
+        The part number comes from the store, the same source the BOM orders
+        from, so a correction can never be resolved against a different part
+        than the one being assembled.
         """
-        lcsc = get_lcsc_value(footprint)
         if not lcsc:
             return None
         return self.lcsc_corrections.get(str(lcsc))
 
-    def fix_rotation(self, footprint):
+    def fix_rotation(self, footprint, lcsc=""):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
         original = footprint.GetOrientation()
         # `.AsDegrees()` added in KiCAD 6.99
@@ -192,7 +195,7 @@ class Fabrication:
         if footprint.GetLayer() != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
-        match = self._find_lcsc_correction(footprint)
+        match = self._find_lcsc_correction(lcsc)
         if match:
             return self.rotate(footprint, rotation, match[0])
         for getter in (
@@ -253,9 +256,9 @@ class Fabrication:
             return wxPoint(position.x + offset_x, position.y + offset_y)
         return position
 
-    def fix_position(self, footprint, position):
+    def fix_position(self, footprint, position, lcsc=""):
         """Fix the position of footprints in order to be correct for JLCPCB."""
-        match = self._find_lcsc_correction(footprint)
+        match = self._find_lcsc_correction(lcsc)
         if match:
             return self.reposition(footprint, position, match[1])
         for getter in (
@@ -479,7 +482,7 @@ class Fabrication:
                     x1, y1 = self.get_position(fp)
                     x2, y2 = aux_orgin
                     position = VECTOR2I(x1 - x2, y1 - y2)
-                position = self.fix_position(fp, position)
+                position = self.fix_position(fp, position, part["lcsc"])
                 writer.writerow(
                     [
                         part["reference"],
@@ -491,7 +494,7 @@ class Fabrication:
                         # https://docs.kicad.org/doxygen/base__units_8h.html
                         f"{ToMM(position.x):.6f}",
                         f"{ToMM(position.y) * -1:.6f}",
-                        self.fix_rotation(fp),
+                        self.fix_rotation(fp, part["lcsc"]),
                         "top" if fp.GetLayer() == 0 else "bottom",
                     ]
                 )

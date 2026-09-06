@@ -195,6 +195,35 @@ class TestGlobalLocalSwitch:
         assert "correction" not in table_names(library.localcorrectionsdb_file)
         assert "lcsc_correction" not in table_names(library.localcorrectionsdb_file)
 
+    def test_going_global_creates_the_table_it_switches_to(self, tmp_path):
+        """A global database predating the LCSC table gains it on the switch.
+
+        check_library only reaches whichever database was selected when the
+        plugin started. A board using board-local corrections therefore leaves
+        an older global corrections.db untouched, and switching to it used to
+        land on a database with no lcsc_correction table at all -- reads
+        returned empty and the next save raised OperationalError.
+        """
+        lib = object.__new__(Library)
+        lib.logger = MagicMock()
+        lib.globalcorrectionsdb_file = str(tmp_path / "corrections.db")
+        lib.localcorrectionsdb_file = str(tmp_path / "project.db")
+
+        # an old global database: correction only, no lcsc_correction
+        lib.correctionsdb_file = lib.globalcorrectionsdb_file
+        lib.create_correction_table()
+
+        # the board starts out on its own local database, as at plugin startup
+        lib.correctionsdb_file = lib.localcorrectionsdb_file
+        lib.create_correction_table()
+        lib.create_lcsc_correction_table()
+
+        lib.switch_to_global_correction_database(True)
+
+        assert "lcsc_correction" in table_names(lib.globalcorrectionsdb_file)
+        lib.insert_lcsc_correction_data("C12345", 90, (0.0, 0.0))
+        assert lib.get_all_lcsc_correction_data() == [("C12345", 90, (0.0, 0.0))]
+
     def test_switching_to_the_current_database_is_a_no_op(self, library):
         """Asking for the database already in use changes nothing."""
         library.insert_lcsc_correction_data("C12345", 90, (0.0, 0.0))

@@ -201,6 +201,9 @@ class Library:
                     cur.execute("DROP TABLE IF EXISTS lcsc_correction")
                     cur.commit()
                 self.correctionsdb_file = self.globalcorrectionsdb_file
+                # check_library only reached whichever database was selected at
+                # startup, so the one being switched to may still lack it.
+                self.create_lcsc_correction_table()
             except OSError:
                 self.logger.warning("Failed to remove board local corrections file.")
         else:
@@ -435,11 +438,10 @@ class Library:
             )
             cur.commit()
 
-    def get_lcsc_correction_data(self, lcsc, db_path=None):
+    def get_lcsc_correction_data(self, lcsc):
         """Get the correction data for exactly this LCSC part number."""
-        target = db_path if db_path is not None else self.correctionsdb_file
         with (
-            contextlib.closing(sqlite3.connect(target)) as con,
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
             con as cur,
         ):
             try:
@@ -473,11 +475,10 @@ class Library:
             )
             cur.commit()
 
-    def insert_lcsc_correction_data(self, lcsc, rotation, offset, db_path=None):
+    def insert_lcsc_correction_data(self, lcsc, rotation, offset):
         """Insert an LCSC correction into the database."""
-        target = db_path if db_path is not None else self.correctionsdb_file
         with (
-            contextlib.closing(sqlite3.connect(target)) as con,
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
             con as cur,
         ):
             cur.execute(

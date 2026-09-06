@@ -505,8 +505,10 @@ class CorrectionManagerDialog(wx.Dialog):
             if row_of_that_regex is None:
                 # the regex is a new one, just create it or update the selected entry
 
-                if self.selection_regex is not None:
-                    # remove old line, if one existed
+                if self.selection_regex is not None and self.selection_kind == kind:
+                    # the key was edited, so move the rule rather than add a
+                    # second one. Switching kind is not an edit of the same
+                    # rule, so it leaves the original alone.
                     self.delete_rule(self.selection_kind, self.selection_regex)
 
                 # Add the modified regex and values
@@ -584,7 +586,10 @@ class CorrectionManagerDialog(wx.Dialog):
                     result = dialog.ShowModal()
 
                     if result == wx.ID_YES:
-                        if self.selection_regex is not None:
+                        if (
+                            self.selection_regex is not None
+                            and self.selection_kind == kind
+                        ):
                             self.delete_rule(self.selection_kind, self.selection_regex)
                         self.update_rule(kind, regex, rotation, offset)
                         self.selection_regex = regex
