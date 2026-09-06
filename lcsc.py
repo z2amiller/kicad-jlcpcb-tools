@@ -61,7 +61,7 @@ def extract_lcsc(text):
     return str(found) if found else ""
 
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class Lcsc:
     """A JLCPCB/LCSC part number, known to be well formed and canonical.
 
@@ -71,6 +71,11 @@ class Lcsc:
     no further checking -- which is the whole point of having the type. It is
     frozen, so it can be a dict key, and it renders as the bare number, so it
     can be formatted straight into a query, a CSV cell or a log line.
+
+    Deliberately not ordered. Comparing the strings would put C10000 before
+    C9999, and comparing the digits would invent a ranking that means nothing
+    -- part numbers are identifiers, not quantities. Sort with an explicit key
+    if a display ever needs one.
 
         >>> part = Lcsc.parse(" c12345 ")
         >>> str(part)

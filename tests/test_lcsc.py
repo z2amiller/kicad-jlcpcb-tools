@@ -191,10 +191,16 @@ class TestLcscBehaviour:
         with pytest.raises(Exception):
             part.value = "C99999"
 
-    def test_it_sorts_by_number(self):
-        """Ordering is defined, so part lists can be sorted without a key."""
-        parts = [Lcsc("C12345"), Lcsc("C1002"), Lcsc("C99999")]
-        assert [str(p) for p in sorted(parts)] == ["C1002", "C12345", "C99999"]
+    def test_parts_do_not_compare_as_greater_or_lesser(self):
+        """Ordering is left undefined on purpose, so nobody relies on a wrong one.
+
+        String order puts C10000 before C9999, and numeric order would invent
+        a ranking that means nothing, since part numbers are identifiers
+        rather than quantities. Refusing the comparison is better than
+        answering it misleadingly.
+        """
+        with pytest.raises(TypeError):
+            Lcsc("C10000") < Lcsc("C9999")
 
 
 class TestHelpersAgreeWithTheType:
