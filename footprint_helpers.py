@@ -2,22 +2,33 @@
 
 import re
 
+from .lcsc import normalize_lcsc
+
 EXCLUDE_FROM_POS = 2
 EXCLUDE_FROM_BOM = 3
+
+
+def is_lcsc_part(value):
+    """Report whether a field value names an LCSC part.
+
+    The value is normalised first, so a number typed into a schematic field
+    with a stray space or in lower case still reads as the part it names.
+    """
+    return bool(re.match(r"^C\d+$", normalize_lcsc(value)))
 
 
 def get_lcsc_value(fp):
     """Get the first lcsc number (C123456 for example) from the properties of the footprint."""
     try:
         for field in fp.GetFields():
-            if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and re.match(
-                r"^C\d+$", field.GetText()
+            if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and is_lcsc_part(
+                field.GetText()
             ):
-                return field.GetText()
+                return normalize_lcsc(field.GetText())
     except AttributeError:
         for key, value in fp.GetProperties().items():
-            if re.match(r"lcsc|jlc", key, re.IGNORECASE) and re.match(r"^C\d+$", value):
-                return value
+            if re.match(r"lcsc|jlc", key, re.IGNORECASE) and is_lcsc_part(value):
+                return normalize_lcsc(value)
     return ""
 
 
@@ -25,10 +36,11 @@ def set_lcsc_value(fp, lcsc: str):
     """Set an lcsc number on the footprint, using LCSC as property name if needed."""
     if not fp:
         return
+    lcsc = normalize_lcsc(lcsc)
     lcsc_field = None
     for field in fp.GetFields():
-        if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and re.match(
-            r"^C\d+$", field.GetText()
+        if re.match(r"lcsc|jlc", field.GetName(), re.IGNORECASE) and is_lcsc_part(
+            field.GetText()
         ):
             lcsc_field = field
 
