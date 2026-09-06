@@ -45,26 +45,17 @@ def temporary_modules(replacements):
                 sys.modules[name] = restored
 
 
-class FakeWidget:
-    """Permissive stand-in for wx objects whose state the tests never inspect."""
-
-    def __init__(self, *args, **kwargs):
-        self.args = args
-        self.kwargs = kwargs
-
-    def __getattr__(self, name):
-        """Answer wx-style method calls with a no-op, and nothing else."""
-        if name[:1].isupper():
-            return lambda *_args, **_kwargs: None
-        raise AttributeError(name)
-
-
 class FakeWxModule(types.ModuleType):
-    """A wx-shaped module that mints the attributes it is asked for.
+    """A wx-shaped module that mints the flag constants it is asked for.
 
-    ``UPPER_CASE`` names become distinct single-bit flags, so a test can assert
-    on style arithmetic (``style & wx.ICON_WARNING``) without two unrelated
-    flags colliding.  Any other name becomes a permissive widget class.
+    ``UPPER_CASE`` names become distinct single-bit values, so a test can
+    assert on style arithmetic (``style & wx.ICON_WARNING``) without two
+    unrelated flags colliding, and no test has to hand-number its constants.
+
+    Everything else -- classes, functions, submodules -- must be supplied
+    explicitly by the caller.  An attribute nobody supplied raises
+    ``AttributeError`` rather than resolving to something callable, so a
+    misspelled wx call fails the test instead of quietly succeeding.
     """
 
     def __init__(self, name, **symbols):
@@ -73,10 +64,10 @@ class FakeWxModule(types.ModuleType):
         self.__dict__.update(symbols)
 
     def __getattr__(self, name):
-        """Mint a flag or a widget class for an attribute nobody supplied."""
-        if name.startswith("__"):
+        """Mint a flag; reject any other attribute that was not supplied."""
+        if not name.isupper() or name.startswith("__"):
             raise AttributeError(name)
-        value = 1 << next(self._bits) if name.isupper() else FakeWidget
+        value = 1 << next(self._bits)
         setattr(self, name, value)
         return value
 
@@ -129,9 +120,11 @@ def mainwindow_stubs(package, *, wx=None, pcbnew=None, **overrides):
     stubs.update(wx_stubs() if wx is None else wx)
     stubs["pcbnew"] = module("pcbnew") if pcbnew is None else pcbnew
 
-    # events.py falls back to a plain event factory when wx.lib is missing, and
-    # the fake wx has no submodules, so the real module loads here.  Using it
-    # keeps the event names from drifting out of step with a copy.
+    # events.py falls back to a plain event factory when wx.lib is missing.
+    # The stub submodules are limited to the ones wired up above and the fake
+    # wx has an empty __path__, so wx.lib cannot be found and the fallback is
+    # taken here -- even where wxPython is installed.  Loading the real module
+    # keeps its event names from drifting out of step with a copy.
     stubs[f"{package}.events"] = load(package, "events", stubs)
 
     symbols = {
