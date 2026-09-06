@@ -60,7 +60,7 @@ from .footprint_helpers import (
     toggle_exclude_from_pos,
 )
 from .generate_hooks import format_hook_error, run_configured_hook
-from .lcsc import Lcsc, extract_lcsc
+from .lcsc import Lcsc, extract_lcsc, format_lcsc
 from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
@@ -1178,7 +1178,10 @@ class JLCPCBTools(wx.Dialog):
                     part["reference"],
                     part["value"],
                     part["footprint"],
-                    part["lcsc"],
+                    # The canonical form, so the column agrees with the details
+                    # beside it rather than showing whatever spelling the store
+                    # happens to hold.
+                    format_lcsc(lcsc),
                     details.get(lcsc, {}).get("type", ""),  # type
                     details.get(lcsc, {}).get("stock", ""),  # stock
                     part["exclude_from_bom"],

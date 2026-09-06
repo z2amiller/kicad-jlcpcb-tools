@@ -182,8 +182,10 @@ def mainwindow_stubs(package, *, wx=None, pcbnew=None, **overrides):
     }
     symbols.update(overrides)
     stubs.update(
-        {f"{package}.{suffix}": module(f"{package}.{suffix}", **values)
-         for suffix, values in symbols.items()}
+        {
+            f"{package}.{suffix}": module(f"{package}.{suffix}", **values)
+            for suffix, values in symbols.items()
+        }
     )
     return stubs
 

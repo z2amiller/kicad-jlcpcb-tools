@@ -123,3 +123,14 @@ class Lcsc:
     def __str__(self) -> str:
         """Render as the bare canonical part number."""
         return self.value
+
+
+def format_lcsc(part) -> str:
+    """Render a part, or the absence of one, for something that wants a string.
+
+    Absence is ``None`` everywhere inside the plugin; the empty string is what
+    sqlite columns, CSV cells and wx list cells use to mean the same thing.
+    This is the boundary between those two conventions, so that no caller has
+    to decide for itself what an absent part looks like.
+    """
+    return str(part) if part is not None else ""

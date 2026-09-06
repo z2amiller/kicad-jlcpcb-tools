@@ -1,5 +1,6 @@
 """Tests for the single definition of an LCSC part number."""
 
+import dataclasses
 import importlib.util
 from pathlib import Path
 
@@ -14,6 +15,7 @@ _spec.loader.exec_module(_lcsc)
 
 normalize_lcsc = _lcsc.normalize_lcsc
 Lcsc = _lcsc.Lcsc
+format_lcsc = _lcsc.format_lcsc
 is_lcsc_part = _lcsc.is_lcsc_part
 extract_lcsc = _lcsc.extract_lcsc
 
@@ -188,7 +190,7 @@ class TestLcscBehaviour:
     def test_it_is_immutable(self):
         """A part cannot be edited into a different part after validation."""
         part = Lcsc("C12345")
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             part.value = "C99999"
 
     def test_parts_do_not_compare_as_greater_or_lesser(self):
@@ -220,3 +222,30 @@ class TestHelpersAgreeWithTheType:
         """extract_lcsc is find_in rendered as a string."""
         found = Lcsc.find_in(text)
         assert extract_lcsc(text) == (str(found) if found else "")
+
+
+class TestAbsence:
+    """Absence is None inside the plugin and "" only at the edges."""
+
+    def test_there_is_no_empty_part(self):
+        """No value of Lcsc represents "no part"; that is what None is for."""
+        assert Lcsc.parse("") is None
+        assert Lcsc.parse(None) is None
+        with pytest.raises(ValueError):
+            Lcsc("")
+
+    def test_format_renders_a_part_as_its_number(self):
+        """A part renders as the bare canonical number."""
+        assert format_lcsc(Lcsc(" c12345 ")) == "C12345"
+
+    def test_format_renders_absence_as_empty(self):
+        """None becomes the empty string the storage layers expect."""
+        assert format_lcsc(None) == ""
+
+    def test_format_is_what_a_string_boundary_should_call(self):
+        """Rendering an absent part never produces "None" in a cell.
+
+        str(None) would put the text "None" into a CSV cell or a list column,
+        which is the failure this helper exists to make impossible.
+        """
+        assert format_lcsc(None) != str(None)
