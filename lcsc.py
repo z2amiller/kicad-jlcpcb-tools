@@ -1,41 +1,19 @@
 r"""Canonical handling of LCSC part numbers.
 
 Part numbers reach the plugin from a footprint field, the clipboard, the parts
-database and the mapping table, and only some of those sources are already
-upper case and unpadded. Every question about a part number -- is this one,
-what is one called, is there one in this text -- is answered here, so the
-answers cannot drift apart.
-
-This module is where the decision belongs. Three separate spellings of it had
-drifted apart before it existed: two anchored patterns in footprint_helpers and
-an unanchored, case-insensitive one in mainwindow, which disagreed about
-whether "C12345 " was a part number at all. Reach for is_lcsc_part or
-extract_lcsc rather than writing a fourth.
-
-The consolidation is not finished. footprint_helpers still carries its own
-``^C\d+$`` in get_lcsc_value and set_lcsc_value, and store.update_from_board
-populates the parts list through it, so a schematic field holding "C12345 " or
-"c12345" is still discarded before anything here sees it -- that is issue #773,
-fixed separately. Note the two rules disagree in both directions until then:
-that one has no minimum digit count, so it accepts a reference designator this
-one rejects.
+database and the mapping table, and not all of those are upper case and
+unpadded. Every question about one -- is this a part number, what is it called,
+is there one in this text -- is answered here, rather than being decided again
+at each call site.
 """
 
 import re
 
-# At least four digits. Measured against the full JLC assembly catalogue
-# (708,966 parts, 2026-04-17 snapshot): no part number has fewer, the smallest
-# is C1002, and every entry is a capital C followed only by digits. A second,
-# independently built cache agrees. Requiring four digits costs nothing today
-# and stops most capacitor reference designators, which share the shape
-# exactly, from reading as a part number.
-#
-# It narrows the overlap rather than removing it: a large array, or a board
-# numbering a sub-assembly from C1001, reaches four digits and collides again.
-# What limits the damage is that the strict check is only ever applied to a
-# field already named lcsc or jlc, so a designator has to be deliberately put
-# there. extract_lcsc has no such guard, which is why the bound lives here and
-# not at the call sites. If LCSC ever issues a shorter number, relax this line.
+# At least four digits: measured across the JLC assembly catalogue (708,966
+# parts), where every number is a capital C and digits and the shortest is
+# C1002. The floor also keeps capacitor reference designators, which share the
+# shape, from reading as part numbers -- unlikely to collide above C1000, and
+# mostly harmless when it does.
 _PART_NUMBER = re.compile(r"^C\d{4,}$")
 _PART_NUMBER_IN_TEXT = re.compile(r"C\d{4,}", re.IGNORECASE)
 
