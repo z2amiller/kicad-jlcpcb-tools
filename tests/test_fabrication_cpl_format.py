@@ -65,7 +65,8 @@ def generate_cpl(tmp_path):
         parent = SimpleNamespace(
             settings={},
             library=SimpleNamespace(
-                get_all_correction_data=lambda: [("R1", 0, offset)]
+                get_all_correction_data=lambda: [("R1", 0, offset)],
+                get_all_lcsc_correction_data=lambda: [],
             ),
             store=SimpleNamespace(get_part=lambda reference: part),
         )
