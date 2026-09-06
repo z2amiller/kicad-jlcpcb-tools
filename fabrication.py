@@ -445,9 +445,9 @@ class Fabrication:
         """Generate placement file (CPL)."""
         cpl_path = self.get_cpl_csv_path()
         self.corrections = self.parent.library.get_all_correction_data()
+        lcsc_corrections = self.parent.library.get_all_lcsc_correction_data()
         self.lcsc_corrections = {
-            lcsc: (rotation, offset)
-            for lcsc, rotation, offset in self.parent.library.get_all_lcsc_correction_data()
+            lcsc: (rotation, offset) for lcsc, rotation, offset in lcsc_corrections
         }
         aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(

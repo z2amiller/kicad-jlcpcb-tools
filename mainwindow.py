@@ -1165,9 +1165,9 @@ class JLCPCBTools(wx.Dialog):
         parts = self.store.read_all()
         details = {}
         corrections = self.library.get_all_correction_data()
+        lcsc_correction_rows = self.library.get_all_lcsc_correction_data()
         lcsc_corrections = {
-            lcsc: (rotation, offset)
-            for lcsc, rotation, offset in self.library.get_all_lcsc_correction_data()
+            lcsc: (rotation, offset) for lcsc, rotation, offset in lcsc_correction_rows
         }
         for part in parts:
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
