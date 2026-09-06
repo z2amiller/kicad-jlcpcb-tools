@@ -1,8 +1,8 @@
 """Regression tests for the settings dialog's static labels and LCSC dropdown.
 
 ``settings.py`` normally runs inside KiCad and imports wxPython at module load
-time.  These tests load it under a private synthetic package with a small fake
-``wx`` module whose controls record labels, values and selections, so the
+time.  The shared harness loads it under a private synthetic package with a
+fake ``wx`` whose controls record labels, values and selections, so the
 dialog's real construction and change-handling code runs without a GUI.
 
 Covers https://github.com/Bouni/kicad-jlcpcb-tools/issues/778: checkbox labels
@@ -10,53 +10,52 @@ must describe the behaviour when checked and never change with the state, and
 the LCSC priority setting is a two-way choice rather than an on/off switch.
 """
 
-from contextlib import contextmanager
-import importlib.util
-from itertools import count
-from pathlib import Path
-import sys
 import types
 
 import pytest
 
-_ROOT = Path(__file__).parent.parent
-_PACKAGE = "pr778_settings_dialog_tests"
-_MISSING = object()
+from .wx_harness import load, module, package_stubs, wx_stubs
 
-
-def _module(name, **symbols):
-    """Create a module containing the explicitly supplied symbols."""
-    module = types.ModuleType(name)
-    module.__dict__.update(symbols)
-    return module
-
-
-@contextmanager
-def _temporary_modules(replacements):
-    """Install import stubs temporarily and restore prior modules afterward."""
-    previous = {name: sys.modules.get(name, _MISSING) for name in replacements}
-    sys.modules.update(replacements)
-    try:
-        yield
-    finally:
-        for name, module in previous.items():
-            if module is _MISSING:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
+_PACKAGE = "settings_dialog_tests"
 
 
 class _FakeWidget:
-    """Permissive stand-in for wx objects whose state the tests never inspect."""
+    """Stand-in for the wx objects whose state these tests never inspect."""
 
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
 
     def __getattr__(self, name):
+        """Answer wx-style method calls with a no-op, and nothing else."""
         if name[:1].isupper():
             return lambda *_args, **_kwargs: None
         raise AttributeError(name)
+
+
+# Everything settings.py builds that these tests do not look at.  Naming them
+# keeps the fake wx strict: a name that is not here and not a control below
+# raises AttributeError rather than quietly becoming callable.
+_INERT = (
+    "AcceleratorEntry",
+    "AcceleratorTable",
+    "BoxSizer",
+    "Button",
+    "Colour",
+    "DefaultPosition",
+    "DefaultSize",
+    "DirPickerCtrl",
+    "FilePickerCtrl",
+    "FlexGridSizer",
+    "MemoryDC",
+    "NewId",
+    "NullBitmap",
+    "Pen",
+    "Size",
+    "SpinCtrl",
+    "StaticBoxSizer",
+    "ToolTip",
+)
 
 
 class _FakeBitmap:
@@ -165,73 +164,44 @@ class _Dialog(_FakeWidget):
     """wx.Dialog stand-in whose window methods are all no-ops."""
 
 
-def _make_wx():
-    """Build the fake wx module used to load settings.py."""
-    wx = _module(
-        "wx",
-        Dialog=_Dialog,
-        CheckBox=_CheckBox,
-        ComboBox=_ComboBox,
-        StaticText=_StaticText,
-        StaticBitmap=_StaticBitmap,
-        EVT_CHECKBOX="EVT_CHECKBOX",
-        EVT_COMBOBOX="EVT_COMBOBOX",
-        posted_events=[],
-    )
-    wx.PostEvent = lambda target, event: wx.posted_events.append((target, event))
-
-    constants = {}
-    bits = count(1)
-
-    def _missing(name):
-        # UPPER_CASE names are flags and ids; anything else is a widget class.
-        if name.isupper():
-            return constants.setdefault(name, 1 << next(bits))
-        return _FakeWidget
-
-    wx.__getattr__ = _missing
-    return wx
-
-
 def _load_settings_module():
     """Load settings.py with deterministic stubs for its GUI dependencies."""
-    package = _module(_PACKAGE)
-    package.__path__ = [str(_ROOT)]
-    bom_estimation_package = _module(f"{_PACKAGE}.bom_estimation")
-    bom_estimation_package.__path__ = []
     library_config = types.SimpleNamespace(display_name="Full Library - All Parts")
-
-    replacements = {
-        "wx": _make_wx(),
-        _PACKAGE: package,
-        f"{_PACKAGE}.bom_estimation": bom_estimation_package,
-        f"{_PACKAGE}.bom_estimation.help_text": _module(
-            f"{_PACKAGE}.bom_estimation.help_text",
-            show_bom_estimator_help=lambda *_args, **_kwargs: None,
-        ),
-        f"{_PACKAGE}.dblib": _module(
-            f"{_PACKAGE}.dblib", LIBRARY_CONFIGS={"current-parts": library_config}
-        ),
-        f"{_PACKAGE}.events": _module(
-            f"{_PACKAGE}.events",
-            UpdateSetting=types.SimpleNamespace,
-        ),
-        f"{_PACKAGE}.helpers": _module(
-            f"{_PACKAGE}.helpers",
-            HighResWxSize=lambda _window, size: size,
-            loadBitmapScaled=lambda filename, *_args, **_kwargs: _FakeBitmap(filename),
-        ),
-    }
-
-    module_name = f"{_PACKAGE}.settings"
-    spec = importlib.util.spec_from_file_location(module_name, _ROOT / "settings.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    module.__package__ = _PACKAGE
-    replacements[module_name] = module
-    with _temporary_modules(replacements):
-        spec.loader.exec_module(module)
-    return module
+    stubs = package_stubs(_PACKAGE, ("bom_estimation",))
+    stubs.update(
+        wx_stubs(
+            submodules=(),
+            Dialog=_Dialog,
+            CheckBox=_CheckBox,
+            ComboBox=_ComboBox,
+            StaticText=_StaticText,
+            StaticBitmap=_StaticBitmap,
+            posted_events=[],
+            **dict.fromkeys(_INERT, _FakeWidget),
+        )
+    )
+    wx = stubs["wx"]
+    wx.PostEvent = lambda target, event: wx.posted_events.append((target, event))
+    stubs.update(
+        {
+            f"{_PACKAGE}.bom_estimation.help_text": module(
+                f"{_PACKAGE}.bom_estimation.help_text",
+                show_bom_estimator_help=lambda *_args, **_kwargs: None,
+            ),
+            f"{_PACKAGE}.dblib": module(
+                f"{_PACKAGE}.dblib", LIBRARY_CONFIGS={"current-parts": library_config}
+            ),
+            f"{_PACKAGE}.events": module(
+                f"{_PACKAGE}.events", UpdateSetting=types.SimpleNamespace
+            ),
+            f"{_PACKAGE}.helpers": module(
+                f"{_PACKAGE}.helpers",
+                HighResWxSize=lambda _window, size: size,
+                loadBitmapScaled=lambda filename, *_a, **_k: _FakeBitmap(filename),
+            ),
+        }
+    )
+    return load(_PACKAGE, "settings", stubs)
 
 
 settings = _load_settings_module()
