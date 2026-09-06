@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 from typing import Union
 
+from .bom_estimation.assembly_mode import ComponentProductType
 from .footprint_helpers import (
     get_exclude_from_bom,
     get_exclude_from_pos,
@@ -292,13 +293,14 @@ class Store:
 
     def get_assembly_enrichment_targets(self, references=None) -> dict:
         """Get references grouped by LCSC that still need assembly process enrichment."""
+        product_types = ",".join(str(member.value) for member in ComponentProductType)
         query = (
             "SELECT reference, lcsc FROM part_info "
             "WHERE lcsc IS NOT NULL AND lcsc != '' "
             "AND ("
             "assembly_process IS NULL OR assembly_process = '' "
             "OR component_product_type IS NULL "
-            "OR component_product_type NOT IN (0, 1, 2)"
+            f"OR component_product_type NOT IN ({product_types})"
             ")"
         )
         params = []
