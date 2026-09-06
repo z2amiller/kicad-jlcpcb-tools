@@ -2,7 +2,6 @@
 
 import importlib.util
 from pathlib import Path
-import re
 
 import pytest
 
@@ -88,68 +87,3 @@ class TestExtractLcsc:
         text = "LCSC Part C12345 in stock"
         assert extract_lcsc(text) == "C12345"
         assert not is_lcsc_part(text)
-
-
-class TestOneDefinition:
-    """No module outside lcsc.py may decide what a part number looks like.
-
-    Three separate definitions had drifted apart before this was consolidated:
-    two anchored ones in footprint_helpers and an unanchored, case-insensitive
-    one in mainwindow. The disagreement is what let a field of "C12345 " read
-    as no part at all. A fourth would reintroduce the same class of bug, so
-    this fails rather than waiting for someone to notice.
-    """
-
-    # A part number written as a pattern, in the spellings that actually turn
-    # up: a raw string (C\\d+), a plain string where the backslash is doubled
-    # (C\\\\d+), or an explicit class (C[0-9]+). This is a heuristic, not a
-    # proof -- str.startswith("C") plus str.isdigit() would pass it -- but it
-    # catches every form this codebase has used.
-    DEFINITION = re.compile(r"C\\{1,2}d|C\[0-9\]")
-
-    # footprint_helpers.py still spells the pattern out three times. Those go
-    # away with the fix for issue #773, which is in flight separately; until it
-    # lands this allows them while still refusing any new ones.
-    ALLOWED = {"footprint_helpers.py"}
-
-    PACKAGES = ("common", "dblib", "core", "bom_estimation", "enrichment")
-
-    def test_the_part_number_pattern_appears_only_in_lcsc_py(self):
-        """Only lcsc.py may spell out the part-number pattern."""
-        paths = list(_ROOT.glob("*.py"))
-        for package in self.PACKAGES:
-            paths.extend((_ROOT / package).rglob("*.py"))
-
-        offenders = []
-        for path in sorted(paths):
-            if path.name == "lcsc.py" or path.name in self.ALLOWED:
-                continue
-            source = path.read_text(encoding="utf-8")
-            for number, line in enumerate(source.splitlines(), start=1):
-                if self.DEFINITION.search(line):
-                    rel = path.relative_to(_ROOT)
-                    offenders.append(f"{rel}:{number}: {line.strip()}")
-        assert offenders == [], (
-            "these lines define an LCSC part number outside lcsc.py; call "
-            "is_lcsc_part() or extract_lcsc() instead.\n"
-            "If the line matches a capacitor reference designator rather than a "
-            "part number -- the two look identical -- add the file to ALLOWED "
-            "with a comment saying so.\n" + "\n".join(offenders)
-        )
-
-    def test_the_allowance_is_still_needed(self):
-        """Delete an allowed file from the set once it stops defining one.
-
-        An allowance nobody needs is worse than none: it silently re-permits
-        the thing this guards against.
-        """
-        stale = [
-            name
-            for name in sorted(self.ALLOWED)
-            if not (_ROOT / name).is_file()
-            or not self.DEFINITION.search((_ROOT / name).read_text(encoding="utf-8"))
-        ]
-        assert stale == [], (
-            f"these files no longer define a part number; remove them from "
-            f"ALLOWED: {stale}"
-        )

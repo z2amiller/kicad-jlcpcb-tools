@@ -5,6 +5,13 @@ database and the mapping table, and only some of those sources are already
 upper case and unpadded. Every question about a part number -- is this one,
 what is one called, is there one in this text -- is answered here, so the
 answers cannot drift apart.
+
+This module is meant to be the only place that decides what a part number
+looks like. Three separate spellings of that decision had drifted apart before
+it existed: two anchored patterns in footprint_helpers and an unanchored,
+case-insensitive one in mainwindow, which disagreed about whether "C12345 "
+was a part number at all. Reach for is_lcsc_part or extract_lcsc rather than
+writing a fourth.
 """
 
 import re
