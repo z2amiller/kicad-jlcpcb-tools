@@ -166,7 +166,7 @@ class TestFindCorrectionExistingAnchors:
     """Patterns that end with $ keep their own anchoring semantics."""
 
     def test_pre_anchored_pattern_matches_correctly(self):
-        """A pattern ending in $ still matches correctly when wrapped."""
+        """A pattern ending in $ matches a value it anchors to."""
         fab = make_fab([("SOT-23$", 10, (0.0, 0.0))])
         rotation, _ = fab._find_correction("SOT-23")
         assert rotation == 10

@@ -153,6 +153,8 @@ class Fabrication:
     def _find_correction(self, value):
         """Return (rotation, offset) for the most specific correction matching value.
 
+        Returns None when no correction matches.
+
         Specificity is how much of *value* a pattern actually consumes, so
         'SOT-23-3' beats 'SOT-23', and '^SOP-4_' beats '^SOP-(?!18_)' even
         though the lookahead is the longer pattern -- it is zero-width, so it
