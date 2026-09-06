@@ -7,15 +7,20 @@ pointer. Focusing the clicked row instead points that scroll somewhere already
 on screen.
 
 ``mainwindow.py`` only imports with a full set of GUI stubs in place, so these
-tests reuse the harness that ``test_mainwindow_stale_footprints`` builds rather
-than standing up a second copy of it.
+tests load it through the shared harness.
 """
 
 from unittest.mock import MagicMock
 
 import pytest
 
-from .test_mainwindow_stale_footprints import JLCPCBTools, mainwindow
+from .wx_harness import load_mainwindow, wx_stubs
+
+mainwindow = load_mainwindow(
+    "mainwindow_select_alike_tests",
+    wx=wx_stubs(Dialog=type("Dialog", (), {}), NewIdRef=object, PostEvent=lambda *_a: None),
+)
+JLCPCBTools = mainwindow.JLCPCBTools
 
 
 class _Item:
