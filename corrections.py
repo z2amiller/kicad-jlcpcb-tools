@@ -10,6 +10,7 @@ import wx.dataview  # pylint: disable=import-error
 
 from .events import PopulateFootprintListEvent
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
+from .lcsc import normalize_lcsc
 
 KIND_FOOTPRINT = "Footprint"
 KIND_LCSC = "LCSC"
@@ -474,17 +475,20 @@ class CorrectionManagerDialog(wx.Dialog):
         """Add/Update a correction in the database."""
         regex = self.regex.GetValue()
         kind = self.current_kind()
-        if kind == KIND_LCSC and not LCSC_PART_RE.match(regex.strip()):
-            wx.MessageBox(
-                f"'{regex}' is not an LCSC part number.\n\n"
-                "An LCSC rule matches one part exactly, so it needs a plain "
-                "part number like C12345, not a pattern.",
-                "Not an LCSC part number",
-                style=wx.ICON_WARNING,
-            )
-            return
         if kind == KIND_LCSC:
-            regex = regex.strip()
+            # Rules are keyed exactly, so store the canonical form whatever the
+            # user pasted -- part numbers arrive from the clipboard and from
+            # sanitize_lcsc() in mixed case.
+            regex = normalize_lcsc(regex)
+            if not LCSC_PART_RE.match(regex):
+                wx.MessageBox(
+                    f"'{self.regex.GetValue()}' is not an LCSC part number.\n\n"
+                    "An LCSC rule matches one part exactly, so it needs a plain "
+                    "part number like C12345, not a pattern.",
+                    "Not an LCSC part number",
+                    style=wx.ICON_WARNING,
+                )
+                return
             self.regex.SetValue(regex)
         rotation = int(self.to_float(self.rotation.GetValue()))
         offset_x = self.to_float(self.offset_x.GetValue())

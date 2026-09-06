@@ -22,6 +22,7 @@ from .events import (
     MessageEvent,
 )
 from .helpers import PLUGIN_PATH, dict_factory, natural_sort_collation
+from .lcsc import normalize_lcsc
 from .partselector_columns import DB_FIELDS, SORTABLE_COLUMN_INDEX_TO_DB
 from .search_escape import escape_fts_phrase, escape_like_term
 from .unzip_parts import unzip_parts
@@ -447,8 +448,8 @@ class Library:
             try:
                 return cur.execute(
                     "SELECT lcsc, rotation, offset_x, offset_y "
-                    "FROM lcsc_correction WHERE lcsc = ?",
-                    (lcsc,),
+                    "FROM lcsc_correction WHERE lcsc = ? COLLATE NOCASE",
+                    (normalize_lcsc(lcsc),),
                 ).fetchone()
             except sqlite3.OperationalError:
                 return None
@@ -459,7 +460,10 @@ class Library:
             contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
             con as cur,
         ):
-            cur.execute("DELETE FROM lcsc_correction WHERE lcsc = ?", (lcsc,))
+            cur.execute(
+                "DELETE FROM lcsc_correction WHERE lcsc = ? COLLATE NOCASE",
+                (normalize_lcsc(lcsc),),
+            )
             cur.commit()
 
     def update_lcsc_correction_data(self, lcsc, rotation, offset):
@@ -470,8 +474,8 @@ class Library:
         ):
             cur.execute(
                 "UPDATE lcsc_correction SET rotation = ?, offset_x = ?, offset_y = ? "
-                "WHERE lcsc = ?",
-                (rotation, offset[0], offset[1], lcsc),
+                "WHERE lcsc = ? COLLATE NOCASE",
+                (rotation, offset[0], offset[1], normalize_lcsc(lcsc)),
             )
             cur.commit()
 
@@ -484,7 +488,7 @@ class Library:
             cur.execute(
                 "INSERT INTO lcsc_correction (lcsc, rotation, offset_x, offset_y) "
                 "VALUES (?, ?, ?, ?)",
-                (lcsc, rotation, offset[0], offset[1]),
+                (normalize_lcsc(lcsc), rotation, offset[0], offset[1]),
             )
             cur.commit()
 
@@ -499,7 +503,10 @@ class Library:
                     "SELECT lcsc, rotation, offset_x, offset_y "
                     "FROM lcsc_correction ORDER BY lcsc ASC"
                 ).fetchall()
-                return [(c[0], int(c[1]), (float(c[2]), float(c[3]))) for c in result]
+                return [
+                    (normalize_lcsc(c[0]), int(c[1]), (float(c[2]), float(c[3])))
+                    for c in result
+                ]
             except sqlite3.OperationalError:
                 return []
 

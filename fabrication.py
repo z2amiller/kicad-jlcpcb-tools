@@ -34,6 +34,7 @@ from pcbnew import (  # pylint: disable=import-error
 )
 
 from .footprint_helpers import get_is_dnp
+from .lcsc import normalize_lcsc
 
 # Compatibility hack for V6 / V7 / V7.99
 try:
@@ -178,9 +179,10 @@ class Fabrication:
         from, so a correction can never be resolved against a different part
         than the one being assembled.
         """
+        lcsc = normalize_lcsc(lcsc)
         if not lcsc:
             return None
-        return self.lcsc_corrections.get(str(lcsc))
+        return self.lcsc_corrections.get(lcsc)
 
     def fix_rotation(self, footprint, lcsc=""):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""

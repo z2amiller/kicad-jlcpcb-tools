@@ -61,6 +61,7 @@ from .footprint_helpers import (
     toggle_exclude_from_pos,
 )
 from .generate_hooks import format_hook_error, run_configured_hook
+from .lcsc import normalize_lcsc
 from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
@@ -1139,7 +1140,7 @@ class JLCPCBTools(wx.Dialog):
     ) -> str:
         """Try to find correction data for a given part."""
         # A correction for the exact LCSC part wins over every regex rule
-        lcsc = str(part.get("lcsc", ""))
+        lcsc = normalize_lcsc(part.get("lcsc", ""))
         if lcsc and lcsc in lcsc_corrections:
             rotation, offset = lcsc_corrections[lcsc]
             return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (lcsc)"

@@ -164,6 +164,17 @@ class TestLcscValidation:
         dialog.save_correction()
         assert dialog.library.calls[0][2] == "C12345"
 
+    def test_a_lowercase_part_number_is_accepted_and_canonicalised(self):
+        """A pasted lower-case number saves as a rule that will actually fire.
+
+        sanitize_lcsc() returns the number as typed, so "c12345" reaches the
+        parts list and, through the context menu, this dialog. Rejecting it
+        would leave the user unable to add a rule for that part at all.
+        """
+        dialog = make_dialog(key="c12345", lcsc_mode=True)
+        dialog.save_correction()
+        assert dialog.library.calls[0][2] == "C12345"
+
     def test_surrounding_whitespace_is_trimmed(self):
         """A pasted part number with stray spaces is stored trimmed."""
         dialog = make_dialog(key="  C12345 ", lcsc_mode=True)
