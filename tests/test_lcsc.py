@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+import re
 
 import pytest
 
@@ -99,24 +100,41 @@ class TestOneDefinition:
     this fails rather than waiting for someone to notice.
     """
 
+    # A part number written as a pattern, in the spellings that actually turn
+    # up: a raw string (C\\d+), a plain string where the backslash is doubled
+    # (C\\\\d+), or an explicit class (C[0-9]+). This is a heuristic, not a
+    # proof -- str.startswith("C") plus str.isdigit() would pass it -- but it
+    # catches every form this codebase has used.
+    DEFINITION = re.compile(r"C\\{1,2}d|C\[0-9\]")
+
     # footprint_helpers.py still spells the pattern out three times. Those go
     # away with the fix for issue #773, which is in flight separately; until it
     # lands this allows them while still refusing any new ones.
     ALLOWED = {"footprint_helpers.py"}
 
+    PACKAGES = ("common", "dblib", "core", "bom_estimation", "enrichment")
+
     def test_the_part_number_pattern_appears_only_in_lcsc_py(self):
         """Only lcsc.py may spell out the part-number pattern."""
+        paths = list(_ROOT.glob("*.py"))
+        for package in self.PACKAGES:
+            paths.extend((_ROOT / package).rglob("*.py"))
+
         offenders = []
-        for path in sorted(_ROOT.glob("*.py")):
+        for path in sorted(paths):
             if path.name == "lcsc.py" or path.name in self.ALLOWED:
                 continue
             source = path.read_text(encoding="utf-8")
             for number, line in enumerate(source.splitlines(), start=1):
-                if "C\\d+" in line:
-                    offenders.append(f"{path.name}:{number}: {line.strip()}")
+                if self.DEFINITION.search(line):
+                    rel = path.relative_to(_ROOT)
+                    offenders.append(f"{rel}:{number}: {line.strip()}")
         assert offenders == [], (
             "these lines define an LCSC part number outside lcsc.py; call "
-            "is_lcsc_part() or extract_lcsc() instead:\n" + "\n".join(offenders)
+            "is_lcsc_part() or extract_lcsc() instead.\n"
+            "If the line matches a capacitor reference designator rather than a "
+            "part number -- the two look identical -- add the file to ALLOWED "
+            "with a comment saying so.\n" + "\n".join(offenders)
         )
 
     def test_the_allowance_is_still_needed(self):
@@ -127,8 +145,9 @@ class TestOneDefinition:
         """
         stale = [
             name
-            for name in self.ALLOWED
-            if "C\\d+" not in (_ROOT / name).read_text(encoding="utf-8")
+            for name in sorted(self.ALLOWED)
+            if not (_ROOT / name).is_file()
+            or not self.DEFINITION.search((_ROOT / name).read_text(encoding="utf-8"))
         ]
         assert stale == [], (
             f"these files no longer define a part number; remove them from "

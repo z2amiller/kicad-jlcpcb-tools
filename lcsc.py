@@ -16,10 +16,10 @@ _PART_NUMBER_IN_TEXT = re.compile(r"C\d+", re.IGNORECASE)
 def normalize_lcsc(value):
     """Return an LCSC part number in canonical form for keying and comparison.
 
-    Part numbers are compared exactly in several places -- the parts database
-    filters its own query results with ``==``, and corrections are keyed on the
-    number -- so a value that differs only in case or padding silently fails to
-    match rather than reporting an error.
+    The parts database filters its own FTS5 results with ``==``, so a value
+    differing only in case or padding finds nothing and reports no error. The
+    same value is also used as a cache key and grouped on when the BOM is
+    written, where two spellings of one part silently become two parts.
     """
     if not value:
         return ""
