@@ -22,10 +22,16 @@ import time
 from typing import Protocol
 
 try:
-    from ..bom_estimation.assembly_mode import classify_component_product_type
+    from ..bom_estimation.assembly_mode import (
+        ComponentProductType,
+        classify_component_product_type,
+    )
     from ..lcsc_api import LCSC_API
 except ImportError:  # pragma: no cover - test import fallback
-    from bom_estimation.assembly_mode import classify_component_product_type
+    from bom_estimation.assembly_mode import (
+        ComponentProductType,
+        classify_component_product_type,
+    )
     from lcsc_api import LCSC_API
 
 
@@ -74,7 +80,7 @@ class LCSCAssemblyMetadataProvider:
             assembly_process = ""
             component_product_type = None
 
-        is_standard = component_product_type == 2
+        is_standard = component_product_type == ComponentProductType.STANDARD_ONLY
 
         return {
             "assembly_process": assembly_process,

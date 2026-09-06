@@ -12,6 +12,7 @@ import wx  # pylint: disable=import-error
 
 from .bom_estimation.assembly_mode import (
     AssemblyModeDecision,
+    ComponentProductType,
     classify_component_product_type,
 )
 from .bom_estimation.pricing import calculate_bom_estimate, get_assembly_flags
@@ -224,9 +225,9 @@ class BomEstimatorController:
             product_type = classify_component_product_type(
                 part.get("component_product_type")
             )
-            if product_type == 2:
+            if product_type == ComponentProductType.STANDARD_ONLY:
                 standard_only_refs.add(reference)
-            elif product_type == 1:
+            elif product_type == ComponentProductType.ECONOMIC_ONLY:
                 economic_only_refs.add(reference)
             elif product_type is None:
                 classification_missing_refs.add(reference)
