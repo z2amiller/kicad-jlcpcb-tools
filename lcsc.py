@@ -16,8 +16,15 @@ writing a fourth.
 
 import re
 
-_PART_NUMBER = re.compile(r"^C\d+$")
-_PART_NUMBER_IN_TEXT = re.compile(r"C\d+", re.IGNORECASE)
+# At least four digits. Measured against the full JLC assembly catalogue
+# (708,966 parts, 2026-04-17 snapshot): no part number has fewer, the smallest
+# is C1002, and every entry is a capital C followed only by digits. A second,
+# independently built cache agrees. Requiring four digits costs nothing today
+# and stops a capacitor reference designator -- C1 through C999, which is every
+# designator a board of this size will ever have -- from reading as a part
+# number. If LCSC ever issues a shorter one, this is the line to relax.
+_PART_NUMBER = re.compile(r"^C\d{4,}$")
+_PART_NUMBER_IN_TEXT = re.compile(r"C\d{4,}", re.IGNORECASE)
 
 
 def normalize_lcsc(value):
@@ -47,7 +54,9 @@ def extract_lcsc(text):
 
     Unlike :func:`is_lcsc_part` this is deliberately lenient, because it reads
     what a person pasted: a part number copied out of a web page arrives
-    surrounded by whatever came with it.
+    surrounded by whatever came with it. It is lenient about the surroundings
+    only -- a copied reference designator like C12 is not a part number and
+    does not become one by being pasted into the right box.
     """
     if not text:
         return ""

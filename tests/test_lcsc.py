@@ -40,10 +40,25 @@ class TestNormalize:
 class TestIsLcscPart:
     """is_lcsc_part answers whether a value names a part, strictly."""
 
-    @pytest.mark.parametrize("value", ["C12345", "c12345", " C12345 ", "C1"])
+    @pytest.mark.parametrize(
+        "value", ["C12345", "c12345", " C12345 ", "C1002", "C9900101779"]
+    )
     def test_a_part_number_is_recognised(self, value):
-        """A part number is recognised however it was typed."""
+        """A part number is recognised however it was typed.
+
+        C1002 is the smallest number in the JLC assembly catalogue and
+        C9900101779 the longest, so the bounds are covered rather than assumed.
+        """
         assert is_lcsc_part(value)
+
+    @pytest.mark.parametrize("value", ["C1", "C12", "C123", "C999"])
+    def test_a_reference_designator_is_not_a_part_number(self, value):
+        """A capacitor designator shares the shape but never the length.
+
+        No catalogue part has fewer than four digits, and no board has a
+        thousand capacitors, so the two ranges do not overlap in practice.
+        """
+        assert not is_lcsc_part(value)
 
     @pytest.mark.parametrize(
         "value",
@@ -75,6 +90,15 @@ class TestExtractLcsc:
     @pytest.mark.parametrize("text", ["", None, "no part here", "12345"])
     def test_text_without_a_part_number_yields_empty(self, text):
         """Text carrying no part number produces the empty string."""
+        assert extract_lcsc(text) == ""
+
+    @pytest.mark.parametrize("text", ["C12", "C1,C2,C3", "refdes C99 on the board"])
+    def test_pasted_reference_designators_yield_nothing(self, text):
+        """Copying a designator into the LCSC box does not assign a part.
+
+        This is the mistake the length bound is really for: the strict check
+        is guarded by a field-name match, but pasted text has no such guard.
+        """
         assert extract_lcsc(text) == ""
 
     def test_it_is_more_lenient_than_is_lcsc_part(self):
