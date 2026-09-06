@@ -1,0 +1,37 @@
+{
+  "general": {
+    "bom_estimator_boards": 5,
+    "bom_estimator_force_standard": false,
+    "bom_estimator_show": true,
+    "lcsc_priority": false,
+    "order_number": true,
+    "select_alike_auto": false
+  },
+  "gerber": {
+    "fill_zones": true,
+    "force_drc": true,
+    "lcsc_bom_cpl": true,
+    "plot_references": true,
+    "plot_values": true,
+    "subtract_mask_from_silk": true,
+    "tented_vias": true
+  },
+  "highlighting": {
+    "matches": true
+  },
+  "hooks": {
+    "post_script": "",
+    "pre_script": "",
+    "timeout_seconds": 30
+  },
+  "library": {
+    "data_path": "",
+    "selected_library": "current-parts"
+  },
+  "partselector": {
+    "basic": true,
+    "extended": true,
+    "preferred": true,
+    "stock": false
+  }
+}

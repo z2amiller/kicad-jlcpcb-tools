@@ -22,6 +22,7 @@ from wx import adv  # pylint: disable=import-error
 from .bom_estimation.assembly_mode import classify_component_product_type
 from .bom_estimation.help_text import show_bom_estimator_help
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
+from .core.settings_defaults import resolve_settings
 from .corrections import CorrectionManagerDialog
 from .datamodel import PartListDataModel, STANDARD_ONLY_TOOLTIP
 from .dataview_highlight import (
@@ -1438,36 +1439,9 @@ class JLCPCBTools(wx.Dialog):
         self.logbox.WriteText(e.msg)
 
     def load_settings(self):
-        """Load settings from settings.json."""
-        with open(os.path.join(PLUGIN_PATH, "settings.json"), encoding="utf-8") as j:
-            self.settings = json.load(j)
-
-        gerber_settings = self.settings.setdefault("gerber", {})
-        highlighting_settings = self.settings.setdefault("highlighting", {})
-        partselector_settings = self.settings.setdefault("partselector", {})
-        migrated = False
-
-        if "matches" not in highlighting_settings:
-            if "highlight_matches" in partselector_settings:
-                highlighting_settings["matches"] = partselector_settings.pop(
-                    "highlight_matches"
-                )
-                migrated = True
-            else:
-                highlighting_settings["matches"] = True
-                migrated = True
-
-        if gerber_settings.get("force_drc", False) and not gerber_settings.get(
-            "fill_zones", True
-        ):
-            gerber_settings["fill_zones"] = True
-            migrated = True
-
-        if "subtract_mask_from_silk" not in gerber_settings:
-            gerber_settings["subtract_mask_from_silk"] = True
-            migrated = True
-
-        if migrated:
+        """Load settings, seeding anything unset from default_settings.json."""
+        self.settings, needs_write = resolve_settings(PLUGIN_PATH)
+        if needs_write:
             self.save_settings()
 
     def decode_mainwindow_highlight_value(self, value: str) -> tuple[str, list[str]]:
