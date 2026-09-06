@@ -151,19 +151,24 @@ class Fabrication:
         return empty_pours
 
     def _find_correction(self, value):
-        """Return (rotation, offset) for the first correction matching value.
+        """Return (rotation, offset) for the most specific correction matching value.
 
-        Tries anchored match (pattern + '$') before falling back to unanchored,
-        so 'SOT-23-3' beats 'SOT-23' when both patterns exist.
+        Specificity is how much of *value* a pattern actually consumes, so
+        'SOT-23-3' beats 'SOT-23', and '^SOP-4_' beats '^SOP-(?!18_)' even
+        though the lookahead is the longer pattern -- it is zero-width, so it
+        consumes less.  Patterns that tie keep database order.
         """
-        anchored = [(f"(?:{r})$", rot, off) for r, rot, off in self.corrections]
-        for regex, rotation, offset in anchored:
-            if re.search(regex, value):
-                return rotation, offset
+        best = None
+        best_length = -1
         for regex, rotation, offset in self.corrections:
-            if re.search(regex, value):
-                return rotation, offset
-        return None
+            match = re.search(regex, value)
+            if match is None:
+                continue
+            length = len(match.group(0))
+            if length > best_length:
+                best = (rotation, offset)
+                best_length = length
+        return best
 
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""

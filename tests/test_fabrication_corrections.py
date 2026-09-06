@@ -1,4 +1,4 @@
-"""Tests for the two-pass correction matching logic in Fabrication._find_correction."""
+"""Tests for the most-specific-match correction logic in Fabrication._find_correction."""
 
 import importlib.util
 from pathlib import Path
@@ -41,12 +41,12 @@ def make_fab(corrections):
 
 
 # ---------------------------------------------------------------------------
-# Anchored-first conflict resolution
+# Most-specific-match conflict resolution
 # ---------------------------------------------------------------------------
 
 
 class TestFindCorrectionConflictResolution:
-    """_find_correction prefers exact-suffix (anchored) matches over substring matches."""
+    """_find_correction prefers the pattern that consumes the most of the value."""
 
     def test_specific_pattern_wins_over_prefix(self):
         """SOT-23-3 correction wins over the shorter SOT-23 pattern."""
@@ -71,7 +71,7 @@ class TestFindCorrectionConflictResolution:
         assert rotation == 10
 
     def test_order_in_list_does_not_matter(self):
-        """Anchored match wins regardless of which pattern is listed first."""
+        """The more specific pattern wins regardless of which is listed first."""
         fab = make_fab(
             [
                 ("SOT-23-3", 20, (0.0, 0.0)),
@@ -95,12 +95,12 @@ class TestFindCorrectionConflictResolution:
 
 
 # ---------------------------------------------------------------------------
-# Unanchored fallback
+# Substring matches
 # ---------------------------------------------------------------------------
 
 
-class TestFindCorrectionUnanchoredFallback:
-    """When no anchored match exists, the first substring match is used."""
+class TestFindCorrectionSubstringMatches:
+    """A pattern that only matches part of the value is still a candidate."""
 
     def test_substring_match_used_when_no_conflict(self):
         """A substring pattern matches when it is the only candidate."""
@@ -125,7 +125,7 @@ class TestFindCorrectionUnanchoredFallback:
 
 
 class TestFindCorrectionAlternation:
-    """Alternation patterns (|) are wrapped so $ anchors all branches."""
+    """Alternation patterns (|) are ranked by the branch that actually matched."""
 
     def test_alternation_matches_first_branch(self):
         """An alternation pattern matches the first branch correctly."""
@@ -139,8 +139,8 @@ class TestFindCorrectionAlternation:
         rotation, _ = fab._find_correction("SOT-23-5")
         assert rotation == 20
 
-    def test_alternation_anchored_does_not_match_extended_value(self):
-        """SOT-23-3|SOT-23-5 does not match SOT-23-30 via the first branch."""
+    def test_alternation_loses_to_a_longer_match(self):
+        """SOT-23-30 wins over the SOT-23-3 branch of an alternation."""
         fab = make_fab(
             [
                 ("SOT-23-3|SOT-23-5", 20, (0.0, 0.0)),
@@ -150,20 +150,20 @@ class TestFindCorrectionAlternation:
         rotation, _ = fab._find_correction("SOT-23-30")
         assert rotation == 30
 
-    def test_alternation_falls_back_to_unanchored_when_needed(self):
-        """Alternation pattern still matches as substring in the fallback pass."""
+    def test_alternation_matches_as_a_substring(self):
+        """An alternation branch still matches inside a longer value."""
         fab = make_fab([("SOT-23-3|SOT-23-5", 20, (0.0, 0.0))])
         rotation, _ = fab._find_correction("Package_TO_SOT_SMD:SOT-23-3")
         assert rotation == 20
 
 
 # ---------------------------------------------------------------------------
-# Patterns that already carry anchors
+# Patterns that carry their own anchors
 # ---------------------------------------------------------------------------
 
 
 class TestFindCorrectionExistingAnchors:
-    """Patterns that already end with $ are wrapped as (?:pattern)$ harmlessly."""
+    """Patterns that end with $ keep their own anchoring semantics."""
 
     def test_pre_anchored_pattern_matches_correctly(self):
         """A pattern ending in $ still matches correctly when wrapped."""
@@ -176,8 +176,8 @@ class TestFindCorrectionExistingAnchors:
         fab = make_fab([("SOT-23$", 10, (0.0, 0.0))])
         assert fab._find_correction("SOT-23-3") is None
 
-    def test_pre_anchored_and_unanchored_coexist(self):
-        """Pre-anchored SOT-23$ and unanchored SOT-23-3 resolve correctly."""
+    def test_pre_anchored_and_bare_patterns_coexist(self):
+        """Pre-anchored SOT-23$ and bare SOT-23-3 resolve correctly."""
         fab = make_fab(
             [
                 ("SOT-23$", 10, (0.0, 0.0)),
@@ -202,3 +202,66 @@ class TestFindCorrectionOffset:
         rotation, offset = fab._find_correction("SOT-23-3")
         assert rotation == 45
         assert offset == (1.5, -0.5)
+
+
+# ---------------------------------------------------------------------------
+# Specificity is measured on the match, not on the pattern
+# ---------------------------------------------------------------------------
+
+
+class TestFindCorrectionSpecificityIsMatchLength:
+    """Ranking uses how much of the value a pattern consumed, not its own length."""
+
+    def test_zero_width_lookahead_does_not_win_on_pattern_length(self):
+        """^SOP-4_ beats the longer ^SOP-(?!18_), whose lookahead consumes nothing.
+
+        These are both shipped corrections.  ^SOP-(?!18_) carves out SOP-18 but
+        not SOP-4, so ranking by pattern length would hand every SOP-4 footprint
+        the generic 270 degree correction instead of its own 0 degrees.
+        """
+        fab = make_fab(
+            [
+                ("^SOP-(?!18_)", 270, (0.0, 0.0)),
+                ("^SOP-4_", 0, (0.0, 0.0)),
+            ]
+        )
+        rotation, _ = fab._find_correction("SOP-4_4.4x4.4mm_P2.54mm")
+        assert rotation == 0
+
+    def test_lookahead_still_applies_to_the_packages_it_covers(self):
+        """A SOP-8 footprint still gets the generic correction."""
+        fab = make_fab(
+            [
+                ("^SOP-(?!18_)", 270, (0.0, 0.0)),
+                ("^SOP-4_", 0, (0.0, 0.0)),
+            ]
+        )
+        rotation, _ = fab._find_correction("SOP-8_5.2x5.3mm_P1.27mm")
+        assert rotation == 270
+
+    def test_short_suffix_pattern_loses_to_a_longer_prefix_match(self):
+        """A two-character suffix pattern no longer beats a full-name pattern.
+
+        The old anchored-first pass preferred any pattern matching the end of
+        the value, so 'BR' outranked a pattern matching the whole footprint
+        name.  Consuming more of the value now decides it.
+        """
+        fab = make_fab(
+            [
+                ("BR", 180, (0.0, 0.0)),
+                ("^SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR", 0, (0.0, 0.0)),
+            ]
+        )
+        rotation, _ = fab._find_correction("SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR")
+        assert rotation == 0
+
+    def test_equal_length_matches_keep_database_order(self):
+        """Two patterns that consume the same text resolve to the first one."""
+        fab = make_fab(
+            [
+                ("SOT-23", 10, (0.0, 0.0)),
+                ("SOT.23", 20, (0.0, 0.0)),
+            ]
+        )
+        rotation, _ = fab._find_correction("SOT-23")
+        assert rotation == 10
