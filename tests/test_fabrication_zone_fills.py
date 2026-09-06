@@ -91,6 +91,7 @@ def zone_harness(request, monkeypatch):
 
     footprint_helpers = types.ModuleType(f"{package_name}.footprint_helpers")
     footprint_helpers.get_is_dnp = MagicMock(return_value=False)
+    footprint_helpers.get_lcsc_value = MagicMock(return_value="")
     monkeypatch.setitem(
         sys.modules,
         f"{package_name}.footprint_helpers",

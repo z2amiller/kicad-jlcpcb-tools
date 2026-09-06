@@ -19,6 +19,9 @@ sys.modules["kicadplugin"] = _pkg
 
 _footprint_helpers = types.ModuleType("kicadplugin.footprint_helpers")
 _footprint_helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
+_footprint_helpers.get_lcsc_value = lambda fp: getattr(  # type: ignore[attr-defined]
+    fp, "lcsc", ""
+)
 sys.modules["kicadplugin.footprint_helpers"] = _footprint_helpers
 
 _spec = importlib.util.spec_from_file_location(
@@ -202,3 +205,142 @@ class TestFindCorrectionOffset:
         rotation, offset = fab._find_correction("SOT-23-3")
         assert rotation == 45
         assert offset == (1.5, -0.5)
+
+
+# ---------------------------------------------------------------------------
+# Candidate ordering: LCSC number is matched before the KiCad-side strings
+# ---------------------------------------------------------------------------
+
+
+class FakeOrientation:
+    """Stand-in for the EDA_ANGLE returned by footprint.GetOrientation()."""
+
+    def __init__(self, degrees):
+        self._degrees = degrees
+
+    def AsDegrees(self):
+        """Return the orientation in degrees, like KiCad >= 6.99."""
+        return self._degrees
+
+
+class FakeFootprint:
+    """Minimal footprint stub exposing only what the correction code reads."""
+
+    def __init__(self, lcsc="", reference="U1", value="LM358", name="SOT-23-3"):
+        self.lcsc = lcsc
+        self._reference = reference
+        self._value = value
+        self._name = name
+
+    def GetOrientation(self):
+        """Footprints in these tests are always placed at 0 degrees."""
+        return FakeOrientation(0)
+
+    def GetLayer(self):
+        """Top layer, so no bottom-side mirroring is applied."""
+        return 0
+
+    def GetReference(self):
+        """Return the reference designator."""
+        return self._reference
+
+    def GetValue(self):
+        """Return the footprint value."""
+        return self._value
+
+    def GetFPID(self):
+        """Return self, since GetLibItemName is implemented here as well."""
+        return self
+
+    def GetLibItemName(self):
+        """Return the footprint name."""
+        return self._name
+
+
+def make_fab_with_logger(corrections):
+    """Create a bare Fabrication instance that can also log corrections."""
+    fab = make_fab(corrections)
+    fab.logger = MagicMock()
+    return fab
+
+
+class TestFixRotationCandidateOrder:
+    """fix_rotation tries the LCSC number before reference, value and footprint name."""
+
+    def test_lcsc_correction_wins_over_footprint_family(self):
+        """An LCSC entry overrides the correction for the footprint family."""
+        fab = make_fab_with_logger(
+            [
+                ("SOT-23-3", 180, (0.0, 0.0)),
+                ("^C12345$", 90, (0.0, 0.0)),
+            ]
+        )
+        assert fab.fix_rotation(FakeFootprint(lcsc="C12345")) == 90
+
+    def test_zero_lcsc_correction_mutes_the_family_correction(self):
+        """A 0 degree LCSC entry suppresses the family correction entirely."""
+        fab = make_fab_with_logger(
+            [
+                ("SOT-23-3", 180, (0.0, 0.0)),
+                ("^C12345$", 0, (0.0, 0.0)),
+            ]
+        )
+        assert fab.fix_rotation(FakeFootprint(lcsc="C12345")) == 0
+
+    def test_other_parts_keep_the_family_correction(self):
+        """A part with a different LCSC number still gets the family correction."""
+        fab = make_fab_with_logger(
+            [
+                ("SOT-23-3", 180, (0.0, 0.0)),
+                ("^C12345$", 0, (0.0, 0.0)),
+            ]
+        )
+        assert fab.fix_rotation(FakeFootprint(lcsc="C99999")) == 180
+
+    def test_part_without_lcsc_keeps_the_family_correction(self):
+        """A part with no LCSC number falls through to the footprint name."""
+        fab = make_fab_with_logger([("SOT-23-3", 180, (0.0, 0.0))])
+        assert fab.fix_rotation(FakeFootprint(lcsc="")) == 180
+
+    def test_lcsc_correction_wins_over_reference_and_value(self):
+        """The LCSC number is tried before both the reference and the value."""
+        fab = make_fab_with_logger(
+            [
+                ("^U1$", 45, (0.0, 0.0)),
+                ("^LM358$", 135, (0.0, 0.0)),
+                ("^C12345$", 90, (0.0, 0.0)),
+            ]
+        )
+        assert fab.fix_rotation(FakeFootprint(lcsc="C12345")) == 90
+
+
+class TestFixPositionCandidateOrder:
+    """fix_position resolves its offset from the same ordered candidate list."""
+
+    def _offsets_used(self, fab, footprint):
+        """Run fix_position and report the offset it selected."""
+        used = []
+        fab.reposition = lambda fp, position, offset: used.append(offset)
+        fab.fix_position(footprint, position=None)
+        return used
+
+    def test_lcsc_offset_wins_over_footprint_family(self):
+        """An LCSC entry overrides the position offset for the footprint family."""
+        fab = make_fab_with_logger(
+            [
+                ("SOT-23-3", 0, (1.0, 1.0)),
+                ("^C12345$", 0, (0.5, -0.5)),
+            ]
+        )
+        assert self._offsets_used(fab, FakeFootprint(lcsc="C12345")) == [(0.5, -0.5)]
+
+    def test_part_without_lcsc_keeps_the_family_offset(self):
+        """A part with no LCSC number falls through to the footprint name."""
+        fab = make_fab_with_logger([("SOT-23-3", 0, (1.0, 1.0))])
+        assert self._offsets_used(fab, FakeFootprint(lcsc="")) == [(1.0, 1.0)]
+
+    def test_no_match_leaves_the_position_untouched(self):
+        """With no matching correction the original position is returned."""
+        fab = make_fab_with_logger([("^C99999$", 0, (1.0, 1.0))])
+        sentinel = object()
+        assert fab.fix_position(FakeFootprint(lcsc="C12345"), sentinel) is sentinel

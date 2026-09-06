@@ -33,6 +33,9 @@ sys.modules["kicadplugin"] = _pkg
 
 _footprint_helpers = types.ModuleType("kicadplugin.footprint_helpers")
 _footprint_helpers.get_is_dnp = lambda fp: False  # type: ignore[attr-defined]
+_footprint_helpers.get_lcsc_value = lambda fp: getattr(  # type: ignore[attr-defined]
+    fp, "lcsc", ""
+)
 sys.modules["kicadplugin.footprint_helpers"] = _footprint_helpers
 
 _spec = importlib.util.spec_from_file_location(
