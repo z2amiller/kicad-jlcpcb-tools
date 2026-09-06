@@ -6,6 +6,7 @@
 from contextlib import contextmanager, suppress
 from datetime import datetime as dt
 from threading import Thread
+from typing import Any
 import json
 import logging
 import os
@@ -117,7 +118,7 @@ class KicadProvider:
 class JLCPCBTools(wx.Dialog):
     """JLCPCBTools main dialog."""
 
-    def __init__(self, parent, kicad_provider=KicadProvider()):
+    def __init__(self, parent: Any, kicad_provider: Any = KicadProvider()) -> None:
         while not wx.GetApp():
             time.sleep(1)
         wx.Dialog.__init__(
@@ -295,11 +296,12 @@ class JLCPCBTools(wx.Dialog):
         # ------------------ Right side toolbar List --------------------------
         # ---------------------------------------------------------------------
 
+        # An explicit width overrides GTK's content-based minimum size.
         self.right_toolbar = wx.ToolBar(
             self,
             wx.ID_ANY,
             wx.DefaultPosition,
-            wx.Size(int(self.scale_factor * 128), -1),
+            wx.DefaultSize,
             wx.TB_VERTICAL | wx.TB_TEXT | wx.TB_NODIVIDER,
         )
 
