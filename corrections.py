@@ -430,13 +430,15 @@ class CorrectionManagerDialog(wx.Dialog):
             else:
                 # The regex already exists.
                 existing_rotation = int(
-                    self.to_float(self.corrections_list.GetTextValue(row, 1))
+                    self.to_float(
+                        self.corrections_list.GetTextValue(row_of_that_regex, 1)
+                    )
                 )
                 existing_offset_x = self.to_float(
-                    self.corrections_list.GetTextValue(row, 2)
+                    self.corrections_list.GetTextValue(row_of_that_regex, 2)
                 )
                 existing_offset_y = self.to_float(
-                    self.corrections_list.GetTextValue(row, 3)
+                    self.corrections_list.GetTextValue(row_of_that_regex, 3)
                 )
 
                 if (
