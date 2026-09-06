@@ -1964,10 +1964,15 @@ class JLCPCBTools(wx.Dialog):
                     lcsc = self.library.get_mapping_data(footprint, value)[2]
                     self.store.set_lcsc(reference, lcsc)
                     self.logger.info("Found %s", lcsc)
+                    # A mapping can name a part the local database does not
+                    # have, so the row is updated with whatever is known.
                     details = self.library.get_part_details(lcsc)
-                    params = params_for_part(self.library.get_part_details(lcsc))
                     self.partlist_data_model.set_lcsc(
-                        reference, lcsc, details["type"], details["stock"], params
+                        reference,
+                        lcsc,
+                        details.get("type", ""),
+                        details.get("stock", ""),
+                        params_for_part(details),
                     )
                     self.start_assembly_enrichment([reference])
         self.recompute_bom_estimate()

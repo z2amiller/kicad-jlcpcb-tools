@@ -235,3 +235,26 @@ def test_populate_footprint_list_looks_a_part_up_once_per_part(monkeypatch):
     rows = window.partlist_data_model.AddEntry.call_args_list
     assert len(rows) == 2
     assert [row.args[0][4] for row in rows] == ["Basic", "Basic"]
+
+
+def test_search_foot_mapping_survives_a_part_missing_from_the_database():
+    """A mapping naming a part the local database lacks still updates the row.
+
+    get_part_details answers {} for a part it cannot find -- an unknown
+    number, or one the mapping table holds in a malformed form -- and the row
+    used to be updated by indexing that dict directly, so the lookup failing
+    raised KeyError instead of leaving the columns blank.
+    """
+    window = _window(footprints={"R1": _LiveFootprint()}, selections=("item",))
+    window.library.get_mapping_data.return_value = ("R_0603", "10k", "C12345")
+    window.library.get_part_details.return_value = {}
+    window.partlist_data_model.get_reference.return_value = "R1"
+    window.partlist_data_model.get_value.return_value = "10k"
+    window.partlist_data_model.get_footprint.return_value = "R_0603"
+    window.recompute_bom_estimate = MagicMock()
+
+    JLCPCBTools.search_foot_mapping(window)
+
+    assert window.partlist_data_model.set_lcsc.call_args_list == [
+        call("R1", "C12345", "", "", "params")
+    ]

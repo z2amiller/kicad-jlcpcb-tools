@@ -21,13 +21,14 @@ from dataclasses import dataclass
 import re
 from typing import Optional
 
-# At least four digits: measured across the JLC assembly catalogue (708,966
-# parts), where every number is a capital C and digits and the shortest is
-# C1002. The floor also keeps capacitor reference designators, which share the
-# shape, from reading as part numbers -- unlikely to collide above C1000, and
-# mostly harmless when it does.
-_PART_NUMBER = re.compile(r"^C\d{4,}$")
-_PART_NUMBER_IN_TEXT = re.compile(r"C\d{4,}", re.IGNORECASE)
+# At least four ASCII digits: measured across the JLC assembly catalogue
+# (708,966 parts), where every number is a capital C and digits and the
+# shortest is C1002. [0-9] rather than \d, which also admits Arabic-Indic and
+# other Unicode decimals that no catalogue number uses. The floor also keeps
+# capacitor reference designators, which share the shape, from reading as part
+# numbers -- unlikely to collide above C1000, and mostly harmless when it does.
+_PART_NUMBER = re.compile(r"^C[0-9]{4,}$")
+_PART_NUMBER_IN_TEXT = re.compile(r"C[0-9]{4,}", re.IGNORECASE)
 
 
 def normalize_lcsc(value):
@@ -66,16 +67,14 @@ class Lcsc:
     """A JLCPCB/LCSC part number, known to be well formed and canonical.
 
     Construct one through :meth:`parse` or :meth:`find_in`, which answer
-    ``None`` when the text does not name a part. The constructor itself
-    rejects anything that is not a part number, so an ``Lcsc`` in hand needs
-    no further checking -- which is the whole point of having the type. It is
-    frozen, so it can be a dict key, and it renders as the bare number, so it
-    can be formatted straight into a query, a CSV cell or a log line.
+    ``None`` when the text does not name a part. The constructor rejects
+    anything that is not a part number, so an ``Lcsc`` in hand needs no
+    further checking. It is frozen, so it can be a dict key, and it renders as
+    the bare number, so it can be formatted straight into a query, a CSV cell
+    or a log line.
 
-    Deliberately not ordered. Comparing the strings would put C10000 before
-    C9999, and comparing the digits would invent a ranking that means nothing
-    -- part numbers are identifiers, not quantities. Sort with an explicit key
-    if a display ever needs one.
+    Not ordered: part numbers identify rather than measure. Sort with an
+    explicit key if a display ever needs one.
 
         >>> part = Lcsc.parse(" c12345 ")
         >>> str(part)
@@ -128,9 +127,7 @@ class Lcsc:
 def format_lcsc(part) -> str:
     """Render a part, or the absence of one, for something that wants a string.
 
-    Absence is ``None`` everywhere inside the plugin; the empty string is what
-    sqlite columns, CSV cells and wx list cells use to mean the same thing.
-    This is the boundary between those two conventions, so that no caller has
-    to decide for itself what an absent part looks like.
+    The boundary between ``None`` inside the plugin and the empty string that
+    sqlite columns, CSV cells and wx list cells use for the same thing.
     """
     return str(part) if part is not None else ""

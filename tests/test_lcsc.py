@@ -54,6 +54,17 @@ class TestIsLcscPart:
         """
         assert is_lcsc_part(value)
 
+    @pytest.mark.parametrize("value", ["C١٢٣٤", "C𝟏𝟐𝟑𝟒", "C12٣4"])
+    def test_unicode_digits_are_not_part_numbers(self, value):
+        r"""Only ASCII digits count.
+
+        Python's ``\d`` matches every Unicode decimal, so Arabic-Indic and
+        mathematical digits would otherwise build a validated Lcsc that no
+        catalogue contains and no query can find.
+        """
+        assert not is_lcsc_part(value)
+        assert Lcsc.parse(value) is None
+
     @pytest.mark.parametrize("value", ["C1", "C12", "C123", "C999"])
     def test_a_reference_designator_is_not_a_part_number(self, value):
         """A capacitor designator in the usual range is not a part number.
