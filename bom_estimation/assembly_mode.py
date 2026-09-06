@@ -4,7 +4,16 @@
 # pyupgrade: disable
 
 from dataclasses import dataclass, field
+from enum import IntEnum
 from typing import Optional
+
+
+class ComponentProductType(IntEnum):
+    """Observed JLCPCB assembly classifications with their numeric API values."""
+
+    ECONOMIC_AND_STANDARD = 0
+    ECONOMIC_ONLY = 1
+    STANDARD_ONLY = 2
 
 
 @dataclass(frozen=True)
@@ -73,8 +82,8 @@ class AssemblyModeDecision:
         return self.economic_only_refs if self.board_standard is True else frozenset()
 
 
-def classify_component_product_type(value: object) -> Optional[int]:
-    """Normalize the observed JLC assembly classification to 0, 1, or 2.
+def classify_component_product_type(value: object) -> Optional[ComponentProductType]:
+    """Normalize the observed JLC assembly classification to a named value.
 
     The numeric mapping is observed API behavior, not a published JLCPCB API
     contract: 0 is Economic and Standard, 1 is Economic Only, and 2 is
@@ -85,7 +94,6 @@ def classify_component_product_type(value: object) -> Optional[int]:
     if isinstance(value, float) and not value.is_integer():
         return None
     try:
-        normalized = int(value)
+        return ComponentProductType(int(value))
     except (TypeError, ValueError, OverflowError):
         return None
-    return normalized if normalized in {0, 1, 2} else None

@@ -48,6 +48,9 @@ footprint_has_tht = footprint_metadata_module.footprint_has_tht
 
 # Imported here for the round-trip test below; the import sits below the
 # package bootstrap so bom_estimation resolves correctly.
+from bom_estimation.assembly_mode import (  # noqa: E402  pylint: disable=wrong-import-position,import-error
+    ComponentProductType,
+)
 from bom_estimation.pricing import (  # noqa: E402  pylint: disable=wrong-import-position,import-error
     get_assembly_flags as parse_assembly_flags,
 )
@@ -228,7 +231,11 @@ def test_assembly_metadata_follows_lcsc_lifecycle(tmp_path):
     _update_part(store, "C2")
     assert _part_state(store) == ("C2", "10k", "", None)
 
-    assert store.set_assembly_metadata("R1", "SMT", 0, expected_lcsc="C2")
+    assert store.set_assembly_metadata(
+        "R1", "SMT", ComponentProductType.ECONOMIC_AND_STANDARD, expected_lcsc="C2"
+    )
+    product_type = store.get_part("R1")["component_product_type"]
+    assert product_type == 0 and type(product_type) is int
     store.set_lcsc("R1", "CNEW")
     assert _part_state(store) == ("CNEW", "10k", "", None)
 

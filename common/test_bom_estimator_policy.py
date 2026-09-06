@@ -4,6 +4,7 @@ import pytest
 
 from bom_estimation.assembly_mode import (  # pylint: disable=import-error
     AssemblyModeDecision,
+    ComponentProductType,
     classify_component_product_type,
 )
 
@@ -22,9 +23,11 @@ def _decision(**overrides):
 @pytest.mark.parametrize(
     ("raw_value", "expected"),
     [
-        (0, 0),
-        ("1", 1),
-        (2, 2),
+        (0, ComponentProductType.ECONOMIC_AND_STANDARD),
+        ("1", ComponentProductType.ECONOMIC_ONLY),
+        (2, ComponentProductType.STANDARD_ONLY),
+        (2.0, ComponentProductType.STANDARD_ONLY),
+        (ComponentProductType.STANDARD_ONLY, ComponentProductType.STANDARD_ONLY),
         (None, None),
         ("bad", None),
         (2.5, None),
@@ -34,7 +37,7 @@ def _decision(**overrides):
 )
 def test_component_product_type_accepts_only_the_observed_mapping(raw_value, expected):
     """Unknown values never become Standard merely because they are nonzero."""
-    assert classify_component_product_type(raw_value) == expected
+    assert classify_component_product_type(raw_value) is expected
 
 
 @pytest.mark.parametrize(
