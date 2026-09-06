@@ -145,6 +145,9 @@ class Library:
                     args=(db_path,),
                     daemon=True,
                 ).start()
+        # Unconditional: corrections databases created before LCSC corrections
+        # existed have a correction table but no lcsc_correction table.
+        self.create_lcsc_correction_table()
         if (
             not os.path.isfile(self.mappingsdb_file)
             or os.path.getsize(self.mappingsdb_file) == 0
@@ -195,16 +198,21 @@ class Library:
                     con as cur,
                 ):
                     cur.execute("DROP TABLE IF EXISTS correction")
+                    cur.execute("DROP TABLE IF EXISTS lcsc_correction")
                     cur.commit()
                 self.correctionsdb_file = self.globalcorrectionsdb_file
             except OSError:
                 self.logger.warning("Failed to remove board local corrections file.")
         else:
             global_corrections = self.get_all_correction_data()
+            global_lcsc_corrections = self.get_all_lcsc_correction_data()
             self.correctionsdb_file = self.localcorrectionsdb_file
             self.create_correction_table()
+            self.create_lcsc_correction_table()
             for regex, rotation, offset in global_corrections:
                 self.insert_correction_data(regex, rotation, offset)
+            for lcsc, rotation, offset in global_lcsc_corrections:
+                self.insert_lcsc_correction_data(lcsc, rotation, offset)
 
     def set_order_by(self, n):
         """Set which value we want to order by when getting data from the database."""
@@ -409,6 +417,86 @@ class Library:
             try:
                 result = cur.execute(
                     "SELECT * FROM correction ORDER BY regex ASC"
+                ).fetchall()
+                return [(c[0], int(c[1]), (float(c[2]), float(c[3]))) for c in result]
+            except sqlite3.OperationalError:
+                return []
+
+    def create_lcsc_correction_table(self):
+        """Create the table holding per-LCSC-part corrections."""
+        self.logger.debug("Create SQLite table for LCSC corrections")
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS lcsc_correction "
+                "('lcsc' TEXT PRIMARY KEY, 'rotation', 'offset_x', 'offset_y')"
+            )
+            cur.commit()
+
+    def get_lcsc_correction_data(self, lcsc, db_path=None):
+        """Get the correction data for exactly this LCSC part number."""
+        target = db_path if db_path is not None else self.correctionsdb_file
+        with (
+            contextlib.closing(sqlite3.connect(target)) as con,
+            con as cur,
+        ):
+            try:
+                return cur.execute(
+                    "SELECT lcsc, rotation, offset_x, offset_y "
+                    "FROM lcsc_correction WHERE lcsc = ?",
+                    (lcsc,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return None
+
+    def delete_lcsc_correction_data(self, lcsc):
+        """Delete an LCSC correction from the database."""
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
+            cur.execute("DELETE FROM lcsc_correction WHERE lcsc = ?", (lcsc,))
+            cur.commit()
+
+    def update_lcsc_correction_data(self, lcsc, rotation, offset):
+        """Update an LCSC correction in the database."""
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
+            cur.execute(
+                "UPDATE lcsc_correction SET rotation = ?, offset_x = ?, offset_y = ? "
+                "WHERE lcsc = ?",
+                (rotation, offset[0], offset[1], lcsc),
+            )
+            cur.commit()
+
+    def insert_lcsc_correction_data(self, lcsc, rotation, offset, db_path=None):
+        """Insert an LCSC correction into the database."""
+        target = db_path if db_path is not None else self.correctionsdb_file
+        with (
+            contextlib.closing(sqlite3.connect(target)) as con,
+            con as cur,
+        ):
+            cur.execute(
+                "INSERT INTO lcsc_correction (lcsc, rotation, offset_x, offset_y) "
+                "VALUES (?, ?, ?, ?)",
+                (lcsc, rotation, offset[0], offset[1]),
+            )
+            cur.commit()
+
+    def get_all_lcsc_correction_data(self):
+        """Get all LCSC corrections from the database."""
+        with (
+            contextlib.closing(sqlite3.connect(self.correctionsdb_file)) as con,
+            con as cur,
+        ):
+            try:
+                result = cur.execute(
+                    "SELECT lcsc, rotation, offset_x, offset_y "
+                    "FROM lcsc_correction ORDER BY lcsc ASC"
                 ).fetchall()
                 return [(c[0], int(c[1]), (float(c[2]), float(c[3]))) for c in result]
             except sqlite3.OperationalError:
