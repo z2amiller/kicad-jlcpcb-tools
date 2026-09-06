@@ -60,7 +60,7 @@ from .footprint_helpers import (
     toggle_exclude_from_pos,
 )
 from .generate_hooks import format_hook_error, run_configured_hook
-from .lcsc import extract_lcsc, normalize_lcsc
+from .lcsc import Lcsc, extract_lcsc
 from .helpers import (
     PLUGIN_PATH,
     GetScaleFactor,
@@ -1162,8 +1162,10 @@ class JLCPCBTools(wx.Dialog):
                 continue
             is_dnp = get_is_dnp(fp)
             # Get part stock and type from library, skip if part number was already looked up before
-            lcsc = normalize_lcsc(part["lcsc"])
-            if lcsc and lcsc not in details:
+            # Keyed on the parsed part, so two spellings of one number cannot
+            # become two cache entries and two round trips.
+            lcsc = Lcsc.parse(part["lcsc"])
+            if lcsc is not None and lcsc not in details:
                 details[lcsc] = self.library.get_part_details(lcsc)
             # don't show the part if hide BOM is set
             if self.hide_bom_parts and part["exclude_from_bom"]:
