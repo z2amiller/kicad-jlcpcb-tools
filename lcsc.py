@@ -20,9 +20,15 @@ import re
 # (708,966 parts, 2026-04-17 snapshot): no part number has fewer, the smallest
 # is C1002, and every entry is a capital C followed only by digits. A second,
 # independently built cache agrees. Requiring four digits costs nothing today
-# and stops a capacitor reference designator -- C1 through C999, which is every
-# designator a board of this size will ever have -- from reading as a part
-# number. If LCSC ever issues a shorter one, this is the line to relax.
+# and stops most capacitor reference designators, which share the shape
+# exactly, from reading as a part number.
+#
+# It narrows the overlap rather than removing it: a large array, or a board
+# numbering a sub-assembly from C1001, reaches four digits and collides again.
+# What limits the damage is that the strict check is only ever applied to a
+# field already named lcsc or jlc, so a designator has to be deliberately put
+# there. extract_lcsc has no such guard, which is why the bound lives here and
+# not at the call sites. If LCSC ever issues a shorter number, relax this line.
 _PART_NUMBER = re.compile(r"^C\d{4,}$")
 _PART_NUMBER_IN_TEXT = re.compile(r"C\d{4,}", re.IGNORECASE)
 

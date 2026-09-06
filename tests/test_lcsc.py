@@ -53,10 +53,11 @@ class TestIsLcscPart:
 
     @pytest.mark.parametrize("value", ["C1", "C12", "C123", "C999"])
     def test_a_reference_designator_is_not_a_part_number(self, value):
-        """A capacitor designator shares the shape but never the length.
+        """A capacitor designator in the usual range is not a part number.
 
-        No catalogue part has fewer than four digits, and no board has a
-        thousand capacitors, so the two ranges do not overlap in practice.
+        No catalogue part has fewer than four digits, so designators below
+        C1000 cannot be mistaken for one. The ranges do still meet above that:
+        a large array, or a sub-assembly numbered from C1001, gets there.
         """
         assert not is_lcsc_part(value)
 
