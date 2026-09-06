@@ -3,6 +3,7 @@
 import csv
 import logging
 import os
+import re
 
 import wx  # pylint: disable=import-error
 import wx.dataview  # pylint: disable=import-error
@@ -10,11 +11,16 @@ import wx.dataview  # pylint: disable=import-error
 from .events import PopulateFootprintListEvent
 from .helpers import PLUGIN_PATH, HighResWxSize, loadBitmapScaled
 
+KIND_FOOTPRINT = "Footprint"
+KIND_LCSC = "LCSC"
+
+LCSC_PART_RE = re.compile(r"^C\d+$")
+
 
 class CorrectionManagerDialog(wx.Dialog):
     """Dialog for managing part corrections."""
 
-    def __init__(self, parent, footprint):
+    def __init__(self, parent, footprint, lcsc_part=None):
         wx.Dialog.__init__(
             self,
             parent,
@@ -28,6 +34,7 @@ class CorrectionManagerDialog(wx.Dialog):
         self.logger = logging.getLogger(__name__)
         self.parent = parent
         self.selection_regex = None
+        self.selection_kind = None
         self.selection_rotation = None
         self.selection_offset_x = None
         self.selection_offset_y = None
@@ -58,15 +65,33 @@ class CorrectionManagerDialog(wx.Dialog):
         self.regex = wx.TextCtrl(
             self,
             wx.ID_ANY,
-            footprint,
+            lcsc_part if lcsc_part else footprint,
             wx.DefaultPosition,
             HighResWxSize(parent.window, wx.Size(200, 24)),
+        )
+
+        self.lcsc_mode = wx.CheckBox(
+            self,
+            wx.ID_ANY,
+            "LCSC part, matched exactly",
+        )
+        self.lcsc_mode.SetValue(bool(lcsc_part))
+        self.lcsc_mode.SetToolTip(
+            "Correct one LCSC part number instead of every footprint matching "
+            "a pattern. Use this when two parts share a footprint name but JLC "
+            "assembles them in different orientations."
         )
 
         sizer_regex = wx.BoxSizer(wx.VERTICAL)
         sizer_regex.Add(regex_label, 0, wx.ALL, 5)
         sizer_regex.Add(
             self.regex,
+            0,
+            wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            5,
+        )
+        sizer_regex.Add(
+            self.lcsc_mode,
             0,
             wx.LEFT | wx.RIGHT | wx.BOTTOM,
             5,
@@ -184,6 +209,12 @@ class CorrectionManagerDialog(wx.Dialog):
         )
         self.corrections_list.AppendTextColumn(
             "Offset Y",
+            mode=wx.dataview.DATAVIEW_CELL_INERT,
+            width=int(parent.scale_factor * 100),
+            align=wx.ALIGN_LEFT,
+        )
+        self.corrections_list.AppendTextColumn(
+            "Kind",
             mode=wx.dataview.DATAVIEW_CELL_INERT,
             width=int(parent.scale_factor * 100),
             align=wx.ALIGN_LEFT,
@@ -377,23 +408,64 @@ class CorrectionManagerDialog(wx.Dialog):
         s = str(value)
         return f"{value:.2f}" if len(s) < 4 else s
 
+    def current_kind(self):
+        """Return the kind of rule the add/edit form is currently describing."""
+        return KIND_LCSC if self.lcsc_mode.GetValue() else KIND_FOOTPRINT
+
+    def row_kind(self, row):
+        """Return the kind of the rule shown in the given list row."""
+        return self.corrections_list.GetTextValue(row, 4)
+
+    def insert_rule(self, kind, key, rotation, offset):
+        """Insert a rule of the given kind into its table."""
+        if kind == KIND_LCSC:
+            self.parent.library.insert_lcsc_correction_data(key, rotation, offset)
+        else:
+            self.parent.library.insert_correction_data(key, rotation, offset)
+
+    def update_rule(self, kind, key, rotation, offset):
+        """Update a rule of the given kind in its table."""
+        if kind == KIND_LCSC:
+            self.parent.library.update_lcsc_correction_data(key, rotation, offset)
+        else:
+            self.parent.library.update_correction_data(key, rotation, offset)
+
+    def delete_rule(self, kind, key):
+        """Delete a rule of the given kind from its table."""
+        if kind == KIND_LCSC:
+            self.parent.library.delete_lcsc_correction_data(key)
+        else:
+            self.parent.library.delete_correction_data(key)
+
     def populate_corrections_list(self):
         """Populate the list with the result of the search."""
         self.corrections_list.DeleteAllItems()
-        for regex, rotation, offset in self.parent.library.get_all_correction_data():
+        rules = [
+            (key, rotation, offset, KIND_LCSC)
+            for key, rotation, offset in self.parent.library.get_all_lcsc_correction_data()
+        ]
+        rules += [
+            (key, rotation, offset, KIND_FOOTPRINT)
+            for key, rotation, offset in self.parent.library.get_all_correction_data()
+        ]
+        for key, rotation, offset, kind in rules:
             self.corrections_list.AppendItem(
                 [
-                    str(regex),
+                    str(key),
                     str(rotation),
                     self.str_from_float(offset[0]),
-                    self.str_from_float(offset[1])
+                    self.str_from_float(offset[1]),
+                    kind,
                 ]
             )
         selected_row = None
         if self.selection_regex is not None:
             for row in range(self.corrections_list.GetItemCount()):
                 row_regex = self.corrections_list.GetTextValue(row, 0)
-                if row_regex == self.selection_regex:
+                if row_regex == self.selection_regex and (
+                    self.selection_kind is None
+                    or self.row_kind(row) == self.selection_kind
+                ):
                     selected_row = row
             if selected_row is not None:
                 self.corrections_list.SelectRow(selected_row)
@@ -401,20 +473,33 @@ class CorrectionManagerDialog(wx.Dialog):
     def save_correction(self, *_):
         """Add/Update a correction in the database."""
         regex = self.regex.GetValue()
+        kind = self.current_kind()
+        if kind == KIND_LCSC and not LCSC_PART_RE.match(regex.strip()):
+            wx.MessageBox(
+                f"'{regex}' is not an LCSC part number.\n\n"
+                "An LCSC rule matches one part exactly, so it needs a plain "
+                "part number like C12345, not a pattern.",
+                "Not an LCSC part number",
+                style=wx.ICON_WARNING,
+            )
+            return
+        if kind == KIND_LCSC:
+            regex = regex.strip()
+            self.regex.SetValue(regex)
         rotation = int(self.to_float(self.rotation.GetValue()))
         offset_x = self.to_float(self.offset_x.GetValue())
         offset_y = self.to_float(self.offset_y.GetValue())
         offset = (offset_x, offset_y)
-        if regex == self.selection_regex:
-            # the regex of the selection was not changed, just update values.
-            self.parent.library.update_correction_data(regex, rotation, offset)
+        if regex == self.selection_regex and kind == self.selection_kind:
+            # the key and kind of the selection were not changed, just update values.
+            self.update_rule(kind, regex, rotation, offset)
         else:
             # regex was modified or nothing was selected.
             # Check if there is a existing rule for that regex
             row_of_that_regex = None
             for row in range(self.corrections_list.GetItemCount()):
                 row_regex = self.corrections_list.GetTextValue(row, 0)
-                if row_regex == regex:
+                if row_regex == regex and self.row_kind(row) == kind:
                     row_of_that_regex = row
 
             if row_of_that_regex is None:
@@ -422,11 +507,12 @@ class CorrectionManagerDialog(wx.Dialog):
 
                 if self.selection_regex is not None:
                     # remove old line, if one existed
-                    self.parent.library.delete_correction_data(self.selection_regex)
+                    self.delete_rule(self.selection_kind, self.selection_regex)
 
                 # Add the modified regex and values
-                self.parent.library.insert_correction_data(regex, rotation, offset)
+                self.insert_rule(kind, regex, rotation, offset)
                 self.selection_regex = regex
+                self.selection_kind = kind
             else:
                 # The regex already exists.
                 existing_rotation = int(
@@ -448,18 +534,27 @@ class CorrectionManagerDialog(wx.Dialog):
                 ):
                     # User entered a regex that already exists, just select that one
                     self.selection_regex = regex
+                    self.selection_kind = kind
                 else:
                     # The regex exists with different values, ask the user what to do.
-                    existing_correction = "(" + \
-                        str(existing_rotation) + "°, " + \
-                        self.str_from_float(existing_offset_x) + "/" + \
-                        self.str_from_float(existing_offset_y) + \
-                        ")"
-                    new_correction = "(" + \
-                        str(rotation) + "°, " + \
-                        self.str_from_float(offset_x) + "/" + \
-                        self.str_from_float(offset_y) + \
-                        ")"
+                    existing_correction = (
+                        "("
+                        + str(existing_rotation)
+                        + "°, "
+                        + self.str_from_float(existing_offset_x)
+                        + "/"
+                        + self.str_from_float(existing_offset_y)
+                        + ")"
+                    )
+                    new_correction = (
+                        "("
+                        + str(rotation)
+                        + "°, "
+                        + self.str_from_float(offset_x)
+                        + "/"
+                        + self.str_from_float(offset_y)
+                        + ")"
+                    )
 
                     dialog = wx.MessageDialog(
                         self,
@@ -469,26 +564,31 @@ class CorrectionManagerDialog(wx.Dialog):
                     )
                     if self.selection_regex is None:
                         # The user entered a regex that already exists with different values.
-                        dialog.ExtendedMessage = "Do you want to update the corrections " + \
-                           existing_correction + \
-                           " to " + \
-                           new_correction
+                        dialog.ExtendedMessage = (
+                            "Do you want to update the corrections "
+                            + existing_correction
+                            + " to "
+                            + new_correction
+                        )
                     else:
                         # The user has selected regex_a, changed it to regex_b
                         # (but regex_b exists).
-                        dialog.ExtendedMessage = "Do you want to replace the corrections " + \
-                           existing_correction + \
-                           " with " + \
-                           new_correction + \
-                           ",\n" + \
-                           f"removing the rule for '{self.selection_regex}'?"
+                        dialog.ExtendedMessage = (
+                            "Do you want to replace the corrections "
+                            + existing_correction
+                            + " with "
+                            + new_correction
+                            + ",\n"
+                            + f"removing the rule for '{self.selection_regex}'?"
+                        )
                     result = dialog.ShowModal()
 
                     if result == wx.ID_YES:
                         if self.selection_regex is not None:
-                            self.parent.library.delete_correction_data(self.selection_regex)
-                        self.parent.library.update_correction_data(regex, rotation, offset)
+                            self.delete_rule(self.selection_kind, self.selection_regex)
+                        self.update_rule(kind, regex, rotation, offset)
                         self.selection_regex = regex
+                        self.selection_kind = kind
 
         self.rotation.SetValue(str(rotation))
         self.offset_x.SetValue(self.str_from_float(offset_x))
@@ -503,7 +603,7 @@ class CorrectionManagerDialog(wx.Dialog):
         if row == -1:
             return
         regex = self.corrections_list.GetTextValue(row, 0)
-        self.parent.library.delete_correction_data(regex)
+        self.delete_rule(self.row_kind(row), regex)
         self.populate_corrections_list()
         wx.PostEvent(self.parent, PopulateFootprintListEvent())
 
@@ -521,6 +621,8 @@ class CorrectionManagerDialog(wx.Dialog):
                 return
 
             self.selection_regex = self.corrections_list.GetTextValue(row, 0)
+            self.selection_kind = self.row_kind(row)
+            self.lcsc_mode.SetValue(self.selection_kind == KIND_LCSC)
             self.selection_rotation = int(
                 self.to_float(self.corrections_list.GetTextValue(row, 1))
             )
@@ -537,6 +639,7 @@ class CorrectionManagerDialog(wx.Dialog):
         else:
             self.selection_row = None
             self.selection_regex = None
+            self.selection_kind = None
 
         self.enable_toolbar_buttons()
 

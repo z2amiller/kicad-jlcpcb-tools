@@ -103,6 +103,7 @@ ID_CONTEXT_MENU_PASTE_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_REFERENCE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
+ID_CONTEXT_MENU_ADD_ROT_BY_LCSC = wx.NewIdRef()
 ID_CONTEXT_MENU_FIND_MAPPING = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_MAPPING = wx.NewIdRef()
 
@@ -1133,9 +1134,16 @@ class JLCPCBTools(wx.Dialog):
         }
         wx.MessageBox(e.text, e.title, style=styles.get(e.style, wx.ICON_INFORMATION))
 
-    def get_correction(self, part: dict, corrections: list) -> str:
+    def get_correction(
+        self, part: dict, corrections: list, lcsc_corrections: dict
+    ) -> str:
         """Try to find correction data for a given part."""
-        # First check if the part name matches
+        # A correction for the exact LCSC part wins over every regex rule
+        lcsc = str(part.get("lcsc", ""))
+        if lcsc and lcsc in lcsc_corrections:
+            rotation, offset = lcsc_corrections[lcsc]
+            return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (lcsc)"
+        # Then check if the part name matches
         for regex, rotation, offset in corrections:
             if re.search(regex, str(part["reference"])):
                 return f"{str(rotation)}°, {str(offset[0])}/{str(offset[1])} (ref)"
@@ -1157,6 +1165,10 @@ class JLCPCBTools(wx.Dialog):
         parts = self.store.read_all()
         details = {}
         corrections = self.library.get_all_correction_data()
+        lcsc_corrections = {
+            lcsc: (rotation, offset)
+            for lcsc, rotation, offset in self.library.get_all_lcsc_correction_data()
+        }
         for part in parts:
             fp = self.pcbnew.GetBoard().FindFootprintByReference(part["reference"])
             if fp is None:
@@ -1182,7 +1194,7 @@ class JLCPCBTools(wx.Dialog):
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
                     int(is_dnp),
-                    str(self.get_correction(part, corrections)),
+                    str(self.get_correction(part, corrections, lcsc_corrections)),
                     str(fp.GetLayer()),
                     params_for_part(details.get(part["lcsc"], {})),
                     self._get_enrichment_status_label(part),  # enrichment
@@ -1911,6 +1923,15 @@ class JLCPCBTools(wx.Dialog):
             elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_NAME:
                 if value := self.partlist_data_model.get_value(item):
                     CorrectionManagerDialog(self, re.escape(value)).ShowModal()
+            elif e.GetId() == ID_CONTEXT_MENU_ADD_ROT_BY_LCSC:
+                if lcsc := self.partlist_data_model.get_lcsc(item):
+                    CorrectionManagerDialog(self, "", lcsc_part=lcsc).ShowModal()
+                else:
+                    wx.MessageBox(
+                        "Selected part has no LCSC number assigned.",
+                        "No LCSC number",
+                        style=wx.ICON_WARNING,
+                    )
 
     def save_all_mappings(self, *_):
         """Save all mappings."""
@@ -2015,6 +2036,12 @@ class JLCPCBTools(wx.Dialog):
         )
         right_click_menu.Append(correction_by_name)
         right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_name)
+
+        correction_by_lcsc = wx.MenuItem(
+            right_click_menu, ID_CONTEXT_MENU_ADD_ROT_BY_LCSC, "Add Correction by LCSC"
+        )
+        right_click_menu.Append(correction_by_lcsc)
+        right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_lcsc)
 
         find_mapping = wx.MenuItem(
             right_click_menu, ID_CONTEXT_MENU_FIND_MAPPING, "Find LCSC from Mappings"

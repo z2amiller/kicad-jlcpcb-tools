@@ -33,7 +33,7 @@ from pcbnew import (  # pylint: disable=import-error
     wxPoint,
 )
 
-from .footprint_helpers import get_is_dnp
+from .footprint_helpers import get_is_dnp, get_lcsc_value
 
 # Compatibility hack for V6 / V7 / V7.99
 try:
@@ -96,6 +96,7 @@ class Fabrication:
         self.logger = logging.getLogger(__name__)
         self.board = board
         self.corrections = []
+        self.lcsc_corrections = {}
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
 
@@ -165,6 +166,19 @@ class Fabrication:
                 return rotation, offset
         return None
 
+    def _find_lcsc_correction(self, footprint):
+        """Return (rotation, offset) for the footprint's exact LCSC part, if any.
+
+        Per-part corrections win over the regex table: two parts can share a
+        KiCad footprint name and still need different rotations, because the
+        package JLC assembles is a property of the LCSC number, not of the
+        name we happened to give the footprint.
+        """
+        lcsc = get_lcsc_value(footprint)
+        if not lcsc:
+            return None
+        return self.lcsc_corrections.get(str(lcsc))
+
     def fix_rotation(self, footprint):
         """Fix the rotation of footprints in order to be correct for JLCPCB."""
         original = footprint.GetOrientation()
@@ -178,6 +192,9 @@ class Fabrication:
         if footprint.GetLayer() != 0:
             # bottom angles need to be mirrored on Y-axis
             rotation = (180 - rotation) % 360
+        match = self._find_lcsc_correction(footprint)
+        if match:
+            return self.rotate(footprint, rotation, match[0])
         for getter in (
             lambda: str(footprint.GetReference()),
             lambda: str(footprint.GetValue()),
@@ -238,6 +255,9 @@ class Fabrication:
 
     def fix_position(self, footprint, position):
         """Fix the position of footprints in order to be correct for JLCPCB."""
+        match = self._find_lcsc_correction(footprint)
+        if match:
+            return self.reposition(footprint, position, match[1])
         for getter in (
             lambda: str(footprint.GetReference()),
             lambda: str(footprint.GetValue()),
@@ -425,6 +445,10 @@ class Fabrication:
         """Generate placement file (CPL)."""
         cpl_path = self.get_cpl_csv_path()
         self.corrections = self.parent.library.get_all_correction_data()
+        self.lcsc_corrections = {
+            lcsc: (rotation, offset)
+            for lcsc, rotation, offset in self.parent.library.get_all_lcsc_correction_data()
+        }
         aux_orgin = self.board.GetDesignSettings().GetAuxOrigin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
