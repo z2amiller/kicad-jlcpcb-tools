@@ -1375,11 +1375,15 @@ class JLCPCBTools(wx.Dialog):
         if self.auto_select_alike and self.footprint_list.GetSelectedItemsCount() == 1:
             self.select_alike_parts()
 
-    def get_part_details(self, *_):
-        """Show Part Details for each selected footprint (modeless windows)."""
+    def get_part_details(self, *_: object) -> None:
+        """Show one modeless Part Details window per selected LCSC number."""
+        seen: set[str] = set()
         for item in self.footprint_list.GetSelections():
-            if lcsc := self.partlist_data_model.get_lcsc(item):
-                self.show_part_details_dialog(lcsc)
+            lcsc = self.partlist_data_model.get_lcsc(item)
+            if not lcsc or lcsc in seen:
+                continue
+            seen.add(lcsc)
+            self.show_part_details_dialog(lcsc)
 
     def show_part_details_dialog(self, part):
         """Show the part details dialog (modeless so it doesn't block the app)."""
