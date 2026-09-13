@@ -32,5 +32,5 @@ def test_corner_case_board_matches_jlc():
     assert validator.compare(rows, truth) == []
     by_reference = {row["reference"]: row["verdict"] for row in rows}
     assert by_reference["U7"].fit == "count"
-    assert by_reference["R4"].fit == "pitch"
+    assert by_reference["R4"].fit == "fits_tight"
     assert by_reference["D9"].polarity_light == "yellow"
