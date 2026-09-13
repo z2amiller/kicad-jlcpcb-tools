@@ -3,6 +3,10 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+from jlcfootprint import geometry
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
 
@@ -110,3 +114,83 @@ def test_rows_come_out_in_natural_reference_order(tmp_path):
     rows = validator.evaluate(board_file(tmp_path, body), FIXTURES)
     assert [row["reference"] for row in rows] == ["Q1", "Q2", "Q10"]
     assert validator.reference_key("LED3") < validator.reference_key("Q1")
+
+
+def test_main_end_to_end_reports_and_exits(tmp_path, capsys):
+    """The gate is main's exit code: 0 when JLC agrees, 1 with one reason line per disagreement."""
+    validator = load_script()
+    body = footprint_text("Q1", "F.Cu", 0) + footprint_text(
+        "Q2", "B.Cu", 90, mirror=True
+    )
+    board = board_file(tmp_path, body)
+    truth = tmp_path / "truth.csv"
+    report = tmp_path / "report.txt"
+    truth.write_text("reference,observed_rotation\nQ1,180\nQ2,270\n", encoding="utf-8")
+    argv = [str(board), "--fixtures", str(FIXTURES), "--truth", str(truth)]
+    assert validator.main([*argv, "--report", str(report)]) == 0
+    out = capsys.readouterr().out
+    assert "2 parts checked against JLC, 0 disagree" in out
+    assert (
+        report.read_text(encoding="utf-8")
+        == validator.format_rows(validator.evaluate(board, FIXTURES)) + "\n"
+    )
+    truth.write_text("reference,observed_rotation\nQ1,180\nQ2,0\n", encoding="utf-8")
+    assert validator.main(argv) == 1
+    out = capsys.readouterr().out
+    assert "2 parts checked against JLC, 1 disagree" in out
+    assert "Q2" in out and "placed 90 bottom: would emit 270, JLC shows 0" in out
+
+
+def test_load_truth_tolerates_spreadsheet_output(tmp_path):
+    """A BOM, capitalised headers and a missing cell are read; a missing column stops the run."""
+    validator = load_script()
+    path = tmp_path / "truth.csv"
+    path.write_text("﻿Reference,Observed_Rotation\nQ1,90\nQ2\n\n", encoding="utf-8")
+    assert validator.load_truth(path) == {"Q1": "90", "Q2": ""}
+    path.write_text("ref,observed_rotation\nQ1,90\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="no 'reference' column"):
+        validator.load_truth(path)
+
+
+def test_refused_part_with_a_recorded_angle_is_a_disagreement(tmp_path):
+    """A red verdict against a JLC angle is reported with the status, never silently skipped."""
+    validator = load_script()
+    body = footprint_text("U1", "F.Cu", 0).replace("C2132", "C3014306")
+    rows = validator.evaluate(board_file(tmp_path, body), FIXTURES)
+    assert rows[0]["verdict"].status == "red"
+    assert validator.compare(rows, {"U1": "180"})[0][1] == (
+        "no derived rotation (red); JLC shows 180"
+    )
+    good = validator.evaluate(
+        board_file(tmp_path, footprint_text("Q1", "F.Cu", 0)), FIXTURES
+    )
+    assert validator.compare(good, {"Q1": "180 deg"})[0][1] == (
+        "truth value '180 deg' is not a number"
+    )
+
+
+def test_evaluate_uses_the_plugin_flip_constant_by_default(tmp_path, monkeypatch):
+    """With no --flip-y the gate tests FLIP_EASYEDA_Y itself, so changing the constant changes the gate."""
+    validator = load_script()
+    board = board_file(tmp_path, footprint_text("Q1", "F.Cu", 0))
+    as_shipped = validator.evaluate(board, FIXTURES)[0]["verdict"]
+    monkeypatch.setattr(geometry, "FLIP_EASYEDA_Y", not geometry.FLIP_EASYEDA_Y)
+    flipped = validator.evaluate(board, FIXTURES)[0]["verdict"]
+    assert (as_shipped.rotation, as_shipped.status) != (
+        flipped.rotation,
+        flipped.status,
+    )
+    assert validator.evaluate(board, FIXTURES, flip_y=False)[0]["verdict"].rotation == (
+        as_shipped.rotation
+    )
+
+
+def test_corrupt_fixture_names_the_file(tmp_path):
+    """A truncated recording stops the run with its path instead of a bare JSON error."""
+    validator = load_script()
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "C2132.json").write_text('{"success": tru', encoding="utf-8")
+    board = board_file(tmp_path, footprint_text("Q1", "F.Cu", 0))
+    with pytest.raises(SystemExit, match="C2132.json: not valid JSON"):
+        validator.evaluate(board, fixtures)

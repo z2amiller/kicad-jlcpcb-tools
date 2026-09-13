@@ -25,7 +25,8 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from jlcfootprint.boardfile import (  # noqa: E402
     KiCadFootprint,
@@ -55,13 +56,23 @@ def load_record(fixtures: Path, lcsc: str) -> ComponentRecord | None:
     path = fixtures / f"{lcsc}.json"
     if not path.exists():
         return None
-    return parse_component_response(json.loads(path.read_text(encoding="utf-8")), lcsc)
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as error:
+        raise SystemExit(
+            f"{path}: not valid JSON ({error}); delete it and re-record"
+        ) from error
+    return parse_component_response(body, lcsc)
 
 
 def evaluate_footprints(
-    footprints: list[KiCadFootprint], fixtures: Path, flip_y: bool = False
+    footprints: list[KiCadFootprint], fixtures: Path, flip_y: bool | None = None
 ) -> list[dict]:
-    """Resolve every footprint with an LCSC field; each row keeps the board facts and the verdict."""
+    """Resolve every footprint with an LCSC field; each row keeps the board facts and the verdict.
+
+    ``flip_y`` None uses the plugin's own ``FLIP_EASYEDA_Y`` constant, so the gate
+    tests the convention the plugin ships; ``--flip-y`` overrides it for calibration.
+    """
     rows: list[dict] = []
     for fp in footprints:
         if not fp.lcsc:
@@ -96,11 +107,11 @@ def evaluate_footprints(
 def reference_key(reference: str) -> tuple:
     """Sort key that orders Q2 before Q10: letters, then the number, then any suffix."""
     match = re.match(r"^([A-Za-z_]*)(\d*)(.*)$", reference)
-    letters, digits, rest = match.groups() if match else (reference, "", "")
+    letters, digits, rest = match.groups()  # the pattern matches every string
     return (letters.upper(), int(digits) if digits else -1, rest)
 
 
-def evaluate(board: Path, fixtures: Path, flip_y: bool = False) -> list[dict]:
+def evaluate(board: Path, fixtures: Path, flip_y: bool | None = None) -> list[dict]:
     """Parse the board file and evaluate it, rows in reference order.
 
     pcbnew writes footprints in the order of their fresh internal ids, so a
@@ -114,12 +125,25 @@ def evaluate(board: Path, fixtures: Path, flip_y: bool = False) -> list[dict]:
 
 
 def load_truth(path: Path) -> dict[str, str]:
-    """Return ``{reference: observed_rotation text}`` from the truth CSV."""
-    with path.open(newline="", encoding="utf-8") as handle:
-        return {
-            row["reference"].strip(): row["observed_rotation"].strip()
-            for row in csv.DictReader(handle)
-        }
+    """Return ``{reference: observed_rotation text}`` from the truth CSV.
+
+    Header names match case-insensitively, a UTF-8 BOM (what spreadsheets write) is
+    tolerated, a missing cell reads as blank, and a missing column stops the run.
+    """
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        columns = {name.strip().lower(): name for name in reader.fieldnames or []}
+        for wanted in ("reference", "observed_rotation"):
+            if wanted not in columns:
+                raise SystemExit(
+                    f"{path}: no '{wanted}' column (header: {reader.fieldnames})"
+                )
+        truth: dict[str, str] = {}
+        for row in reader:
+            reference = (row.get(columns["reference"]) or "").strip()
+            if reference:
+                truth[reference] = (row.get(columns["observed_rotation"]) or "").strip()
+        return truth
 
 
 def compare(rows: list[dict], truth: dict[str, str]) -> list[tuple[dict, str]]:
@@ -160,8 +184,13 @@ def compare(rows: list[dict], truth: dict[str, str]) -> list[tuple[dict, str]]:
                 (row, f"no derived rotation ({verdict.status}); JLC shows {observed}")
             )
             continue
+        try:
+            observed_angle = float(observed) % 360
+        except ValueError:
+            failures.append((row, f"truth value {observed!r} is not a number"))
+            continue
         expected = expected_cpl_rotation(row["placed"], row["bottom"], verdict.rotation)
-        if expected != float(observed) % 360:
+        if expected != observed_angle:
             failures.append((row, f"would emit {expected:g}, JLC shows {observed}"))
     return failures
 
@@ -199,9 +228,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="flip EasyEDA Y before matching (spec section 6 calibration)",
     )
-    parser.add_argument("--report", type=Path, help="also write the table to this file")
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="also write the table (without the truth summary) to this file",
+    )
     args = parser.parse_args(argv)
-    rows = evaluate(args.board, args.fixtures, args.flip_y)
+    rows = evaluate(args.board, args.fixtures, True if args.flip_y else None)
     table = format_rows(rows)
     print(table)
     if args.report:
