@@ -453,3 +453,21 @@ def test_coincident_jlc_pads_are_degenerate_not_vertical():
     )
     assert (verdict.status, verdict.rotation) == ("unknown", None)
     assert verdict.note_text == "pad geometry is degenerate"
+
+
+def test_bidirectional_tvs_with_d_tvs_pin_names_aligns_by_axis():
+    """KiCad's D_TVS symbol names both pins A1/A2; a -BI part must not read them as two anodes."""
+    tvs = [
+        Pad("1", -1.45, 0.0, 1.3, 1.4, 0.0, "A1"),
+        Pad("2", 1.45, 0.0, 1.3, 1.4, 0.0, "A2"),
+    ]
+    verdict = resolve(
+        tvs, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-BI", JLC_SMF, D1_PINS
+    )
+    assert (verdict.method, verdict.rotation, verdict.status) == ("axis", 0, "green")
+    assert "bidirectional" in verdict.note_text
+    polarized = resolve(
+        tvs, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D1_PINS
+    )
+    assert polarized.status == "unknown"
+    assert "contradictory" in polarized.note_text
