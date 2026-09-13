@@ -96,3 +96,12 @@ def test_missing_fixture_and_blank_truth(tmp_path):
         validator.compare(good, {"Q1": ""})[0][1]
         == "expected no derived rotation, got 180"
     )
+
+
+def test_rows_come_out_in_natural_reference_order(tmp_path):
+    """Q2 sorts before Q10, whatever order pcbnew wrote the footprints in."""
+    validator = load_script()
+    body = "".join(footprint_text(ref, "F.Cu", 0) for ref in ("Q10", "Q2", "Q1"))
+    rows = validator.evaluate(board_file(tmp_path, body), FIXTURES)
+    assert [row["reference"] for row in rows] == ["Q1", "Q2", "Q10"]
+    assert validator.reference_key("LED3") < validator.reference_key("Q1")
