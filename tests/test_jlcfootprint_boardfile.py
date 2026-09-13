@@ -60,8 +60,8 @@ def test_pads_carry_pin_functions_and_relative_rotation():
     d1, q1, _ = parse_kicad_pcb_text(BOARD)
     pads = footprint_pads(d1)
     assert pads == [
-        Pad("1", -1.45, 0.0, 1.3, 1.4, 0.0, "K"),
-        Pad("2", 1.45, 0.0, 1.3, 1.4, 0.0, "A"),
+        Pad("1", -1.45, 0.0, 1.3, 1.4, 0.0, "K", "roundrect"),
+        Pad("2", 1.45, 0.0, 1.3, 1.4, 0.0, "A", "roundrect"),
     ]
     q1_pads = footprint_pads(q1)
     assert [p.number for p in q1_pads] == ["1", "2", "3"]
