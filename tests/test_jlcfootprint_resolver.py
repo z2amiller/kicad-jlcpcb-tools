@@ -211,6 +211,82 @@ def test_two_versus_three_pads_is_red_count():
     assert (verdict.status, verdict.fit) == ("red", "count")
 
 
+def test_fetch_error_is_unknown_and_will_retry():
+    """A failed fetch is not a verdict about the part; the next enrichment retries it."""
+    verdict = resolve(KICAD_SOT23, "Package_TO_SOT_SMD:SOT-23", "error", "", [], [])
+    assert (verdict.status, verdict.rotation, verdict.method) == (
+        "unknown",
+        None,
+        "none",
+    )
+    assert "will retry" in verdict.note_text
+
+
+def test_non_finite_pad_values_are_unknown_not_a_crash():
+    """A NaN coordinate from a corrupt record short-circuits before any geometry."""
+    package, jlc_pads, pins = load_jlc("C2132")
+    bad = [KICAD_SOT23[0]._replace(x=float("nan"))] + KICAD_SOT23[1:]
+    verdict = resolve(bad, "Package_TO_SOT_SMD:SOT-23", "ok", package, jlc_pads, pins)
+    assert (verdict.status, verdict.rotation) == ("unknown", None)
+    assert "non-numeric" in verdict.note_text
+    bad_jlc = [jlc_pads[0]._replace(width=float("inf"))] + jlc_pads[1:]
+    verdict = resolve(
+        KICAD_SOT23, "Package_TO_SOT_SMD:SOT-23", "ok", package, bad_jlc, pins
+    )
+    assert verdict.status == "unknown"
+
+
+def test_fewer_than_two_shared_names_is_unknown():
+    """One shared pad name cannot fix a rotation; say so instead of guessing."""
+    package, jlc_pads, pins = load_jlc("C2132")
+    renamed = [KICAD_SOT23[0]] + [
+        p._replace(number=f"X{p.number}") for p in KICAD_SOT23[1:]
+    ]
+    verdict = resolve(
+        renamed, "Package_TO_SOT_SMD:SOT-23", "ok", package, jlc_pads, pins
+    )
+    assert (verdict.status, verdict.rotation) == ("unknown", None)
+    assert "fewer than two matching pad names" in verdict.note_text
+
+
+def test_collinear_multi_pin_pads_are_underdetermined():
+    """Three pads on one line and one JLC pad stacked: the solver reports no rotation."""
+    kicad = [Pad(str(i), 0.0, 0.0, 0.5, 0.5) for i in range(1, 4)]
+    jlc = [Pad(str(i), float(i), 0.0, 0.5, 0.5) for i in range(1, 4)]
+    verdict = resolve(kicad, "Custom:Stacked", "ok", "SOT-23-3", jlc, [])
+    assert (verdict.status, verdict.rotation) == ("unknown", None)
+    assert "degenerate" in verdict.note_text
+
+
+def test_larger_kicad_pads_are_reported_exactly():
+    """Hand-solder pads: the part fits, and the grade names the reason."""
+    package, jlc_pads, pins = load_jlc("C2132")
+    wide = [p._replace(width=p.width * 1.6, height=p.height * 1.4) for p in KICAD_SOT23]
+    verdict = resolve(
+        wide, "Package_TO_SOT_SMD:SOT-23_Handsoldering", "ok", package, jlc_pads, pins
+    )
+    assert (verdict.status, verdict.fit, verdict.rotation) == (
+        "green",
+        "fits_larger_pads",
+        180,
+    )
+
+
+def test_skewed_kicad_pads_are_a_pitch_finding():
+    """A footprint whose pad pitch is wrong for the part misses a pad: red, pitch."""
+    package, jlc_pads, pins = load_jlc("C2132")
+    skewed = [
+        KICAD_SOT23[0]._replace(y=-1.6),
+        KICAD_SOT23[1]._replace(y=1.6),
+        KICAD_SOT23[2],
+    ]
+    verdict = resolve(
+        skewed, "Package_TO_SOT_SMD:SOT-23", "ok", package, jlc_pads, pins
+    )
+    assert (verdict.status, verdict.fit, verdict.rotation) == ("red", "pitch", None)
+    assert "does not fit: pitch" in verdict.note_text
+
+
 def test_no_easyeda_record_is_unknown_with_the_checkerboard_note():
     """Parts EasyEDA does not know get no rotation and the checkerboard wording."""
     verdict = resolve(KICAD_SOT23, "Package_TO_SOT_SMD:SOT-23", "none", "", [], [])

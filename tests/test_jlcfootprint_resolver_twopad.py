@@ -32,13 +32,128 @@ def test_token_reference_side():
 
 def test_kicad_reference_pad_by_function_or_convention():
     """The named terminal wins; the other named terminal implies it; pad 1 is the fallback."""
-    assert kicad_reference_pad(KICAD_SMF, "cathode") == (KICAD_SMF[0], False)
+    assert kicad_reference_pad(KICAD_SMF, "cathode") == (KICAD_SMF[0], False, "")
     only_anode = [Pad("1", -1, 0, 1, 1, 0, "A"), Pad("2", 1, 0, 1, 1)]
-    assert kicad_reference_pad(only_anode, "cathode") == (only_anode[1], False)
-    assert kicad_reference_pad(JLC_SMF, "cathode") == (JLC_SMF[0], True)
-    assert kicad_reference_pad(
+    assert kicad_reference_pad(only_anode, "cathode") == (only_anode[1], False, "")
+    pad, assumed, note = kicad_reference_pad(JLC_SMF, "cathode")
+    assert (pad, assumed, note) == (JLC_SMF[0], True, "assumed KiCad pad 1 = K")
+    pad, assumed, note = kicad_reference_pad(
         [Pad("A", 0, 0, 1, 1), Pad("B", 1, 0, 1, 1)], "positive"
-    ) == (None, True)
+    )
+    assert (pad, assumed) == (None, True)
+    assert "no pad 1" in note
+
+
+def test_kicad_reference_pad_reads_positive_and_negative_as_anode_and_cathode():
+    """An LED symbol labelled +/- names the anode and cathode; both vocabularies match."""
+    led = [Pad("1", -1, 0, 1, 1, 0, "-"), Pad("2", 1, 0, 1, 1, 0, "+")]
+    assert kicad_reference_pad(led, "cathode", diode=True) == (led[0], False, "")
+    cap = [Pad("1", -1, 0, 1, 1, 0, "K"), Pad("2", 1, 0, 1, 1, 0, "A")]
+    assert kicad_reference_pad(cap, "positive") == (cap[1], False, "")
+
+
+def test_contradictory_pin_functions_give_no_reference_pad():
+    """Two pads both claiming the cathode cannot be trusted; the caller reports unknown."""
+    both_k = [Pad("1", -1, 0, 1, 1, 0, "K"), Pad("2", 1, 0, 1, 1, 0, "K")]
+    pad, assumed, note = kicad_reference_pad(both_k, "cathode", diode=True)
+    assert pad is None
+    assert "contradictory" in note
+    verdict = resolve(
+        both_k, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D1_PINS
+    )
+    assert (verdict.status, verdict.rotation) == ("unknown", None)
+    assert "contradictory" in verdict.note_text
+
+
+def test_c_is_a_cathode_only_on_a_diode():
+    """``C`` is a collector on a transistor symbol; it names the cathode only for diodes."""
+    pads = [Pad("1", -1, 0, 1, 1, 0, "C"), Pad("2", 1, 0, 1, 1, 0, "E")]
+    assert kicad_reference_pad(pads, "cathode") == (
+        pads[0],
+        True,
+        "assumed KiCad pad 1 = K",
+    )
+    assert kicad_reference_pad(pads, "cathode", diode=True) == (pads[0], False, "")
+
+
+def test_led_with_plus_minus_functions_is_a_diode_read_by_meaning():
+    """C84256-style: LED0805-RD, KiCad pads labelled - (pad 1) and + (pad 2).
+
+    The footprint name says diode, so ``-`` is the cathode on pad 1: the same terminal
+    JLC's pin 1 = K names, so the rotation is 0.  Reading the part as a capacitor and
+    ignoring the functions gave 180 before.
+    """
+    led = [
+        Pad("1", -1.05, 0.0, 1.0, 1.2, 0.0, "-"),
+        Pad("2", 1.05, 0.0, 1.0, 1.2, 0.0, "+"),
+    ]
+    jlc = [Pad("1", -1.05, 0.0, 1.0, 1.2), Pad("2", 1.05, 0.0, 1.0, 1.2)]
+    verdict = resolve(
+        led, "LED_SMD:LED_0805_2012Metric", "ok", "LED0805-RD", jlc, D1_PINS
+    )
+    assert (verdict.rotation, verdict.status, verdict.polarity_light) == (
+        0,
+        "green",
+        "green",
+    )
+    assert verdict.method == "polarity"
+
+
+def test_led_symbol_labelled_plus_minus_on_the_easyeda_side_is_still_a_diode():
+    """EasyEDA symbols for LEDs often say +/-; the KiCad footprint name keeps it a diode."""
+    led = [
+        Pad("1", -1.05, 0.0, 1.0, 1.2, 0.0, "K"),
+        Pad("2", 1.05, 0.0, 1.0, 1.2, 0.0, "A"),
+    ]
+    jlc = [Pad("1", -1.05, 0.0, 1.0, 1.2), Pad("2", 1.05, 0.0, 1.0, 1.2)]
+    plus_minus = [SymbolPin("1", "-"), SymbolPin("2", "+")]
+    verdict = resolve(
+        led, "LED_SMD:LED_0805_2012Metric", "ok", "LED0805-RD", jlc, plus_minus
+    )
+    assert (verdict.rotation, verdict.polarity_light) == (0, "green")
+
+
+def test_two_terminal_part_on_a_three_pad_kicad_footprint_aligns_by_meaning():
+    """A KiCad diode footprint with an extra pad still pairs its 1 and 2 by terminal."""
+    kicad = [
+        Pad("1", -1.45, 0.0, 1.3, 1.4, 0.0, "K"),
+        Pad("2", 1.45, 0.0, 1.3, 1.4, 0.0, "A"),
+        Pad("3", 0.0, 1.5, 1.0, 0.5),
+    ]
+    verdict = resolve(
+        kicad, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D1_PINS
+    )
+    assert (verdict.rotation, verdict.method, verdict.status) == (
+        0,
+        "polarity",
+        "green",
+    )
+    no_pair = [
+        Pad("A", -1.45, 0.0, 1.3, 1.4, 0.0, "K"),
+        Pad("B", 1.45, 0.0, 1.3, 1.4, 0.0, "A"),
+        Pad("C", 0.0, 1.5, 1.0, 0.5),
+    ]
+    verdict = resolve(
+        no_pair, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D1_PINS
+    )
+    assert (verdict.status, verdict.rotation) == ("unknown", None)
+
+
+def test_degenerate_two_pad_geometry_is_unknown():
+    """Two pads at the same point cannot define an axis: unknown, not a rotation."""
+    stacked = [
+        Pad("1", 0.0, 0.0, 1.0, 1.0, 0.0, "K"),
+        Pad("2", 0.0, 0.0, 1.0, 1.0, 0.0, "A"),
+    ]
+    verdict = resolve(
+        stacked, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D1_PINS
+    )
+    assert (verdict.status, verdict.rotation) == ("unknown", None)
+    assert "degenerate" in verdict.note_text
+    same = resolve(
+        stacked, "Resistor_SMD:R_0603_1608Metric", "ok", "R0603", JLC_SMF, []
+    )
+    assert (same.status, same.rotation) == ("unknown", None)
 
 
 def test_label_reference_pad():
