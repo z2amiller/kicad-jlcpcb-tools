@@ -190,9 +190,9 @@ def compare(rows: list[dict], truth: dict[str, str]) -> list[tuple[dict, str]]:
             failures.append((row, f"truth value {observed!r} is not a number"))
             continue
         expected = expected_cpl_rotation(row["placed"], row["bottom"], verdict.rotation)
-        # A part aligned by axis only has no pin 1 to place: 180 degrees apart is the
-        # same placement, and JLC's preview accepts either.
-        modulus = 180 if verdict.method == "axis" else 360
+        # A non-polar part (aligned by axis, or a marked inductor whose token only
+        # places JLC's cosmetic pin-1 dot) is the same placement 180 degrees apart.
+        modulus = 180 if verdict.non_polar else 360
         if expected % modulus != observed_angle % modulus:
             failures.append((row, f"would emit {expected:g}, JLC shows {observed}"))
     return failures

@@ -135,14 +135,27 @@ def pad_geom(pad: Pad) -> tuple[float, float, float, float]:
 
 
 def ccw_correction(math_rotation_deg: float) -> int:
-    """Convert the solver's Y-down math-frame angle to KiCad's CCW CPL degrees, snapped to 90.
+    """Convert the solver's Y-down math-frame angle to the CPL correction, snapped to 90.
 
-    In a Y-down frame a positive mathematical rotation appears clockwise on screen,
-    and KiCad's CPL rotation is counter-clockwise on screen, so the sign flips.
+    The solver's angle turns the KiCad pads onto JLC's drawing in the Y-down frame;
+    the CPL correction is the same turn as JLC counts it.  JLC's placement preview
+    settled the sign on 2026-09-12 (plan Task 12, pass 1): every -BL/-TL multi-pin
+    part on the corner-case board needed 270 where the negated angle gave 90, and
+    every 180-degree part agreed either way, so the angle is taken as it is.
     Feed it ``TransformResult.rotation_deg`` (or the raw angle; both snap here).
     Exact 45-degree ties round to the even multiple, which is deterministic and
-    irrelevant in practice because such a solve is red on angular RMS anyway.
-    Never feed the result back into ``assess_quality``, which works in the math
-    frame.  Spec section 6; confirmed by the gate on SOIC-8 -BL (must give 90).
+    irrelevant in practice because such a solve fails a pad anyway.  Never feed
+    the result back into ``assess_quality``, which works in the math frame.
     """
-    return (round(-math_rotation_deg / 90.0) * 90) % 360
+    return (round(math_rotation_deg / 90.0) * 90) % 360
+
+
+def crawl_to_cpl(rotation: int) -> int:
+    """Convert a crawl-table rotation (the (family, token) table's sense) to the CPL's.
+
+    The crawler's table and ``scripts/sweep_crawl.py`` count the turn that brings
+    JLC's drawing onto KiCad's footprint; the CPL counts the turn of KiCad's part
+    onto JLC's drawing.  They are negatives of each other (SOIC-8 -BL: 90 in the
+    table, 270 in the CPL, confirmed by the preview).
+    """
+    return (-rotation) % 360

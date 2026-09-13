@@ -7,6 +7,7 @@ from jlcfootprint.geometry import (
     Pad,
     ccw_correction,
     centroid,
+    crawl_to_cpl,
     easyeda_pads_to_mm,
     mirror_y,
     named_pads,
@@ -112,11 +113,16 @@ def test_centroid_is_the_mean_and_rejects_no_pads():
         centroid([])
 
 
-def test_ccw_correction_flips_sign_snaps_and_wraps():
-    """Math-frame angles in a Y-down frame become KiCad CCW degrees with the sign flipped."""
-    assert [ccw_correction(a) for a in (0, 90, 180, 270)] == [0, 270, 180, 90]
-    assert ccw_correction(-92.0) == 90
-    assert ccw_correction(268.0) == 90
+def test_ccw_correction_snaps_and_wraps():
+    """The CPL correction is the snapped math-frame angle, modulo 360 (sign settled by the preview)."""
+    assert [ccw_correction(a) for a in (0, 90, 180, 270)] == [0, 90, 180, 270]
+    assert ccw_correction(-92.0) == 270
+    assert ccw_correction(268.0) == 270
     assert ccw_correction(44.0) == 0
-    assert ccw_correction(-270.0) == 270
-    assert ccw_correction(450.0) == 270
+    assert ccw_correction(-270.0) == 90
+    assert ccw_correction(450.0) == 90
+
+
+def test_crawl_to_cpl_negates():
+    """The crawl table's 90 is the CPL's 270; 0 and 180 are their own negatives."""
+    assert [crawl_to_cpl(a) for a in (0, 90, 180, 270)] == [0, 270, 180, 90]
