@@ -205,6 +205,12 @@ def _resolve_polarized(
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
     reference = REFERENCE_TERMINAL[kind]
     diode = kind == "diode"
+    side = token_reference_side(package_name, reference)
+    if side == "none":
+        # A bidirectional TVS has no reference terminal; KiCad's D_TVS symbol names its
+        # pins A1/A2, which would otherwise read as two anodes.
+        verdict.notes.append("bidirectional part; aligned by axis")
+        return _resolve_axis(kicad_named, jlc_named, verdict)
     kicad_ref, assumed, note = kicad_reference_pad(
         kicad_named, reference, diode, CONVENTION[kind]
     )
@@ -213,10 +219,6 @@ def _resolve_polarized(
     if note:
         verdict.notes.append(note)
     polarity = pin1_polarity(symbol_pins)
-    side = token_reference_side(package_name, reference)
-    if side == "none":
-        verdict.notes.append("bidirectional part; aligned by axis")
-        return _resolve_axis(kicad_named, jlc_named, verdict)
     token_pad = None
     if side is not None:
         token_pad = next((p for p in jlc_named if side_of(p, jlc_named) == side), None)
