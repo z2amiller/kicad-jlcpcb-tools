@@ -59,7 +59,7 @@ def test_normalise_function_and_terminal_of():
 
 
 def test_part_kind_from_family_footprint_functions_or_labels():
-    """Any side may declare the part polarized; caps win over diodes when both fire."""
+    """Any side may declare the part polarized: KiCad evidence, then the family, then labels."""
     plain = [Pad("1", 0, 0, 1, 1), Pad("2", 1, 0, 1, 1)]
     wired = [Pad("1", 0, 0, 1, 1, 0, "K"), Pad("2", 1, 0, 1, 1, 0, "A")]
     assert part_kind("R0603", "Resistor_SMD:R_0603_1608Metric", plain, []) == "other"
@@ -272,8 +272,8 @@ def test_fewer_than_two_shared_names_is_unknown():
     assert "fewer than two matching pad names" in verdict.note_text
 
 
-def test_collinear_multi_pin_pads_are_underdetermined():
-    """Three pads on one line and one JLC pad stacked: the solver reports no rotation."""
+def test_coincident_multi_pin_pads_are_underdetermined():
+    """Three KiCad pads at one point cannot fix a rotation: the solver reports none."""
     kicad = [Pad(str(i), 0.0, 0.0, 0.5, 0.5) for i in range(1, 4)]
     jlc = [Pad(str(i), float(i), 0.0, 0.5, 0.5) for i in range(1, 4)]
     verdict = resolve(kicad, "Custom:Stacked", "ok", "SOT-23-3", jlc, [])
@@ -308,6 +308,23 @@ def test_skewed_kicad_pads_are_a_pitch_finding():
     )
     assert (verdict.status, verdict.fit, verdict.rotation) == ("red", "pitch", None)
     assert "does not fit: pitch" in verdict.note_text
+
+
+def test_numbering_note_reports_the_package_angle_with_the_by_name_sign():
+    """A cyclic renumbering of a 90-degree-rotated SOT-23 aligns by shape at the by-name angle."""
+    package, jlc_pads, pins = load_jlc("C2132")
+    turned = rotated_on_screen_ccw(jlc_pads, 90)
+    by_name = resolve(
+        KICAD_SOT23, "Package_TO_SOT_SMD:SOT-23", "ok", package, turned, pins
+    )
+    assert by_name.rotation in (90, 270)
+    cyclic = {"1": "2", "2": "3", "3": "1"}
+    renumbered = [p._replace(number=cyclic[p.number]) for p in turned]
+    verdict = resolve(
+        KICAD_SOT23, "Package_TO_SOT_SMD:SOT-23", "ok", package, renumbered, pins
+    )
+    assert (verdict.status, verdict.fit, verdict.rotation) == ("red", "numbering", None)
+    assert f"aligns at {by_name.rotation}°" in verdict.note_text
 
 
 def test_no_easyeda_record_is_unknown_with_the_checkerboard_note():
