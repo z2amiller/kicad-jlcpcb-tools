@@ -89,6 +89,29 @@ def test_part_kind_from_family_footprint_functions_or_labels():
     )
 
 
+def test_part_kind_reads_kicad_diode_evidence_before_capacitor_evidence():
+    """An LED whose pads say +/- is a diode: the footprint name and K/A functions come first."""
+    plus_minus = [Pad("1", 0, 0, 1, 1, 0, "-"), Pad("2", 1, 0, 1, 1, 0, "+")]
+    assert (
+        part_kind("LED0805-RD", "LED_SMD:LED_0805_2012Metric", plus_minus, [])
+        == "diode"
+    )
+    assert (
+        part_kind("SMF_L2.8-W1.8-LS3.7-RD", "Diode_SMD:D_SMF", plus_minus, [])
+        == "diode"
+    )
+    wired = [Pad("1", 0, 0, 1, 1, 0, "K"), Pad("2", 1, 0, 1, 1, 0, "A")]
+    cap_labels = [SymbolPin("1", "+"), SymbolPin("2", "-")]
+    assert (
+        part_kind("CAP-SMD_BD6.3-L6.6-W6.6-FD", "Custom:Thing", wired, cap_labels)
+        == "diode"
+    )
+    assert (
+        part_kind("CAP-SMD_BD6.3-L6.6-W6.6-FD", "Custom:Thing", plus_minus, [])
+        == "polar_cap"
+    )
+
+
 def test_sot23_against_the_recorded_c2132_footprint_gives_180():
     """KiCad's SOT-23 (pin 1 top-left) against EasyEDA's -BR drawing is exactly 180 degrees."""
     name, jlc, pins = load_jlc("C2132")
