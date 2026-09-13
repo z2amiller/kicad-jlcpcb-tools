@@ -1,5 +1,11 @@
 """2D rigid-transform solver (Kabsch/Umeyama, specialised for 2D).
 
+Angles are in whatever frame both pad sets share (KiCad's Y-down frame in this
+plugin; ``geometry.ccw_correction`` turns the snapped angle into KiCad's CCW CPL
+degrees).  ``residual`` is the RMS error for the raw angle, and ``offset_x/y`` is
+the least-squares translation for the raw angle; consumers that apply the
+snapped angle must recompute the translation from the centroids.
+
 Given two pad dicts ``{pad_number: (x, y)}`` from the same physical part
 (one from KiCad, one from JLCPCB/EasyEDA), compute the rotation and
 translation that best aligns ``A`` to ``B``.
@@ -136,6 +142,9 @@ def solve_transform(a: PadDict, b: PadDict) -> TransformResult:
 
     a_pts: list[Point] = [(float(a[k][0]), float(a[k][1])) for k in common]
     b_pts: list[Point] = [(float(b[k][0]), float(b[k][1])) for k in common]
+
+    if not all(math.isfinite(v) for pt in a_pts + b_pts for v in pt):
+        return _identity(matched, "underdetermined")
 
     if matched == 1:
         # Only translation recoverable.

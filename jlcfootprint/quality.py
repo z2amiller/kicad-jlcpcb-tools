@@ -1,7 +1,7 @@
 """Quality-assessment layer for rigid-transform pad alignment.
 
 Computes pad-overlap fraction and angular consistency on top of the raw
-linear residual already provided by ``autorotation.solver``.  Designed as
+linear residual already provided by ``jlcfootprint.solver``.  Designed as
 a pure function with no I/O so it can be tested offline without fixtures.
 
 Python 3.9 compatible; stdlib only.
@@ -136,7 +136,7 @@ def assess_quality(
     jlc_pads:
         Same format, in the JLC/EasyEDA footprint's local frame.
     transform:
-        Result from ``autorotation.solver.solve_transform``.  The snapped
+        Result from ``jlcfootprint.solver.solve_transform``.  The snapped
         rotation and offset fields are used; the raw rotation is ignored.
 
     Returns
@@ -157,9 +157,26 @@ def assess_quality(
             notes="no matching pad numbers between KiCad and JLC footprints",
         )
 
+    if transform.is_underdetermined or transform.quality_flag == "no_pads":
+        return QualityAssessment(
+            tier="no_data",
+            angular_rms_deg=0.0,
+            overlap_fraction=0.0,
+            min_overlap_ratio=0.0,
+            mean_overlap_ratio=0.0,
+            notes="transform is underdetermined",
+        )
+
     rot_deg = transform.rotation_deg  # snapped: 0/90/180/270
-    tx = transform.offset_x
-    ty = transform.offset_y
+    # The solver's offset belongs to the raw angle; with the snapped angle the
+    # translation that keeps the centroids together is what a placement means.
+    ck_x0 = sum(kicad_pads[k][0] for k in common_keys) / n
+    ck_y0 = sum(kicad_pads[k][1] for k in common_keys) / n
+    cj_x0 = sum(jlc_pads[k][0] for k in common_keys) / n
+    cj_y0 = sum(jlc_pads[k][1] for k in common_keys) / n
+    rck_x, rck_y = _rotate_2d(ck_x0, ck_y0, rot_deg)
+    tx = cj_x0 - rck_x
+    ty = cj_y0 - rck_y
 
     # ------------------------------------------------------------------
     # Transform KiCad pad centres into JLC frame.
@@ -203,16 +220,24 @@ def assess_quality(
     cj_x = sum(p[0] for p in jlc_centres) / n
     cj_y = sum(p[1] for p in jlc_centres) / n
 
+    radii = [math.hypot(kx - ck_x, ky - ck_y) for (kx, ky) in kicad_centres] + [
+        math.hypot(jx - cj_x, jy - cj_y) for (jx, jy) in jlc_centres
+    ]
+    mean_radius = sum(radii) / len(radii) if radii else 0.0
+    # A pad near the centroid (an exposed pad, a DPAK tab) has a bearing that a
+    # hundredth of a millimetre can swing by tens of degrees; leave it out.
+    near_centre = 0.1 * mean_radius
+
     angular_errs_sq = []
     for (kx, ky), (jx, jy) in zip(kicad_centres, jlc_centres):
         dk_x = kx - ck_x
         dk_y = ky - ck_y
         dj_x = jx - cj_x
         dj_y = jy - cj_y
-        # Skip pads that are at (or very near) the centroid to avoid atan2(0,0).
-        if abs(dk_x) < 1e-9 and abs(dk_y) < 1e-9:
-            continue
-        if abs(dj_x) < 1e-9 and abs(dj_y) < 1e-9:
+        if (
+            math.hypot(dk_x, dk_y) <= near_centre
+            or math.hypot(dj_x, dj_y) <= near_centre
+        ):
             continue
         bearing_kicad = math.degrees(math.atan2(dk_y, dk_x))
         bearing_jlc = math.degrees(math.atan2(dj_y, dj_x))
