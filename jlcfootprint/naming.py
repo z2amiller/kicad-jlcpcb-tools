@@ -199,6 +199,10 @@ _CATHODE_PIN1_FAMILIES = frozenset(
         # LCSC "Diodes" category, which the plugin does not see at resolve time.
         "SMF",
         "DO-219AB",
+        # SOD-882 / SOD-882D: 2-lead DFN diodes (KiCad D_SOD-882 has pin 1 = K); the crawl's
+        # table lacked them, so its RD entries for this family read 180 where 0 is right.
+        "SOD-882",
+        "SOD-882D",
         # Vishay PowerDI series (SOD-123 footprint-compatible)
         "POWERDI-123",
         "POWERDI-323",

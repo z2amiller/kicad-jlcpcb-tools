@@ -33,6 +33,7 @@ class KiCadPad:
     width: float  # pad width in mm
     height: float  # pad height in mm
     rotation: float = 0.0  # absolute angle from the file, degrees
+    shape: str = ""  # 'roundrect', 'rect', 'oval', 'circle', 'custom', ...
     pin_function: str = ""  # from (pinfunction "K"), "" when absent
 
 
@@ -219,6 +220,7 @@ def _parse_pad(pad_node: list[object]) -> KiCadPad | None:
     if function_node is not None:
         pin_function = _str_arg(function_node, 1) or ""
 
+    shape = pad_node[3] if len(pad_node) > 3 and isinstance(pad_node[3], str) else ""
     return KiCadPad(
         number=number,
         x=px,
@@ -227,6 +229,7 @@ def _parse_pad(pad_node: list[object]) -> KiCadPad | None:
         height=ph,
         rotation=rotation,
         pin_function=pin_function,
+        shape=shape,
     )
 
 
@@ -344,6 +347,7 @@ def footprint_pads(fp: KiCadFootprint) -> list[Pad]:
             height=pad.height,
             rotation=(pad.rotation - fp.placed_rotation) % 360,
             pin_function=pad.pin_function,
+            shape=pad.shape,
         )
         for pad in fp.pads
     ]
