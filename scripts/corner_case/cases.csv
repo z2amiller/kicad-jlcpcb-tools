@@ -39,7 +39,7 @@ C8,Capacitor_SMD,C_1206_3216Metric,C13585,CL31A106KBHNNNE,0,F,,rotation
 R1,Resistor_SMD,R_0402_1005Metric,C2906861,FRC0402F1002TS,0,F,,rotation
 R2,Resistor_SMD,R_0603_1608Metric,C25804,0603WAF1002T5E,0,F,,rotation
 R3,Resistor_SMD,R_0603_1608Metric_Pad0.98x0.95mm_HandSolder,C25804,0603WAF1002T5E,90,F,,rotation
-R4,Resistor_SMD,R_0402_1005Metric,C25804,0603 part on 0402 pads,0,F,,red
+R4,Resistor_SMD,R_0402_1005Metric,C25804,0603 part on 0402 pads,0,F,,tight
 J1,Connector_USB,USB_C_Receptacle_HRO_TYPE-C-31-M-12,C165948,TYPE-C-31-M-12,0,F,,rotation
 D11,Diode_SMD,D_SMB,C553979,SMBJ28A-E3/52 (-R-RD),0,F,1=K;2=A,rotation
 L1,Inductor_SMD,L_0402_1005Metric,C77110,LQG15HS6N8J02D (L0402-RD),0,F,,rotation
