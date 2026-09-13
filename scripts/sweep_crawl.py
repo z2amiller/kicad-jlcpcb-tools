@@ -239,7 +239,7 @@ def main(argv=None) -> int:
         if text.lstrip().startswith("{"):
             data = json.loads(text)
             head = data.get("head") or {}
-            raw = parse_footprint_pads(
+            raw, _ = parse_footprint_pads(
                 data.get("shape") or [],
                 float(head.get("x", 0) or 0),
                 float(head.get("y", 0) or 0),
