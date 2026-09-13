@@ -35,6 +35,13 @@ def test_extract_family(name, family):
         ("SOT-223-3_L6.5-W3.5-P2.30-LS7.0-BR", 180, "naming_rule", "high"),
         ("CAP-SMD_BD6.3-L6.6-W6.6-FD", 0, "naming_rule", "high"),
         ("CAP-SMD_BD6.3-L6.6-W6.6-LS7.2-R-RD", 180, "naming_rule", "high"),
+        ("LED-SMD_L1.6-W0.8-R-RD", 0, "naming_rule", "medium"),
+        ("LED0603-RD_GREEN", 0, "naming_rule", "medium"),
+        ("led0603-rd", 0, "naming_rule", "medium"),
+        ("SOIC-8_L4.9-W3.9-P1.27-LS6.0-TR", 270, "naming_rule", "high"),
+        ("CAP-SMD_BD5.0-L5.3-W5.3-T", 270, "naming_rule", "high"),
+        ("CAP-SMD_BD5.0-L5.3-W5.3-B", 90, "naming_rule", "high"),
+        ("SOD-882_L1.0-W0.6-RD", 0, "naming_rule", "medium"),
         ("LED0603-RD", 0, "naming_rule", "medium"),
         ("LED0603-FD", 180, "naming_rule", "medium"),
         ("SMA_L4.3-W2.6-LS5.2-RD", 0, "naming_rule", "medium"),
@@ -82,6 +89,9 @@ def test_orientation_tokens_skip_dimensions_and_mpn_suffixes():
         "RD",
     ]
     assert extract_orientation_tokens("HDR-TH_2P-P2.54-V-R") == []
+    assert extract_orientation_tokens("CASE-B_3528") == []
+    assert extract_orientation_tokens("CASE-A_3216") == []
+    assert extract_family("CASE-B_3528") == "CASE-B"
 
 
 def test_polarized_cap_families_are_not_cathode_families():

@@ -41,13 +41,13 @@ from typing import NamedTuple
 # Pin-1 corner/edge position → correction (all non-LED families)
 _PIN1_CORRECTION: dict[str, int] = {
     "TL": 0,  # top-left  → already standard → 0°
-    "TR": 270,  # top-right → rotate 270° CCW to bring to TL
-    "BL": 90,  # bottom-left → rotate 90° CCW to bring to TL
-    "BR": 180,  # bottom-right → rotate 180° to bring to TL
+    "TR": 270,  # KiCad's top-left pin 1 lands on JLC's top-right after 270° CCW
+    "BL": 90,  # KiCad's top-left pin 1 lands on JLC's bottom-left after 90° CCW
+    "BR": 180,  # KiCad's top-left pin 1 lands on JLC's bottom-right after 180°
     "L": 0,  # left → standard 2-pin horizontal → 0°
     "R": 180,  # right → flipped → 180°
-    "T": 270,  # top → vertical with pin-1 up → 270° to bring to left
-    "B": 90,  # bottom → vertical with pin-1 down → 90° to bring to left
+    "T": 270,  # KiCad's left pin 1 lands at the top after 270° CCW
+    "B": 90,  # KiCad's left pin 1 lands at the bottom after 90° CCW
 }
 
 # Polarity direction → correction (standard: positive terminal = KiCad pin-1)
@@ -253,17 +253,10 @@ POLARIZED_CAP_FAMILIES: frozenset[str] = frozenset(
     }
 )
 
-# Combined set of all polarized families for priority fetching and status display.
-# Superset of CATHODE_PIN1_FAMILIES — use this wherever "is this component polarized?"
-# is the question, rather than "does this family invert the FD/RD correction?"
-POLARIZED_FAMILIES: frozenset[str] = CATHODE_PIN1_FAMILIES | POLARIZED_CAP_FAMILIES
 
-# LCSC firstTypeNameEn values that imply cathode-is-pin-1 polarity.
-# Used as a fallback when the family name is not in _CATHODE_PIN1_FAMILIES —
-# catches diode package families not yet enumerated above (e.g. new naming
-# conventions, regional variants).  LED-ARRAY is protected because the
-# category override only fires when the family is NOT already matched.
-_CATHODE_CATEGORY_NAMES: frozenset[str] = frozenset({"Diodes"})
+# Families that must never be treated as cathode-is-pin-1 even when a caller says the part
+# is a diode: multi-LED arrays usually put the anode on pin 1.
+_NEVER_CATHODE_FAMILIES: frozenset[str] = frozenset({"LED-ARRAY"})
 
 # ---------------------------------------------------------------------------
 # Dimensional token filter
@@ -298,6 +291,8 @@ def _is_dimensional(token: str) -> bool:
 # Hyphens connecting alpha segments are included (e.g. "CAP-SMD" → "CAP-SMD" via _
 # split; this regex covers the no-underscore simpler cases).
 _LEADING_ALPHA_RE = re.compile(r"^([A-Z]+(?:-[A-Z]+)*)(?=\d|$)")
+# A head that carries its own orientation token looks like LED0603-RD: letters, digits, token.
+_HEAD_WITH_DIGITS_RE = re.compile(r"^[A-Z]+(?:-[A-Z]+)*\d")
 
 
 def extract_family(package_name: str) -> str:
@@ -311,12 +306,34 @@ def extract_family(package_name: str) -> str:
         "QFN-48_L7.0-W7.0-P0.5-BL"     → "QFN-48"
 
     """
-    if "_" in package_name:
-        return package_name.split("_", 1)[0]
-    m = _LEADING_ALPHA_RE.match(package_name)
+    package_name = package_name.upper()
+    head = package_name.split("_", 1)[0]
+    if "_" in package_name and not _head_tokens(head):
+        return head
+    m = _LEADING_ALPHA_RE.match(head)
     if m:
         return m.group(1).rstrip("-")
-    return package_name  # fallback: return as-is
+    return head  # fallback: return as-is
+
+
+def _head_tokens(head: str) -> list[str]:
+    """Return orientation tokens carried by a pre-underscore head such as ``LED0603-RD``.
+
+    Only a head shaped family-plus-digits qualifies; a bare code such as ``CASE-B``
+    (a tantalum case size) has no digits and its ``B`` is not an orientation.
+    """
+    if not _HEAD_WITH_DIGITS_RE.match(head):
+        return []
+    return _tokens_in(head)
+
+
+def _tokens_in(section: str) -> list[str]:
+    """Return the orientation tokens found in one hyphen-separated section, in order."""
+    return [
+        tok.upper()
+        for tok in section.split("-")
+        if tok.upper() in _ALL_ORIENTATION_TOKENS and not _is_dimensional(tok.upper())
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -335,28 +352,24 @@ def extract_orientation_tokens(package_name: str) -> list[str]:
     orientation tokens are extracted, avoiding false positives from product
     codes that happen to look like EasyEDA orientation tokens.
     """
+    package_name = package_name.upper()
     family = extract_family(package_name)
-    family_root = family.split("-")[0].upper()
+    family_root = family.split("-")[0]
     if family_root in _MPN_SUFFIX_FAMILY_ROOTS:
         return []
 
-    # The EasyEDA naming rule uses a second underscore to separate the geometric
-    # suffix from a trailing MPN (e.g. VSON-10_L3.0-W3.0-TL-EP_TPS61230DRCR).
-    # Only the segment between the first and second underscore carries valid
-    # orientation tokens; anything after the second underscore is a product code.
-    if "_" in package_name:
-        after_first = package_name.split("_", 1)[1]
-        suffix_section = after_first.split("_", 1)[0]
-    else:
-        suffix_section = package_name
-
-    tokens = suffix_section.split("-")
-    result = []
-    for tok in tokens:
-        tok_upper = tok.upper()
-        if tok_upper in _ALL_ORIENTATION_TOKENS and not _is_dimensional(tok_upper):
-            result.append(tok_upper)
-    return result
+    # The naming rule uses a second underscore to separate the geometric suffix from a
+    # trailing MPN (VSON-10_L3.0-W3.0-TL-EP_TPS61230DRCR); only the segment between the
+    # first and second underscore carries valid orientation tokens.  Some names put the
+    # tokens before the first underscore instead and a colour or MPN after it
+    # (LED0603-RD_GREEN); when the middle segment yields nothing, the head is scanned.
+    head, _, rest = package_name.partition("_")
+    if rest:
+        tokens = _tokens_in(rest.split("_", 1)[0])
+        if tokens:
+            return tokens
+        return _head_tokens(head)
+    return _tokens_in(head)
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +390,7 @@ class SuffixParseResult(NamedTuple):
 
 def parse_package_name(
     package_name: str,
-    lcsc_first_type: str | None = None,
+    cathode_is_pin1: bool | None = None,
 ) -> SuffixParseResult:
     """Parse a package name and return the rotation correction.
 
@@ -385,21 +398,23 @@ def parse_package_name(
 
     Args:
         package_name: The EasyEDA package name string.
-        lcsc_first_type: The LCSC firstTypeNameEn category string (e.g. "Diodes",
-            "Capacitors").  When provided and the family name is not already in
-            _CATHODE_PIN1_FAMILIES, this is used to detect diode packages that
-            aren't yet enumerated by family name.
+        cathode_is_pin1: A caller's knowledge that the part is a diode or LED whose
+            KiCad footprint has pin 1 = cathode (for example from the parts database's
+            category, or from the schematic's pin functions).  Used only when the family
+            is not already listed, and never for families in _NEVER_CATHODE_FAMILIES.
 
     Lookup order:
-    1. PIN1_CORRECTION (TL/TR/BL/BR/L/R/T/B): positional token, unambiguous.
-    2. POLARITY_CORRECTION (FD/RD/BI): polarity token; cathode-is-pin-1 families
-       (LEDs, standard diodes) invert the mapping.
+    1. POLARITY_CORRECTION (FD/RD/BI) when a polarity token is present: it names a
+       physical direction, so it wins; cathode-is-pin-1 families (LEDs, standard
+       diodes) invert the mapping.
+    2. PIN1_CORRECTION (TL/TR/BL/BR/L/R/T/B) otherwise: a positional token names
+       where pin 1 is drawn, which for a two-terminal part is only as good as the
+       library's choice of which terminal is pin 1.
     3. No orientation token found: default to 0° with 'family_default' source.
     4. Unrecognised package name: 0° with 'none' source and no confidence.
 
-    When both a positional and a polarity token are found, they should encode
-    the same rotation (redundant in the naming rule); if they conflict, a note
-    is added and the positional token takes precedence.
+    When both kinds of token are present and disagree, a note records the
+    positional value.
 
     """
     family = extract_family(package_name)
@@ -430,60 +445,42 @@ def parse_package_name(
             notes=None,
         )
 
-    # Resolve rotation from the most specific token available.
+    family_upper = family.upper()
+    cathode_via_family = family_upper in _CATHODE_PIN1_FAMILIES
+    cathode_via_hint = (
+        not cathode_via_family
+        and bool(cathode_is_pin1)
+        and family_upper not in _NEVER_CATHODE_FAMILIES
+    )
+    is_cathode_family = cathode_via_family or cathode_via_hint
+    pol_table = (
+        _POLARITY_CORRECTION_LED if is_cathode_family else _POLARITY_CORRECTION_STANDARD
+    )
+
     rotation: int | None = None
     used_token: str | None = None
     confidence = "high"
     notes = None
 
-    if positional:
-        # Use the last positional token (in case of duplicates)
-        used_token = positional[-1]
-        rotation = _PIN1_CORRECTION[used_token]
-
-        if polarity:
-            # Cross-check positional vs polarity for consistency
-            cathode_via_family = family.upper() in _CATHODE_PIN1_FAMILIES
-            cathode_via_cat = (
-                not cathode_via_family
-                and lcsc_first_type is not None
-                and lcsc_first_type.strip() in _CATHODE_CATEGORY_NAMES
-            )
-            cathode_is_pin1 = cathode_via_family or cathode_via_cat
-            pol_table = (
-                _POLARITY_CORRECTION_LED
-                if cathode_is_pin1
-                else _POLARITY_CORRECTION_STANDARD
-            )
-            pol_rotation = pol_table[polarity[-1]]
-            if pol_rotation != rotation:
-                notes = (
-                    f"positional {used_token}→{rotation}° vs "
-                    f"polarity {polarity[-1]}→{pol_rotation}° mismatch; "
-                    f"positional used"
-                )
-    else:
-        # Polarity token only
+    if polarity:
         used_token = polarity[-1]
-        cathode_via_family = family.upper() in _CATHODE_PIN1_FAMILIES
-        cathode_via_cat = (
-            not cathode_via_family
-            and lcsc_first_type is not None
-            and lcsc_first_type.strip() in _CATHODE_CATEGORY_NAMES
-        )
-        cathode_is_pin1 = cathode_via_family or cathode_via_cat
-        pol_table = (
-            _POLARITY_CORRECTION_LED
-            if cathode_is_pin1
-            else _POLARITY_CORRECTION_STANDARD
-        )
         rotation = pol_table[used_token]
         if cathode_via_family:
             confidence = "medium"
             notes = "cathode-is-pin1 family: FD/RD polarity inverted relative to standard convention"
-        elif cathode_via_cat:
+        elif cathode_via_hint:
             confidence = "medium"
-            notes = f"cathode-is-pin1 via LCSC category '{lcsc_first_type}': FD/RD polarity inverted"
+            notes = "cathode-is-pin1 by caller's hint: FD/RD polarity inverted"
+        if positional:
+            pos_rotation = _PIN1_CORRECTION[positional[-1]]
+            if pos_rotation != rotation:
+                notes = (
+                    f"polarity {used_token}→{rotation}° used; positional "
+                    f"{positional[-1]}→{pos_rotation}° disagrees"
+                )
+    else:
+        used_token = positional[-1]
+        rotation = _PIN1_CORRECTION[used_token]
 
     all_tokens = positional + [t for t in polarity if t not in positional]
     parsed_suffix = ",".join(all_tokens) if all_tokens else None
