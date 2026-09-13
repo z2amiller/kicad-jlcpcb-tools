@@ -89,6 +89,11 @@ def test_missing_fixture_and_blank_truth(tmp_path):
     assert rows[0]["verdict"] is None
     assert validator.compare(rows, {"Q1": "90"})[0][1] == "no recorded EasyEDA response"
     assert validator.compare(rows, {}) == []
+    typo = validator.compare(rows, {"Q1": "90", "Q99": "0"})
+    assert [(row["reference"], reason) for row, reason in typo] == [
+        ("Q99", "not on the board (typo in truth.csv?)"),
+        ("Q1", "no recorded EasyEDA response"),
+    ]
     good = validator.evaluate(
         board_file(tmp_path, footprint_text("Q1", "F.Cu", 0)), FIXTURES
     )

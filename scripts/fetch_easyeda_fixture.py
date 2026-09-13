@@ -1,10 +1,12 @@
 """Record EasyEDA per-LCSC responses as test fixtures (dev-time only; needs requests).
 
 Usage:
-    python3 scripts/fetch_easyeda_fixture.py C2132 C1978115 [...] [--out DIR] [--interval 1.5]
+    python3 scripts/fetch_easyeda_fixture.py C2132 C1978115 [...] [--out DIR] [--interval 10]
 
 Existing files are skipped, so re-running costs nothing.  One request per
-``interval`` seconds; 403/429/5xx back off 5, 10, 20 s then give up on that part.
+``interval`` seconds (EasyEDA returned 403 after about 18 requests at 1.5 s;
+10 s has been safe); 403/429/5xx back off 60, 120, 240 s, then that part is
+given up and the rest continue.  Exits 1 when any part failed.
 """
 
 from __future__ import annotations
