@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
+from typing import Any
 
 from .easyeda_parse import (
     PIN1_ANODE_LABELS,
@@ -41,8 +42,6 @@ CENTRE_TOLERANCE = 0.8
 MIN_OVERLAP = 0.5
 # Pads this much bigger on one side are reported as "fits, KiCad pads larger/smaller".
 SIZE_RATIO = 1.5
-# Angular RMS at or above this means the pad pattern does not match under any rotation.
-RED_ANGULAR_RMS = 10.0
 
 CHECKERBOARD_NOTE = (
     "no JLC footprint data for this part (expect a checkerboard in the preview)"
@@ -189,7 +188,7 @@ def part_kind(
     return "other"
 
 
-def _transformed(pad: Pad, transform) -> tuple[float, float, float, float]:
+def _transformed(pad: Pad, transform: Placement) -> tuple[float, float, float, float]:
     """Return a KiCad pad's ``(x, y, w, h)`` after the solved transform (solver's math frame)."""
     theta = math.radians(transform.rotation_deg)
     cos, sin = math.cos(theta), math.sin(theta)
@@ -225,7 +224,25 @@ def _pad_fit(
     return (2 if centred else 1), overlap
 
 
-def _align(kicad: dict[str, Pad], jlc: dict[str, Pad], verdict: Verdict):
+@dataclass
+class Placement:
+    """A solved alignment in the solver's math frame.
+
+    ``rotation_deg`` is snapped to 90 and ``offset_x/y`` is the translation that keeps
+    the matched centroids together under that snapped angle, which is what a CPL
+    position means and what keeps a pin-1-origin footprint from drifting.
+    """
+
+    rotation_deg: int
+    offset_x: float
+    offset_y: float
+    is_mirrored: bool
+    residual: float
+
+
+def _align(
+    kicad: dict[str, Pad], jlc: dict[str, Pad], verdict: Verdict
+) -> tuple[Placement, Any]:
     """Solve and assess on pads matched by dict key, filling the verdict's metrics."""
     transform = solve_transform(
         {key: (pad.x, pad.y) for key, pad in kicad.items()},
@@ -236,10 +253,20 @@ def _align(kicad: dict[str, Pad], jlc: dict[str, Pad], verdict: Verdict):
         {key: pad_geom(pad) for key, pad in jlc.items()},
         transform,
     )
+    kx, ky = centroid(list(kicad.values()))
+    jx, jy = centroid(list(jlc.values()))
+    theta = math.radians(transform.rotation_deg)
+    placement = Placement(
+        rotation_deg=transform.rotation_deg,
+        offset_x=jx - (kx * math.cos(theta) - ky * math.sin(theta)),
+        offset_y=jy - (kx * math.sin(theta) + ky * math.cos(theta)),
+        is_mirrored=transform.is_mirrored,
+        residual=transform.residual,
+    )
     verdict.residual_mm = transform.residual
     verdict.angular_rms = quality.angular_rms_deg
     verdict.matched_pads = len(kicad)
-    return transform, quality
+    return placement, quality
 
 
 def _assess_fit(
@@ -247,7 +274,7 @@ def _assess_fit(
     jlc: dict[str, Pad],
     kicad_all: list[Pad],
     jlc_rest: list[Pad],
-    transform,
+    transform: Placement,
     verdict: Verdict,
 ) -> str:
     """Return the fit: every JLC pad must land on KiCad copper after the transform.
@@ -376,21 +403,17 @@ def _resolve_multi_pin(
         return verdict.unresolved(
             "unknown", "no_data", "fewer than two matching pad names"
         )
-    transform, quality = _align(kicad, jlc, verdict)
-    if transform.is_mirrored:
+    placement, quality = _align(kicad, jlc, verdict)
+    if placement.is_mirrored:
         return verdict.unresolved(
             "red",
             "mirror",
             "pin order reversed: the KiCad footprint's pin numbering runs the opposite way to JLC's part",
         )
     verdict.fit = _assess_fit(
-        kicad, jlc, named_pads(kicad_pads), jlc_rest, transform, verdict
+        kicad, jlc, named_pads(kicad_pads), jlc_rest, placement, verdict
     )
-    if quality.angular_rms_deg >= RED_ANGULAR_RMS or verdict.fit in ("count", "pitch"):
-        if verdict.fit not in ("count", "pitch"):
-            verdict.fit = (
-                "count" if verdict.pad_count_kicad != verdict.pad_count_jlc else "pitch"
-            )
+    if verdict.fit in ("count", "pitch"):
         if verdict.pad_count_kicad == verdict.pad_count_jlc:
             angle, landed = _shape_alignment(
                 named_pads(kicad_pads), named_pads(jlc_pads)
@@ -402,7 +425,7 @@ def _resolve_multi_pin(
                     f"pin numbering differs from JLC's part; the package itself aligns at {angle}°",
                 )
         return verdict.unresolved("red", verdict.fit, _mismatch_note(verdict))
-    verdict.rotation = ccw_correction(transform.rotation_deg)
+    verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "geometry"
     verdict.confidence = "high"
     if len(common) == 2:
@@ -501,10 +524,10 @@ def _pin1_meaning(pads: list[Pad], kind: str) -> str | None:
 
 
 def _two_pad_fit(
-    kicad: dict[str, Pad], jlc: dict[str, Pad], transform, verdict: Verdict
+    kicad: dict[str, Pad], jlc: dict[str, Pad], placement: Placement, verdict: Verdict
 ) -> bool:
     """Fill the fit for a two-pad alignment; return True when the part fits."""
-    verdict.fit = _assess_fit(kicad, jlc, list(kicad.values()), [], transform, verdict)
+    verdict.fit = _assess_fit(kicad, jlc, list(kicad.values()), [], placement, verdict)
     if verdict.fit in ("count", "pitch"):
         verdict.unresolved("red", "pitch", _mismatch_note(verdict))
         return False
@@ -564,10 +587,10 @@ def _resolve_polarized(
     jlc_other = next(p for p in jlc_sig if p is not jlc_ref)
     kicad = {"ref": kicad_ref, "other": kicad_other}
     jlc = {"ref": jlc_ref, "other": jlc_other}
-    transform, _ = _align(kicad, jlc, verdict)
-    if not _two_pad_fit(kicad, jlc, transform, verdict):
+    placement, _ = _align(kicad, jlc, verdict)
+    if not _two_pad_fit(kicad, jlc, placement, verdict):
         return verdict
-    verdict.rotation = ccw_correction(transform.rotation_deg)
+    verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "polarity"
     verdict.confidence = "medium" if assumed else "high"
     kicad_pin1 = _pin1_meaning(kicad_sig, kind)
@@ -593,14 +616,14 @@ def _resolve_axis(
     kicad = {"a": kicad_sig[0], "b": kicad_sig[1]}
     best = None
     for jlc in ({"a": jlc_sig[0], "b": jlc_sig[1]}, {"a": jlc_sig[1], "b": jlc_sig[0]}):
-        transform, _ = _align(kicad, jlc, Verdict())
-        if best is None or transform.residual < best[0].residual:
-            best = (transform, jlc)
-    transform, jlc = best
+        placement, _ = _align(kicad, jlc, Verdict())
+        if best is None or placement.residual < best[0].residual:
+            best = (placement, jlc)
+    placement, jlc = best
     _align(kicad, jlc, verdict)
-    if not _two_pad_fit(kicad, jlc, transform, verdict):
+    if not _two_pad_fit(kicad, jlc, placement, verdict):
         return verdict
-    verdict.rotation = ccw_correction(transform.rotation_deg) % 180
+    verdict.rotation = ccw_correction(placement.rotation_deg) % 180
     verdict.method = "axis"
     verdict.confidence = "high"
     verdict.status = "yellow" if verdict.fit == "fits_tight" else "green"
@@ -635,7 +658,7 @@ def resolve(
     verdict.pad_count_kicad = len(kicad_named)
     verdict.pad_count_jlc = len(jlc_named)
     kind = part_kind(package_name, kicad_footprint_name, kicad_pads, symbol_pins)
-    parsed = parse_package_name(package_name, "Diodes" if kind == "diode" else None)
+    parsed = parse_package_name(package_name, True if kind == "diode" else None)
     if parsed.rotation_source == "naming_rule":
         verdict.name_rotation = parsed.rotation_correction
     if min(len(kicad_named), len(jlc_named)) < 2:
