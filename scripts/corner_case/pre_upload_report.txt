@@ -14,11 +14,12 @@ D4     C81598     green    fits                 0    0  Diode_SMD:D_SOD-123 / SO
 D5     C81598     yellow   fits               180    0  Diode_SMD:D_SOD-123 / SOD-123F_L2.7-W1.6-LS3.8-RD / KiCad footprint drawn non-standard; name says 0°; JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
 D6     C7502694   green    fits                 0    0  Diode_SMD:D_SOD-323 / SOD-323_L1.7-W1.3-LS2.6-RD-1 / KiCad pads are smaller than JLC's land pattern
 D7     C435829    green    fits                 0    0  Diode_SMD:D_MiniMELF / LL-34_L3.5-W1.5-RD / 
-D8     C1978115   yellow   fits               180  180  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-FD-1 / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
+D8     C1973411   green    fits_larger_pads   180  180  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-R-FD / 
 D9     C1856655   yellow   fits               180  180  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-FD-1 / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
-D10    C1981006   green    fits                 0    0  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-RD / 
+D10    C707468    green    fits                 0    0  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-RD / 
 D11    C553979    yellow   fits                 0    0  Diode_SMD:D_SMB / SMB_L4.3-W3.6-LS5.4-R-RD / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
 D12    C2836396   red      no_data                   0  Diode_SMD:D_SMA / DO-214AC_L4.3-W2.7-LS5.0-RD / EasyEDA data inconsistent: name token and symbol pin-1 label disagree
+D13    C2857328   green    fits                 0    0  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-BI / bidirectional part; aligned by axis
 J1     C165948    green    fits                 0       Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12 / USB-C_SMD-TYPE-C-31-M-12_1 / pad counts differ (20 vs 16) but the 8 shared names align
 L1     C77110     green    fits               180  180  Inductor_SMD:L_0402_1005Metric / L0402-RD / orientation token on a non-polar part: pin 1 kept where JLC draws it; assumed KiCad pad 1 = JLC's pin 1
 LED1   C2286      yellow   fits                 0    0  LED_SMD:LED_0603_1608Metric / LED-SMD_L1.6-W0.8-R-RD / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint

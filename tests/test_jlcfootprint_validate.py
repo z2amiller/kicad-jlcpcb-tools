@@ -193,3 +193,30 @@ def test_corrupt_fixture_names_the_file(tmp_path):
     board = board_file(tmp_path, footprint_text("Q1", "F.Cu", 0))
     with pytest.raises(SystemExit, match="C2132.json: not valid JSON"):
         validator.evaluate(board, fixtures)
+
+
+def test_axis_parts_compare_modulo_180():
+    """A resistor JLC shows at 180 where we emit 0 is the same placement; polarized parts are not."""
+    validator = load_script()
+
+    def row(reference, method, rotation):
+        return {
+            "reference": reference,
+            "lcsc": "C1",
+            "footprint": "F",
+            "placed": 0.0,
+            "bottom": False,
+            "package": "",
+            "verdict": validator.Verdict(
+                status="green", rotation=rotation, method=method
+            ),
+        }
+
+    rows = [row("R1", "axis", 0), row("D1", "polarity", 0)]
+    assert validator.compare(rows, {"R1": "180", "D1": "0"}) == []
+    assert [
+        r["reference"] for r, _ in validator.compare(rows, {"R1": "90", "D1": "180"})
+    ] == [
+        "R1",
+        "D1",
+    ]
