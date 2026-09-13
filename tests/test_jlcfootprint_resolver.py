@@ -1,0 +1,219 @@
+"""Tests for jlcfootprint.resolver: classification and the multi-pin alignment path."""
+
+import json
+from pathlib import Path
+
+from jlcfootprint.easyeda_parse import SymbolPin, parse_component_response
+from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
+from jlcfootprint.resolver import normalise_function, part_kind, resolve, terminal_of
+
+FIXTURES = Path(__file__).parent / "fixtures" / "jlcfootprint" / "easyeda"
+
+# KiCad library pads, footprint frame, Y-down (Package_TO_SOT_SMD:SOT-23).
+KICAD_SOT23 = [
+    Pad("1", -0.9375, -0.95, 1.475, 0.6),
+    Pad("2", -0.9375, 0.95, 1.475, 0.6),
+    Pad("3", 0.9375, 0.0, 1.475, 0.6),
+]
+
+# KiCad library pads (Package_SO:SOIC-8_3.9x4.9mm_P1.27mm): pin 1 top-left, 1-4 down the left.
+KICAD_SOIC8 = [
+    Pad("1", -2.475, -1.905, 1.95, 0.6),
+    Pad("2", -2.475, -0.635, 1.95, 0.6),
+    Pad("3", -2.475, 0.635, 1.95, 0.6),
+    Pad("4", -2.475, 1.905, 1.95, 0.6),
+    Pad("5", 2.475, 1.905, 1.95, 0.6),
+    Pad("6", 2.475, 0.635, 1.95, 0.6),
+    Pad("7", 2.475, -0.635, 1.95, 0.6),
+    Pad("8", 2.475, -1.905, 1.95, 0.6),
+]
+
+
+def rotated_on_screen_ccw(pads, degrees):
+    """Rotate a pad pattern counter-clockwise as seen on screen (Y-down frame)."""
+    steps = (degrees // 90) % 4
+    out = pads
+    for _ in range(steps):
+        out = [p._replace(x=p.y, y=-p.x, rotation=(p.rotation + 90) % 360) for p in out]
+    return out
+
+
+def load_jlc(lcsc):
+    """Return (package_name, jlc pads in mm, symbol pins) from a recorded response."""
+    record = parse_component_response(
+        json.loads((FIXTURES / f"{lcsc}.json").read_text()), lcsc
+    )
+    return record.package_name, easyeda_pads_to_mm(record.pads), record.symbol_pins
+
+
+def test_normalise_function_and_terminal_of():
+    """Pin functions such as K_1 or anode reduce to a terminal name; +/- stay literal."""
+    assert normalise_function("K_1") == "K"
+    assert normalise_function("anode") == "ANODE"
+    assert normalise_function("+") == "+"
+    assert normalise_function("~") == ""
+    assert terminal_of(Pad("1", 0, 0, 1, 1, 0, "K_1")) == "cathode"
+    assert terminal_of(Pad("2", 0, 0, 1, 1, 0, "A")) == "anode"
+    assert terminal_of(Pad("1", 0, 0, 1, 1, 0, "+")) == "positive"
+    assert terminal_of(Pad("1", 0, 0, 1, 1, 0, "")) == ""
+
+
+def test_part_kind_from_family_footprint_functions_or_labels():
+    """Any side may declare the part polarized; caps win over diodes when both fire."""
+    plain = [Pad("1", 0, 0, 1, 1), Pad("2", 1, 0, 1, 1)]
+    wired = [Pad("1", 0, 0, 1, 1, 0, "K"), Pad("2", 1, 0, 1, 1, 0, "A")]
+    assert part_kind("R0603", "Resistor_SMD:R_0603_1608Metric", plain, []) == "other"
+    assert part_kind("SMF_L2.8-W1.8-LS3.7-RD", "Diode_SMD:D_SMF", plain, []) == "diode"
+    assert part_kind("DIO-SMD_X", "Custom:Thing", wired, []) == "diode"
+    assert part_kind("X", "LED_SMD:LED_0603_1608Metric", plain, []) == "diode"
+    assert (
+        part_kind(
+            "X", "Custom:Thing", plain, [SymbolPin("1", "A"), SymbolPin("2", "K")]
+        )
+        == "diode"
+    )
+    assert (
+        part_kind(
+            "CAP-SMD_BD6.3-L6.6-W6.6-FD", "Capacitor_SMD:CP_Elec_6.3x7.7", plain, []
+        )
+        == "polar_cap"
+    )
+    assert (
+        part_kind("CAP-SMD_BD6.3-L6.6-W6.6-RD", "Custom:Elec", plain, []) == "polar_cap"
+    )
+    assert (
+        part_kind(
+            "X", "Custom:Thing", plain, [SymbolPin("1", "+"), SymbolPin("2", "-")]
+        )
+        == "polar_cap"
+    )
+
+
+def test_sot23_against_the_recorded_c2132_footprint_gives_180():
+    """KiCad's SOT-23 (pin 1 top-left) against EasyEDA's -BR drawing is exactly 180 degrees."""
+    name, jlc, pins = load_jlc("C2132")
+    verdict = resolve(KICAD_SOT23, "Package_TO_SOT_SMD:SOT-23", "ok", name, jlc, pins)
+    assert verdict.status == "green"
+    assert verdict.fit == "fits"
+    assert verdict.rotation == 180
+    assert verdict.method == "geometry"
+    assert verdict.confidence == "high"
+    assert verdict.name_rotation == 180
+    assert verdict.pad_count_kicad == 3 and verdict.pad_count_jlc == 3
+    assert verdict.overlap_min > 0.5
+
+
+def test_soic8_bl_gives_90_and_agrees_with_the_name():
+    """A -BL SOIC is KiCad's pattern turned 90 degrees CCW on screen; the table says 90."""
+    jlc = rotated_on_screen_ccw(KICAD_SOIC8, 90)
+    verdict = resolve(
+        KICAD_SOIC8,
+        "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+        "ok",
+        "SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL",
+        jlc,
+        [],
+    )
+    assert verdict.rotation == 90
+    assert verdict.name_rotation == 90
+    assert verdict.confidence == "high"
+    assert verdict.status == "green"
+    assert verdict.fit == "fits"
+
+
+def test_placed_rotation_never_enters_the_footprint_frame():
+    """The same part drawn at any of the four screen rotations yields the same correction."""
+    jlc = rotated_on_screen_ccw(KICAD_SOIC8, 90)
+    for degrees in (0, 90, 180, 270):
+        turned = rotated_on_screen_ccw(KICAD_SOIC8, degrees)
+        verdict = resolve(
+            turned,
+            "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+            "ok",
+            "SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL",
+            jlc,
+            [],
+        )
+        assert verdict.rotation == (90 - degrees) % 360, degrees
+
+
+def test_non_standard_kicad_footprint_keeps_geometry_and_notes_the_name():
+    """When the KiCad footprint is already drawn like JLC's, geometry says 0 and the name says 90."""
+    already_bl = rotated_on_screen_ccw(KICAD_SOIC8, 90)
+    verdict = resolve(
+        already_bl,
+        "Custom:SOIC-8_BL",
+        "ok",
+        "SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL",
+        already_bl,
+        [],
+    )
+    assert verdict.rotation == 0
+    assert verdict.name_rotation == 90
+    assert verdict.confidence == "medium"
+    assert any("non-standard" in note for note in verdict.notes)
+
+
+def test_mirrored_pin_order_is_red_not_solved():
+    """A Y-mirrored pin order is a wrong footprint variant, flagged rather than rotated."""
+    mirrored = [p._replace(y=-p.y) for p in KICAD_SOIC8]
+    verdict = resolve(
+        KICAD_SOIC8,
+        "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+        "ok",
+        "SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL",
+        mirrored,
+        [],
+    )
+    assert verdict.status == "red"
+    assert verdict.fit == "mirror"
+    assert verdict.rotation is None
+
+
+def test_wrong_pick_with_different_pad_count_is_red_count():
+    """Six KiCad pads against a five-pad JLC part with a pad that lands nowhere: red, count."""
+    kicad_sot23_6 = [
+        Pad("1", -1.3, -0.95, 1.0, 0.6),
+        Pad("2", -1.3, 0.0, 1.0, 0.6),
+        Pad("3", -1.3, 0.95, 1.0, 0.6),
+        Pad("4", 1.3, 0.95, 1.0, 0.6),
+        Pad("5", 1.3, 0.0, 1.0, 0.6),
+        Pad("6", 1.3, -0.95, 1.0, 0.6),
+    ]
+    jlc_sot23_5 = [
+        Pad("1", -1.3, -0.95, 1.0, 0.6),
+        Pad("2", -1.3, 0.0, 1.0, 0.6),
+        Pad("3", -1.3, 0.95, 1.0, 0.6),
+        Pad("4", 1.3, 0.95, 1.0, 0.6),
+        Pad("5", 1.3, -0.95, 1.0, 0.6),
+    ]
+    verdict = resolve(
+        kicad_sot23_6,
+        "Package_TO_SOT_SMD:SOT-23-6",
+        "ok",
+        "SOT-23-5_L2.9-W1.6-P0.95-LS2.8-BL",
+        jlc_sot23_5,
+        [],
+    )
+    assert verdict.status == "red"
+    assert verdict.fit == "count"
+    assert verdict.rotation is None
+    assert "6 vs 5 pads" in verdict.note_text
+
+
+def test_two_versus_three_pads_is_red_count():
+    """A two-pad KiCad footprint cannot take a three-pad part."""
+    jlc = KICAD_SOT23
+    kicad = [Pad("1", -1.0, 0, 1, 1), Pad("2", 1.0, 0, 1, 1)]
+    verdict = resolve(
+        kicad, "Diode_SMD:D_SOD-123", "ok", "SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR", jlc, []
+    )
+    assert (verdict.status, verdict.fit) == ("red", "count")
+
+
+def test_no_easyeda_record_is_unknown_with_the_checkerboard_note():
+    """Parts EasyEDA does not know get no rotation and the checkerboard wording."""
+    verdict = resolve(KICAD_SOT23, "Package_TO_SOT_SMD:SOT-23", "none", "", [], [])
+    assert verdict.status == "unknown"
+    assert verdict.rotation is None
+    assert "checkerboard" in verdict.note_text
