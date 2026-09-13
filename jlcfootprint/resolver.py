@@ -17,6 +17,7 @@ from .fit import FitReport, Placement, align, assess_fit, pair_by_name, shape_al
 from .geometry import Pad, ccw_correction, named_pads
 from .naming import parse_package_name
 from .polarity import (
+    CONVENTION,
     REFERENCE_TERMINAL,
     kicad_reference_pad,
     label_reference_pad,
@@ -99,9 +100,9 @@ class Verdict:
         self.notes.extend(report.notes)
 
 
-def _mismatch_note(verdict: Verdict) -> str:
-    """Describe a red fit in the UI vocabulary."""
-    if verdict.pad_count_kicad != verdict.pad_count_jlc:
+def _mismatch_note(verdict: Verdict, fit: str) -> str:
+    """Describe a red fit in the UI vocabulary, following the fit report's decision."""
+    if fit == "count":
         return (
             f"does not fit: {verdict.pad_count_kicad} vs {verdict.pad_count_jlc} pads"
         )
@@ -149,7 +150,9 @@ def _resolve_multi_pin(
                     "pin numbering differs from JLC's part; the package itself aligns at "
                     f"{ccw_correction(angle)}°",
                 )
-        return verdict.unresolved("red", report.fit, _mismatch_note(verdict))
+        return verdict.unresolved(
+            "red", report.fit, _mismatch_note(verdict, report.fit)
+        )
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "geometry"
     verdict.confidence = "high"
@@ -183,7 +186,7 @@ def _two_pad_fit(
     report = assess_fit(kicad, jlc, list(kicad.values()), [], placement, 2, 2)
     verdict.take_fit(report)
     if report.fit in ("count", "pitch"):
-        verdict.unresolved("red", "pitch", _mismatch_note(verdict))
+        verdict.unresolved("red", "pitch", _mismatch_note(verdict, "pitch"))
         return False
     return True
 
@@ -198,9 +201,13 @@ def _resolve_polarized(
     polarity_source: str,
 ) -> Verdict:
     """Align a polarized two-pad part by terminal meaning, never by pad number (spec 7.3)."""
+    if _coincident(kicad_named) or _coincident(jlc_named):
+        return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
     reference = REFERENCE_TERMINAL[kind]
     diode = kind == "diode"
-    kicad_ref, assumed, note = kicad_reference_pad(kicad_named, reference, diode)
+    kicad_ref, assumed, note = kicad_reference_pad(
+        kicad_named, reference, diode, CONVENTION[kind]
+    )
     if kicad_ref is None:
         return verdict.unresolved("unknown", "no_data", note)
     if note:
@@ -218,8 +225,9 @@ def _resolve_polarized(
                 "name token could not be applied: JLC pads are drawn vertical"
             )
     label_pad = label_reference_pad(jlc_named, polarity, reference)
+    seeded = polarity_source != "symbol"
     if token_pad is not None and label_pad is not None and token_pad is not label_pad:
-        if polarity_source != "symbol":
+        if seeded:
             verdict.notes.append(
                 "seeded pin-1 polarity (per footprint) disagrees with the name token; token used"
             )
@@ -236,6 +244,11 @@ def _resolve_polarized(
         return verdict.unresolved(
             "unknown", "no_data", "polarity unknown; check in JLC preview"
         )
+    seed_decided = token_pad is None and seeded
+    if seed_decided:
+        verdict.notes.append(
+            "reference terminal from the seeded per-footprint polarity"
+        )
     kicad_other = next(p for p in kicad_named if p is not kicad_ref)
     jlc_other = next(p for p in jlc_named if p is not jlc_ref)
     kicad = {"ref": kicad_ref, "other": kicad_other}
@@ -248,7 +261,12 @@ def _resolve_polarized(
         return verdict
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "polarity"
-    verdict.confidence = "medium" if assumed else "high"
+    verdict.confidence = "medium" if assumed or seed_decided else "high"
+    if verdict.name_rotation is not None and verdict.name_rotation != verdict.rotation:
+        verdict.confidence = "medium"
+        verdict.notes.append(
+            f"KiCad footprint drawn non-standard; name says {verdict.name_rotation}°"
+        )
     kicad_pin1 = pin1_meaning(kicad_named, kind, diode)
     if polarity is None or kicad_pin1 is None:
         verdict.polarity_light = "unknown"
@@ -269,6 +287,8 @@ def _resolve_axis(
     kicad_named: list[Pad], jlc_named: list[Pad], verdict: Verdict
 ) -> Verdict:
     """Align a non-polar two-pad part by axis only; 180 degrees is irrelevant (spec 7.4)."""
+    if _coincident(kicad_named) or _coincident(jlc_named):
+        return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
     kicad = {"a": kicad_named[0], "b": kicad_named[1]}
     jlc = {"a": jlc_named[0], "b": jlc_named[1]}
     placement = align(kicad, jlc)
@@ -284,12 +304,17 @@ def _resolve_axis(
     return verdict
 
 
+def _coincident(pads: list[Pad]) -> bool:
+    """Return True when the pads share one position, so no axis can be drawn through them."""
+    return len({(round(pad.x, 6), round(pad.y, 6)) for pad in pads}) < 2
+
+
 def _finite(pads: list[Pad]) -> bool:
-    """Return True when every pad coordinate and size is a finite number."""
+    """Return True when every pad coordinate, size and angle is a finite number."""
     return all(
         math.isfinite(value)
         for pad in pads
-        for value in (pad.x, pad.y, pad.width, pad.height)
+        for value in (pad.x, pad.y, pad.width, pad.height, pad.rotation)
     )
 
 

@@ -18,17 +18,21 @@ from .naming import (
     extract_orientation_tokens,
 )
 
-# Pin-function tokens, after normalisation, that name the two terminals.  ``C`` is a
+# Pin-function tokens, after normalisation, that name the terminals.  ``C`` is a
 # collector on KiCad's transistor symbols and a cathode on some vendor symbols; it is
 # accepted as a cathode only when the part is already known to be a diode.
-_CATHODE_TOKENS = frozenset({"K", "CATHODE", "CAT", "NEG"})
-_ANODE_TOKENS = frozenset({"A", "ANODE", "AN", "POS"})
+_CATHODE_TOKENS = frozenset({"K", "CATHODE", "CAT"})
+_ANODE_TOKENS = frozenset({"A", "ANODE", "AN"})
+_POSITIVE_TOKENS = frozenset({"+", "POS", "POSITIVE"})
+_NEGATIVE_TOKENS = frozenset({"-", "NEG", "NEGATIVE"})
 _CAP_LABELS = frozenset({"+", "-", "POS", "NEG"})
 _DIODE_LABELS = (PIN1_CATHODE_LABELS | PIN1_ANODE_LABELS) - _CAP_LABELS
 
 # The two terminal names, unified: the reference terminal of a diode is its cathode,
 # of a capacitor its positive terminal, and each name's opposite.
 REFERENCE_TERMINAL = {"diode": "cathode", "polar_cap": "positive", "other": "positive"}
+# What pad 1 is assumed to be when the KiCad side says nothing, per kind, for the note.
+CONVENTION = {"diode": "K", "polar_cap": "+", "other": "JLC's pin 1"}
 OPPOSITE = {
     "cathode": "anode",
     "anode": "cathode",
@@ -66,11 +70,27 @@ def terminal_of(pad: Pad, diode: bool = False) -> str:
         return "cathode"
     if token in _ANODE_TOKENS:
         return "anode"
-    if token == "+":
+    if token in _POSITIVE_TOKENS:
         return "positive"
-    if token == "-":
+    if token in _NEGATIVE_TOKENS:
         return "negative"
     return ""
+
+
+def function_terminals(pads: list[Pad], diode: bool = False) -> set[str]:
+    """Return the terminals the pads' functions name, or nothing when one names something else.
+
+    A switch symbol's ``A``/``B`` and a connector's ``A1`` must not read as an anode: the
+    functions count only when every non-empty function on the pads is a terminal name.
+    """
+    terminals: set[str] = set()
+    for pad in pads:
+        terminal = terminal_of(pad, diode)
+        if normalise_function(pad.pin_function) and not terminal:
+            return set()
+        if terminal:
+            terminals.add(terminal)
+    return terminals
 
 
 def part_kind(
@@ -81,42 +101,46 @@ def part_kind(
 ) -> str:
     """Return ``diode``, ``polar_cap`` or ``other`` (spec section 7.1).
 
-    KiCad-side evidence wins: a footprint named ``D_``/``LED_`` or pads whose functions
-    say cathode/anode make the part a diode whatever labels EasyEDA's symbol uses
-    (LED symbols labelled ``+``/``-`` are common).  Then capacitor evidence, then
-    EasyEDA's own diode evidence.
+    Evidence is weighed from the most to the least reliable: the KiCad footprint's name
+    and its pads' functions, then EasyEDA's package family, then the symbol's pin
+    labels.  LED symbols labelled ``+``/``-`` are common, so labels alone never outrank
+    a diode family, and ``+``/``-`` pad functions name a capacitor only when nothing
+    else says diode.
     """
     family = extract_family(package_name).upper()
     footprint = kicad_footprint_name.rsplit(":", 1)[-1].upper()
-    terminals = {terminal_of(pad) for pad in kicad_pads}
+    terminals = function_terminals(kicad_pads)
     labels = {pin.label.strip().upper() for pin in symbol_pins}
     polarity_tokens = {
         t for t in extract_orientation_tokens(package_name) if t in ("FD", "RD")
     }
     if footprint.startswith(("D_", "LED_")) or terminals & {"cathode", "anode"}:
         return "diode"
-    if (
-        family in POLARIZED_CAP_FAMILIES
-        or (family.startswith("CAP") and polarity_tokens)
-        or footprint.startswith(("CP_", "C_ELEC", "TANTALUM"))
-        or terminals & {"positive", "negative"}
-        or labels & _CAP_LABELS
+    if footprint.startswith(("CP_", "C_ELEC", "TANTALUM")):
+        return "polar_cap"
+    if family in CATHODE_PIN1_FAMILIES:
+        return "diode"
+    if family in POLARIZED_CAP_FAMILIES or (
+        family.startswith("CAP") and polarity_tokens
     ):
         return "polar_cap"
-    if family in CATHODE_PIN1_FAMILIES or labels & _DIODE_LABELS:
+    if labels & _DIODE_LABELS:
         return "diode"
+    if terminals & {"positive", "negative"} or labels & _CAP_LABELS:
+        return "polar_cap"
     return "other"
 
 
 def kicad_reference_pad(
-    pads: list[Pad], reference: str, diode: bool = False
+    pads: list[Pad], reference: str, diode: bool = False, convention: str | None = None
 ) -> tuple[Pad | None, bool, str]:
     """Return (pad, assumed, note) for the KiCad pad carrying ``reference``.
 
     A pin function naming the reference terminal, or its opposite on the other of two
     pads, decides; anode and positive (cathode and negative) are interchangeable.  Two
     pads claiming the same terminal are contradictory: no pad, with a note.  Without any
-    usable function, pad 1 is assumed and said so.
+    usable function, pad 1 is assumed and the note says what it is assumed to be
+    (``convention``, by default K for a cathode reference and + otherwise).
     """
     wanted = SAME_MEANING[reference]
     opposite = SAME_MEANING[OPPOSITE[reference]]
@@ -128,21 +152,19 @@ def kicad_reference_pad(
         return claims_reference[0], False, ""
     if claims_opposite and len(pads) == 2:
         return next(pad for pad in pads if pad is not claims_opposite[0]), False, ""
+    if convention is None:
+        convention = "K" if reference == "cathode" else "+"
     for pad in pads:
         if pad.number == "1":
-            return (
-                pad,
-                True,
-                f"assumed KiCad pad 1 = {'K' if reference == 'cathode' else '+'}",
-            )
+            return pad, True, f"assumed KiCad pad 1 = {convention}"
     return None, True, "no pad 1 on the KiCad side"
 
 
 def side_of(pad: Pad, pads: list[Pad]) -> str | None:
-    """Return ``left`` or ``right`` for one of two pads, or None when their axis is vertical."""
+    """Return ``left`` or ``right`` for one of two pads, or None when their axis is not horizontal."""
     other = next(p for p in pads if p is not pad)
     dx, dy = pad.x - other.x, pad.y - other.y
-    if abs(dx) < abs(dy):
+    if abs(dx) <= abs(dy):
         return None
     return "left" if dx < 0 else "right"
 
@@ -188,11 +210,18 @@ def label_reference_pad(
 
 
 def pin1_meaning(pads: list[Pad], kind: str, diode: bool = False) -> str | None:
-    """Return 'A' or 'K' for what the KiCad side means by pad 1, by function or convention."""
+    """Return 'A' or 'K' for what the KiCad side means by pad 1.
+
+    Pad 1's own function decides; failing that, the other pad's function implies it;
+    failing both, the convention for the kind (pad 1 = K on diodes, + on capacitors).
+    """
     pad1 = next((p for p in pads if p.number == "1"), None)
     if pad1 is None:
         return None
     terminal = terminal_of(pad1, diode)
+    if not terminal and len(pads) == 2:
+        other = terminal_of(next(p for p in pads if p is not pad1), diode)
+        terminal = OPPOSITE.get(other, "")
     if terminal in ("cathode", "negative"):
         return "K"
     if terminal in ("anode", "positive"):
