@@ -123,8 +123,24 @@ def load_truth(path: Path) -> dict[str, str]:
 
 
 def compare(rows: list[dict], truth: dict[str, str]) -> list[tuple[dict, str]]:
-    """Return ``(row, reason)`` for every part whose emitted rotation would disagree with JLC."""
+    """Return ``(row, reason)`` for every part whose emitted rotation would disagree with JLC.
+
+    A truth reference that is not on the board is reported too, so a typo in
+    ``truth.csv`` cannot silently pass the gate.
+    """
     failures: list[tuple[dict, str]] = []
+    on_board = {row["reference"] for row in rows}
+    for reference in sorted(set(truth) - on_board, key=reference_key):
+        placeholder = {
+            "reference": reference,
+            "lcsc": "",
+            "footprint": "",
+            "placed": 0.0,
+            "bottom": False,
+            "package": "",
+            "verdict": None,
+        }
+        failures.append((placeholder, "not on the board (typo in truth.csv?)"))
     for row in rows:
         if row["reference"] not in truth:
             continue
