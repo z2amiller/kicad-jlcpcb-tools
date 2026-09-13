@@ -5,7 +5,16 @@ Usage: python3 scripts/sweep_crawl.py --db ~/Downloads/parts.db --top 150 [--csv
 For each of the most-shared EasyEDA footprints (puuids) that has an obvious KiCad
 standard-library twin, run the resolver (KiCad library pads vs the crawled EasyEDA
 footprint, symbol pin-1 polarity from the crawl) and compare its rotation with the
-crawl's packages.rotation_correction.  Read-only; dev-time only.
+crawl's packages.rotation_correction.  Read-only; dev-time only; needs the KiCad
+footprint libraries installed.
+
+What it proves: the alignment logic against 174k parts' worth of footprints.  What
+it does not: the crawl's blobs are almost all EasyEDA Pro text, parsed here by
+``pro_pads`` (mils, Y up), so the plugin's classic-format path
+(``parse_footprint_pads`` + ``easyeda_pads_to_mm`` and ``FLIP_EASYEDA_Y``) is
+exercised only by the recorded live responses: the corner-case board and JLC's
+preview are the check of that frame.  The QFN twin takes the first exposed-pad
+variant KiCad offers, which is enough for rotation.
 """
 
 from __future__ import annotations
@@ -19,10 +28,20 @@ import sqlite3
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from jlcfootprint.easyeda_parse import SymbolPin, parse_footprint_pads  # noqa: E402
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm  # noqa: E402
+from jlcfootprint.resolver import resolve  # noqa: E402
+
+# ``tests`` must resolve to this repository's package (ROOT is first on sys.path and
+# upstream ships tests/__init__.py); an editable install elsewhere can also own that name.
+from tests.jlcfootprint_support import (  # noqa: E402
+    KICAD_FOOTPRINTS,
+    library_pads,
+    with_functions,
+)
 
 MIL_MM = 0.0254
 
@@ -53,13 +72,6 @@ def pro_pads(text: str) -> list[Pad]:
             continue
     return pads
 
-
-from jlcfootprint.resolver import resolve  # noqa: E402
-from tests.jlcfootprint_support import (  # noqa: E402
-    KICAD_FOOTPRINTS,
-    library_pads,
-    with_functions,
-)
 
 CHIP = {
     "0201": "0201_0603Metric",
@@ -196,16 +208,26 @@ def twin(name: str) -> tuple[str, str, dict] | None:
     return None
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the sweep."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument(
         "--db", type=Path, default=Path.home() / "Downloads" / "parts.db"
     )
     parser.add_argument("--top", type=int, default=150)
     parser.add_argument("--csv", type=Path)
     args = parser.parse_args(argv)
-    conn = sqlite3.connect(f"file:{args.db}?immutable=1", uri=True)
+    if not KICAD_FOOTPRINTS.is_dir():
+        print(
+            f"no KiCad footprint libraries at {KICAD_FOOTPRINTS}; nothing would resolve"
+        )
+        return 1
+    if not args.db.is_file():
+        print(f"no database at {args.db}")
+        return 1
+    conn = sqlite3.connect(f"file:{args.db}?mode=ro&immutable=1", uri=True)
     rows = conn.execute(
         """select pu.puuid, pu.package_name, pu.observation_count, pu.pin1_polarity, pu.footprint_json,
                   pk.rotation_correction, pk.rotation_source, pk.parser_confidence
@@ -262,7 +284,7 @@ def main(argv=None) -> int:
             stats["parts_agree"] += count
         else:
             stats["disagree"] += 1
-        stats["resolved"] += v.rotation is not None
+        stats["resolved"] += int(v.rotation is not None)
         out.append(
             {
                 "package": name,
@@ -284,12 +306,15 @@ def main(argv=None) -> int:
         f"{'package':<44} {'parts':>6} {'status':<8} {'fit':<16} {'res':>4} {'crawl':>5} {'src':<12} twin / notes"
     )
     for r in out:
-        flag = "" if r["resolver"] == r["crawl"] else "  <-- differs"
+        if r["resolver"] is None:
+            flag = "  <-- unresolved"
+        else:
+            flag = "" if r["resolver"] == r["crawl"] else "  <-- differs"
         print(
             f"{r['package'][:44]:<44} {r['parts']:>6} {r['status']:<8} {r['fit']:<16} {str(r['resolver']):>4} {str(r['crawl']):>5} {str(r['crawl_src']):<12} {r['twin'].split(':')[1]} / {r['notes'][:70]}{flag}"
         )
-    if args.csv:
-        with args.csv.open("w", newline="") as handle:
+    if args.csv and out:
+        with args.csv.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(out[0]))
             writer.writeheader()
             writer.writerows(out)
