@@ -9,6 +9,8 @@ same idea here, as are cathode and negative terminal: an LED whose symbol says
 
 from __future__ import annotations
 
+import re
+
 from .easyeda_parse import PIN1_ANODE_LABELS, PIN1_CATHODE_LABELS, SymbolPin
 from .geometry import Pad
 from .naming import (
@@ -169,11 +171,37 @@ def side_of(pad: Pad, pads: list[Pad]) -> str | None:
     return "left" if dx < 0 else "right"
 
 
-def token_reference_side(package_name: str, reference: str) -> str | None:
+def band_marks_positive(package_name: str, kicad_footprint_name: str = "") -> bool:
+    """Return True when the part's marking band is its positive terminal.
+
+    The FD/RD token places the band.  On diodes the band is the cathode and on
+    aluminium electrolytic cans and radials (EasyEDA ``BD`` packages) the negative
+    end; on tantalum and other molded chips (``CAP-SMD_L…-W…``, ``CASE-…``, ``TANT…``,
+    KiCad's ``CP_EIA`` and ``Tantalum`` footprints) it is the positive end, so the same
+    token lands the positive terminal on the other side.  JLC's drawing decides when
+    its package name is conclusive; otherwise the KiCad footprint name is the hint.
+    Confirmed on C7171 (``CAP-SMD_L3.2-W1.6-RD``): JLC draws its + end on the left at
+    zero (placement preview, 2026-09-12).
+    """
+    name = package_name.upper()
+    footprint = kicad_footprint_name.rsplit(":", 1)[-1].upper()
+    if name.startswith("CAP") and "BD" in name.split("_", 1)[-1][:4]:
+        return False
+    if name.startswith(("CASE-", "TANT")) or re.match(r"^CAP[^_]*_L\d", name):
+        return True
+    return footprint.startswith(("CP_EIA", "TANTALUM")) or "TANTALUM" in footprint
+
+
+def token_reference_side(
+    package_name: str, reference: str, band_positive: bool = False
+) -> str | None:
     """Return ``left``, ``right``, ``none`` (bidirectional) or None (no token) from FD/RD/BI.
 
-    Forward direction puts the anode or positive terminal on the left of the
-    EasyEDA drawing, which is JLC's zero orientation.
+    Forward direction puts the part's marking band on the right of the EasyEDA
+    drawing (JLC's zero orientation) and reverse direction on the left.  The band
+    is the cathode or negative end unless ``band_positive`` says it is the positive
+    end (see ``band_marks_positive``), so for a diode FD means cathode right, for an
+    electrolytic can positive left, and for a tantalum positive right.
     """
     polarity = [
         t for t in extract_orientation_tokens(package_name) if t in ("FD", "RD", "BI")
@@ -183,10 +211,11 @@ def token_reference_side(package_name: str, reference: str) -> str | None:
     token = polarity[-1]
     if token == "BI":
         return "none"
-    positive_side = "left" if token == "FD" else "right"
-    if reference == "cathode":
-        return "right" if positive_side == "left" else "left"
-    return positive_side
+    band_side = "right" if token == "FD" else "left"
+    band_terminal = "positive" if band_positive else "negative"
+    if reference in SAME_MEANING[band_terminal]:
+        return band_side
+    return "left" if band_side == "right" else "right"
 
 
 def label_reference_pad(

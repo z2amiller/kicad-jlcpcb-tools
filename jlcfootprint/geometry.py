@@ -22,6 +22,9 @@ EASYEDA_UNIT_MM = 0.254
 # (EasyEDA Pro footprint text, used by the crawl and the per-uuid endpoint, is in
 # mils with Y up; its parser flips.)
 FLIP_EASYEDA_Y = False
+# Confirmed against JLC's placement preview on 2026-09-12 with scripts/corner_case (plan
+# Task 12): no mirror findings on either side, and the bottom rows (D2, Q5, Q6, U3)
+# reproduce upstream's mirror formula, so EasyEDA's Y is read as it comes.
 
 
 class Pad(NamedTuple):
