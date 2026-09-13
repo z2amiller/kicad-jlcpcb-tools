@@ -208,7 +208,10 @@ def test_axis_parts_compare_modulo_180():
             "bottom": False,
             "package": "",
             "verdict": validator.Verdict(
-                status="green", rotation=rotation, method=method
+                status="green",
+                rotation=rotation,
+                method=method,
+                non_polar=method == "axis",
             ),
         }
 

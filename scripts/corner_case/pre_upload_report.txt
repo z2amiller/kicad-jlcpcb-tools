@@ -36,13 +36,13 @@ R1     C2906861   green    fits                 0       Resistor_SMD:R_0402_1005
 R2     C25804     green    fits                 0       Resistor_SMD:R_0603_1608Metric / R0603 / 
 R3     C25804     green    fits                 0       Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder / R0603 / 
 R4     C25804     yellow   fits_tight           0       Resistor_SMD:R_0402_1005Metric / R0603 / JLC pads 2, 1 sit at the edge of your pads; check the placement preview
-U1     C7950      green    fits                90   90  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL / 
-U2     C7950      green    fits                90   90  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL / 
-U3     C7950      green    fits                90   90  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL / 
-U4     C19213     green    fits                90   90  Package_DFN_QFN:QFN-16-1EP_3x3mm_P0.5mm_EP1.75x1.75mm / QFN-16_L3.0-W3.0-P0.50-BL-EP1.7 / 
+U1     C7950      green    fits               270  270  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL / 
+U2     C7950      green    fits               270  270  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL / 
+U3     C7950      green    fits               270  270  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL / 
+U4     C19213     green    fits               270  270  Package_DFN_QFN:QFN-16-1EP_3x3mm_P0.5mm_EP1.75x1.75mm / QFN-16_L3.0-W3.0-P0.50-BL-EP1.7 / 
 U5     C3014306   green    fits               180  180  Package_TO_SOT_SMD:SOT-23-5 / SOT-23-5_L2.9-W1.6-P0.95-LS2.8-BR / 
-U6     C84817     green    fits                90   90  Package_TO_SOT_SMD:SOT-23-6 / SOT-23-6_L2.9-W1.6-P0.95-LS2.8-BL / 
+U6     C84817     green    fits               270  270  Package_TO_SOT_SMD:SOT-23-6 / SOT-23-6_L2.9-W1.6-P0.95-LS2.8-BL / 
 U7     C3014306   red      count                   180  Package_TO_SOT_SMD:SOT-23-6 / SOT-23-5_L2.9-W1.6-P0.95-LS2.8-BR / does not fit: 6 vs 5 pads
 U8     C6186      green    fits               180  180  Package_TO_SOT_SMD:SOT-223-3_TabPin2 / SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR / 
 U9     C58069     green    fits                 0    0  Package_TO_SOT_SMD:TO-252-2 / TO-252-2_L6.5-W6.1-P4.58-LS10.0-TL / KiCad pads are smaller than JLC's land pattern; aligned on two shared pad names; remaining pads matched by position
-U10    C46749     green    fits                90   90  Package_DIP:DIP-8_W7.62mm / DIP-8_L9.8-W6.6-P2.54-LS7.6-BL / 
+U10    C46749     green    fits               270  270  Package_DIP:DIP-8_W7.62mm / DIP-8_L9.8-W6.6-P2.54-LS7.6-BL / 
