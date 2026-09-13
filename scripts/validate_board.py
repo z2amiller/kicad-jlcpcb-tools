@@ -21,6 +21,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,9 +93,24 @@ def evaluate_footprints(
     return rows
 
 
+def reference_key(reference: str) -> tuple:
+    """Sort key that orders Q2 before Q10: letters, then the number, then any suffix."""
+    match = re.match(r"^([A-Za-z_]*)(\d*)(.*)$", reference)
+    letters, digits, rest = match.groups() if match else (reference, "", "")
+    return (letters.upper(), int(digits) if digits else -1, rest)
+
+
 def evaluate(board: Path, fixtures: Path, flip_y: bool = False) -> list[dict]:
-    """Parse the board file and evaluate it."""
-    return evaluate_footprints(parse_kicad_pcb(str(board)), fixtures, flip_y)
+    """Parse the board file and evaluate it, rows in reference order.
+
+    pcbnew writes footprints in the order of their fresh internal ids, so a
+    regenerated board lists the same parts in a different order; sorting keeps
+    the report and the gate deterministic.
+    """
+    footprints = sorted(
+        parse_kicad_pcb(str(board)), key=lambda fp: reference_key(fp.reference)
+    )
+    return evaluate_footprints(footprints, fixtures, flip_y)
 
 
 def load_truth(path: Path) -> dict[str, str]:
