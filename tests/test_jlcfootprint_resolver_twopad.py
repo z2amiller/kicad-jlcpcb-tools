@@ -2,6 +2,7 @@
 
 from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.geometry import Pad
+from jlcfootprint.polarity import band_marks_positive
 from jlcfootprint.resolver import (
     kicad_reference_pad,
     label_reference_pad,
@@ -487,3 +488,59 @@ def test_non_polar_flag_marks_axis_and_marked_parts_only():
         KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D1_PINS
     )
     assert not diode.non_polar
+
+
+def test_token_places_the_band_and_the_band_means_a_different_terminal_per_family():
+    """FD puts the band right: cathode on diodes, negative on cans, positive on tantalums."""
+    assert (
+        token_reference_side(
+            "CAP-SMD_L3.2-W1.6-RD-C7171", "positive", band_positive=True
+        )
+        == "left"
+    )
+    assert (
+        token_reference_side("CAP-SMD_L3.2-W1.6-FD", "positive", band_positive=True)
+        == "right"
+    )
+    assert token_reference_side("CAP-SMD_BD6.3-L6.6-W6.6-FD", "positive") == "left"
+    assert token_reference_side("SMF_L2.8-W1.8-LS3.7-FD-1", "cathode") == "right"
+    assert band_marks_positive(
+        "CAP-SMD_L3.2-W1.6-RD-C7171", "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A"
+    )
+    assert band_marks_positive("CASE-B_3528", "")
+    assert band_marks_positive(
+        "MPN-PACKAGE", "Capacitor_Tantalum_SMD:CP_EIA-3528-21_Kemet-B"
+    )
+    assert not band_marks_positive(
+        "CAP-SMD_BD6.3-L6.6-W6.6-RD", "Capacitor_SMD:CP_Elec_6.3x7.7"
+    )
+    assert not band_marks_positive(  # JLC's can decides over the KiCad hint
+        "CAP-SMD_BD6.3-L6.6-W6.6-RD", "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A"
+    )
+    assert not band_marks_positive("SMF_L2.8-W1.8-LS3.7-RD", "Diode_SMD:D_SMF")
+
+
+def test_tantalum_rd_is_0_because_the_band_is_the_positive_end():
+    """C5 on the corner-case board (C7171): JLC draws the band, its + end, on the left at zero."""
+    kicad = [Pad("1", -1.3525, 0, 1.4, 1.2), Pad("2", 1.3525, 0, 1.4, 1.2)]
+    jlc = [Pad("1", -1.53, 0, 1.4, 1.2), Pad("2", 1.53, 0, 1.4, 1.2)]
+    numbered = [SymbolPin("1", "1"), SymbolPin("2", "2")]
+    verdict = resolve(
+        kicad,
+        "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A",
+        "ok",
+        "CAP-SMD_L3.2-W1.6-RD-C7171",
+        jlc,
+        numbered,
+    )
+    assert (verdict.rotation, verdict.name_rotation, verdict.status) == (0, 0, "green")
+    assert "assumed KiCad pad 1 = +" in verdict.note_text
+    can = resolve(
+        kicad,
+        "Capacitor_SMD:CP_Elec_4x5.4",
+        "ok",
+        "CAP-SMD_BD4.0-L4.3-W4.3-RD",
+        jlc,
+        numbered,
+    )
+    assert (can.rotation, can.name_rotation) == (180, 180)

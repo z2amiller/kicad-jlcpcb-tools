@@ -19,6 +19,7 @@ from .naming import parse_package_name
 from .polarity import (
     CONVENTION,
     REFERENCE_TERMINAL,
+    band_marks_positive,
     kicad_reference_pad,
     label_reference_pad,
     normalise_function,
@@ -200,13 +201,14 @@ def _resolve_polarized(
     package_name: str,
     symbol_pins: list[SymbolPin],
     polarity_source: str,
+    band_positive: bool = False,
 ) -> Verdict:
     """Align a polarized two-pad part by terminal meaning, never by pad number (spec 7.3)."""
     if _coincident(kicad_named) or _coincident(jlc_named):
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
     reference = REFERENCE_TERMINAL[kind]
     diode = kind == "diode"
-    side = token_reference_side(package_name, reference)
+    side = token_reference_side(package_name, reference, band_positive)
     if side == "none":
         # A bidirectional TVS has no reference terminal; KiCad's D_TVS symbol names its
         # pins A1/A2, which would otherwise read as two anodes.
@@ -354,17 +356,22 @@ def resolve(
     verdict.pad_count_kicad = len(kicad_named)
     verdict.pad_count_jlc = len(jlc_named)
     kind = part_kind(package_name, kicad_footprint_name, kicad_pads, symbol_pins)
+    band_positive = band_marks_positive(package_name, kicad_footprint_name)
     parsed = parse_package_name(package_name, True if kind == "diode" else None)
     if parsed.rotation_source == "naming_rule":
         verdict.name_rotation = crawl_to_cpl(parsed.rotation_correction)
+        if kind == "polar_cap" and band_positive and verdict.name_rotation in (0, 180):
+            # The crawler's (family, token) table reads every capacitor token as an
+            # electrolytic's, whose band is the negative end; a tantalum's band is its
+            # positive end, so the table's answer is half a turn out for them.
+            verdict.name_rotation = (verdict.name_rotation + 180) % 360
     if min(len(kicad_named), len(jlc_named)) < 2:
         return verdict.unresolved(
             "unknown", "no_data", "fewer than two named pads on one side"
         )
-    marked = kind != "other" or token_reference_side(package_name, "positive") in (
-        "left",
-        "right",
-    )
+    marked = kind != "other" or token_reference_side(
+        package_name, "positive", band_positive
+    ) in ("left", "right")
     if len(jlc_named) == 2 and marked:
         if len(kicad_named) != 2:
             # A two-terminal JLC part on a KiCad footprint with extra pads: align by
@@ -394,6 +401,7 @@ def resolve(
             package_name,
             symbol_pins,
             polarity_source,
+            band_positive,
         )
     if len(kicad_named) == 2 and len(jlc_named) == 2:
         return _resolve_axis(kicad_named, jlc_named, verdict)
