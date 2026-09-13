@@ -273,12 +273,12 @@ def test_vertical_jlc_drawing_uses_the_label_when_the_token_cannot_apply():
     verdict = resolve(
         KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-FD", vertical, D2_PINS
     )
-    assert verdict.rotation == 90  # cathode (pad 2) at the bottom of JLC's drawing
+    assert verdict.rotation == 270  # cathode (pad 2) at the bottom of JLC's drawing
     assert any("vertical" in note for note in verdict.notes)
     cathode_on_top = resolve(
         KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", vertical, D1_PINS
     )
-    assert cathode_on_top.rotation == 270
+    assert cathode_on_top.rotation == 90
 
 
 def test_bidirectional_token_aligns_by_axis():
@@ -471,3 +471,19 @@ def test_bidirectional_tvs_with_d_tvs_pin_names_aligns_by_axis():
     )
     assert polarized.status == "unknown"
     assert "contradictory" in polarized.note_text
+
+
+def test_non_polar_flag_marks_axis_and_marked_parts_only():
+    """Resistors and marked inductors may sit either way round; diodes may not."""
+    resistor = [Pad("1", -0.7875, 0, 0.875, 0.95), Pad("2", 0.7875, 0, 0.875, 0.95)]
+    assert resolve(
+        resistor, "Resistor_SMD:R_0603_1608Metric", "ok", "R0603", resistor, []
+    ).non_polar
+    marked = resolve(
+        resistor, "Inductor_SMD:L_0603_1608Metric", "ok", "L0603-RD", resistor, []
+    )
+    assert marked.non_polar and marked.method == "polarity"
+    diode = resolve(
+        KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D1_PINS
+    )
+    assert not diode.non_polar

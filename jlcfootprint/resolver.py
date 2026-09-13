@@ -14,7 +14,7 @@ import math
 
 from .easyeda_parse import SymbolPin, pin1_polarity
 from .fit import FitReport, Placement, align, assess_fit, pair_by_name, shape_alignment
-from .geometry import Pad, ccw_correction, named_pads
+from .geometry import Pad, ccw_correction, crawl_to_cpl, named_pads
 from .naming import parse_package_name
 from .polarity import (
     CONVENTION,
@@ -61,6 +61,7 @@ class Verdict:
     confidence: str = "none"  # high | medium | low | none
     name_rotation: int | None = None
     polarity_light: str | None = None  # green | yellow | unknown; None for non-polar
+    non_polar: bool = False  # True when 180 degrees apart is the same placement
     pad_count_kicad: int = 0
     pad_count_jlc: int = 0
     matched_pads: int = 0
@@ -301,6 +302,7 @@ def _resolve_axis(
         return verdict
     verdict.rotation = ccw_correction(placement.rotation_deg) % 180
     verdict.method = "axis"
+    verdict.non_polar = True
     verdict.confidence = "high"
     verdict.status = "yellow" if verdict.fit == "fits_tight" else "green"
     return verdict
@@ -354,7 +356,7 @@ def resolve(
     kind = part_kind(package_name, kicad_footprint_name, kicad_pads, symbol_pins)
     parsed = parse_package_name(package_name, True if kind == "diode" else None)
     if parsed.rotation_source == "naming_rule":
-        verdict.name_rotation = parsed.rotation_correction
+        verdict.name_rotation = crawl_to_cpl(parsed.rotation_correction)
     if min(len(kicad_named), len(jlc_named)) < 2:
         return verdict.unresolved(
             "unknown", "no_data", "fewer than two named pads on one side"
@@ -380,6 +382,7 @@ def resolve(
                 )
             kicad_named = shared
         if kind == "other":
+            verdict.non_polar = True
             verdict.notes.append(
                 "orientation token on a non-polar part: pin 1 kept where JLC draws it"
             )

@@ -126,8 +126,8 @@ def test_sot23_against_the_recorded_c2132_footprint_gives_180():
     assert verdict.overlap_min > 0.5
 
 
-def test_soic8_bl_gives_90_and_agrees_with_the_name():
-    """A -BL SOIC is KiCad's pattern turned 90 degrees CCW on screen; the table says 90."""
+def test_soic8_bl_gives_270_and_agrees_with_the_name():
+    """A -BL SOIC is KiCad's pattern turned 270 degrees CCW on screen; the table says 90."""
     jlc = rotated_on_screen_ccw(KICAD_SOIC8, 90)
     verdict = resolve(
         KICAD_SOIC8,
@@ -137,8 +137,8 @@ def test_soic8_bl_gives_90_and_agrees_with_the_name():
         jlc,
         [],
     )
-    assert verdict.rotation == 90
-    assert verdict.name_rotation == 90
+    assert verdict.rotation == 270
+    assert verdict.name_rotation == 270
     assert verdict.confidence == "high"
     assert verdict.status == "green"
     assert verdict.fit == "fits"
@@ -157,11 +157,11 @@ def test_placed_rotation_never_enters_the_footprint_frame():
             jlc,
             [],
         )
-        assert verdict.rotation == (90 - degrees) % 360, degrees
+        assert verdict.rotation == (270 + degrees) % 360, degrees
 
 
 def test_non_standard_kicad_footprint_keeps_geometry_and_notes_the_name():
-    """When the KiCad footprint is already drawn like JLC's, geometry says 0 and the name says 90."""
+    """When the KiCad footprint is already drawn like JLC's, geometry says 0 and the name says 270."""
     already_bl = rotated_on_screen_ccw(KICAD_SOIC8, 90)
     verdict = resolve(
         already_bl,
@@ -172,7 +172,7 @@ def test_non_standard_kicad_footprint_keeps_geometry_and_notes_the_name():
         [],
     )
     assert verdict.rotation == 0
-    assert verdict.name_rotation == 90
+    assert verdict.name_rotation == 270
     assert verdict.confidence == "medium"
     assert any("non-standard" in note for note in verdict.notes)
 
