@@ -12,7 +12,7 @@ from jlcfootprint.easyeda_parse import (
     parse_symbol_pins,
     pin1_polarity,
 )
-from jlcfootprint.geometry import easyeda_pads_to_mm, signal_pads
+from jlcfootprint.geometry import easyeda_pads_to_mm, named_pads
 
 FIXTURES = Path(__file__).parent / "fixtures" / "jlcfootprint" / "easyeda"
 
@@ -129,7 +129,7 @@ def test_none_and_error_responses():
     )
 
 
-def test_signal_pads_after_conversion_excludes_exposed_pad_names():
-    """Conversion keeps every pad; the geometry filter drops non-numeric ones."""
+def test_named_pads_after_conversion_keep_every_named_pad():
+    """Conversion keeps every pad, exposed pad included, and all of them carry names."""
     pads = easyeda_pads_to_mm(load("C2040").pads)
-    assert len(signal_pads(pads)) >= 56
+    assert len(named_pads(pads)) == len(pads) >= 57
