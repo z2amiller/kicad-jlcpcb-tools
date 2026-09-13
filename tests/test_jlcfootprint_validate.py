@@ -5,8 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from jlcfootprint import geometry
-
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
 
@@ -174,6 +172,7 @@ def test_evaluate_uses_the_plugin_flip_constant_by_default(tmp_path, monkeypatch
     validator = load_script()
     board = board_file(tmp_path, footprint_text("Q1", "F.Cu", 0))
     as_shipped = validator.evaluate(board, FIXTURES)[0]["verdict"]
+    geometry = importlib.import_module("jlcfootprint.geometry")
     monkeypatch.setattr(geometry, "FLIP_EASYEDA_Y", not geometry.FLIP_EASYEDA_Y)
     flipped = validator.evaluate(board, FIXTURES)[0]["verdict"]
     assert (as_shipped.rotation, as_shipped.status) != (

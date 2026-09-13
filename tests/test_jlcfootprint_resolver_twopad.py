@@ -273,8 +273,12 @@ def test_vertical_jlc_drawing_uses_the_label_when_the_token_cannot_apply():
     verdict = resolve(
         KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-FD", vertical, D2_PINS
     )
-    assert verdict.rotation in (90, 270)
+    assert verdict.rotation == 90  # cathode (pad 2) at the bottom of JLC's drawing
     assert any("vertical" in note for note in verdict.notes)
+    cathode_on_top = resolve(
+        KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", vertical, D1_PINS
+    )
+    assert cathode_on_top.rotation == 270
 
 
 def test_bidirectional_token_aligns_by_axis():
@@ -315,3 +319,137 @@ def test_0402_pads_under_an_0603_part_are_tight():
     )
     assert (verdict.status, verdict.fit) == ("yellow", "fits_tight")
     assert verdict.rotation == 0
+
+
+def test_led_family_with_plus_minus_labels_and_no_kicad_evidence_is_a_diode():
+    """An LED package whose symbol says +/- on a custom-named footprint without functions.
+
+    Reading it as a capacitor assumed KiCad pad 1 = + and gave 180 on a part at 0; the
+    package family outranks the symbol labels.
+    """
+    plain = [Pad("1", -1.05, 0.0, 1.0, 1.2), Pad("2", 1.05, 0.0, 1.0, 1.2)]
+    jlc = [Pad("1", -1.05, 0.0, 1.0, 1.2), Pad("2", 1.05, 0.0, 1.0, 1.2)]
+    plus_minus = [SymbolPin("1", "-"), SymbolPin("2", "+")]
+    verdict = resolve(plain, "Custom:LED0805-RD", "ok", "LED0805-RD", jlc, plus_minus)
+    assert (verdict.rotation, verdict.status, verdict.polarity_light) == (
+        0,
+        "green",
+        "green",
+    )
+    assert "assumed KiCad pad 1 = K" in verdict.note_text
+
+
+def test_pin1_light_reads_the_other_pads_function():
+    """Pad 1 unnamed and pad 2 = K: pad 1 is the anode, so JLC's K-on-pin-1 lands on it (yellow)."""
+    half = [Pad("1", -1.45, 0.0, 1.3, 1.4), Pad("2", 1.45, 0.0, 1.3, 1.4, 0.0, "K")]
+    verdict = resolve(
+        half, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D1_PINS
+    )
+    assert (verdict.rotation, verdict.polarity_light, verdict.status) == (
+        180,
+        "yellow",
+        "yellow",
+    )
+
+
+def test_switch_a_b_functions_do_not_make_a_diode():
+    """KiCad's SW_SPST names its pins A and B; the part stays non-polar and resolves by axis."""
+    switch = [
+        Pad("1", -1.45, 0.0, 1.3, 1.4, 0.0, "A"),
+        Pad("2", 1.45, 0.0, 1.3, 1.4, 0.0, "B"),
+    ]
+    numbered = [SymbolPin("1", "1"), SymbolPin("2", "2")]
+    verdict = resolve(
+        switch, "Switch:SW_SPST", "ok", "SW-SMD_2P-L3.0-W2.0", JLC_SMF, numbered
+    )
+    assert (verdict.method, verdict.rotation, verdict.status) == ("axis", 0, "green")
+
+
+def test_pos_neg_functions_name_a_capacitor():
+    """POS/NEG are capacitor words on both sides: polar_cap, FD is 0 and the name agrees."""
+    cap = [Pad("1", -2.7, 0, 3.5, 1.6, 0, "POS"), Pad("2", 2.7, 0, 3.5, 1.6, 0, "NEG")]
+    jlc = [Pad("1", -2.7, 0, 3.5, 1.6), Pad("2", 2.7, 0, 3.5, 1.6)]
+    verdict = resolve(cap, "Custom:Cap", "ok", "CAP-SMD_BD6.3-L6.6-W6.6-FD", jlc, [])
+    assert (verdict.rotation, verdict.name_rotation, verdict.confidence) == (
+        0,
+        0,
+        "high",
+    )
+
+
+def test_non_finite_pad_rotation_is_unknown():
+    """A pad angle of infinity or NaN short-circuits like a bad coordinate would."""
+    for bad in (float("inf"), float("nan")):
+        kicad = [KICAD_SMF[0]._replace(rotation=bad), KICAD_SMF[1]]
+        verdict = resolve(
+            kicad, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D1_PINS
+        )
+        assert (verdict.status, verdict.rotation) == ("unknown", None)
+        jlc = [JLC_SMF[0]._replace(rotation=bad), JLC_SMF[1]]
+        verdict = resolve(
+            KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", jlc, D1_PINS
+        )
+        assert (verdict.status, verdict.rotation) == ("unknown", None)
+
+
+def test_three_pad_footprint_pitch_failure_is_reported_as_pitch():
+    """The note follows the fit decision: a two-terminal part missing its pads is pitch, not count."""
+    kicad = [
+        Pad("1", -1.45, 0.0, 1.3, 1.4, 0.0, "K"),
+        Pad("2", 1.45, 0.0, 1.3, 1.4, 0.0, "A"),
+        Pad("3", 0.0, 1.5, 1.0, 0.5),
+    ]
+    wide = [Pad("1", -2.6, 0.0, 1.3, 1.4), Pad("2", 2.6, 0.0, 1.3, 1.4)]
+    verdict = resolve(
+        kicad, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", wide, D1_PINS
+    )
+    assert (verdict.status, verdict.fit) == ("red", "pitch")
+    assert "does not fit: pitch" in verdict.note_text
+
+
+def test_seeded_label_deciding_alone_is_medium_confidence():
+    """No token and a seeded per-footprint polarity: the seed decides, and says so, at medium."""
+    verdict = resolve(
+        KICAD_SMF,
+        "Diode_SMD:D_SMF",
+        "ok",
+        "DIO-SMD_L2.8-W1.8",
+        JLC_SMF,
+        D2_PINS,
+        "seed-puuid",
+    )
+    assert (verdict.rotation, verdict.confidence) == (180, "medium")
+    assert "seeded per-footprint polarity" in verdict.note_text
+
+
+def test_polarized_result_contradicting_the_name_is_medium_with_a_note():
+    """Anode on KiCad pad 1 gives 180 where the name says 0: right, but flagged."""
+    wired_backwards = [
+        Pad("1", -1.45, 0.0, 1.3, 1.4, 0.0, "A"),
+        Pad("2", 1.45, 0.0, 1.3, 1.4, 0.0, "K"),
+    ]
+    verdict = resolve(
+        wired_backwards,
+        "Diode_SMD:D_SMF",
+        "ok",
+        "SMF_L2.8-W1.8-LS3.7-RD",
+        JLC_SMF,
+        D1_PINS,
+    )
+    assert (verdict.rotation, verdict.confidence) == (180, "medium")
+    assert "name says 0°" in verdict.note_text
+
+
+def test_coincident_jlc_pads_are_degenerate_not_vertical():
+    """Two JLC pads at one point: no axis, no token side, and the note says degenerate."""
+    coincident = [Pad("1", 0.0, 0.0, 1.3, 1.4), Pad("2", 0.0, 0.0, 1.3, 1.4)]
+    verdict = resolve(
+        KICAD_SMF,
+        "Diode_SMD:D_SMF",
+        "ok",
+        "SMF_L2.8-W1.8-LS3.7-RD",
+        coincident,
+        D1_PINS,
+    )
+    assert (verdict.status, verdict.rotation) == ("unknown", None)
+    assert verdict.note_text == "pad geometry is degenerate"
