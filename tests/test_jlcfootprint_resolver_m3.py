@@ -332,6 +332,36 @@ def test_reversed_numbering_with_pin_functions_pairs_by_function():
     assert (blind.status, blind.fit, blind.rotation) == ("red", "mirror", None)
 
 
+def test_pads_that_share_no_name_pair_by_function():
+    """A JLC drawing naming its pads E, B and C shares no name with KiCad's 1, 2, 3; the schematic's functions pair them and the part fits as drawn."""
+    kicad = [
+        Pad("1", -0.95, 1.0, 0.6, 1.0, 0.0, "B"),
+        Pad("2", 0.95, 1.0, 0.6, 1.0, 0.0, "E"),
+        Pad("3", 0.0, -1.0, 0.6, 1.0, 0.0, "C"),
+    ]
+    jlc = [
+        Pad("B", -0.95, 1.0, 0.6, 1.0),
+        Pad("E", 0.95, 1.0, 0.6, 1.0),
+        Pad("C", 0.0, -1.0, 0.6, 1.0),
+    ]
+    pins = [SymbolPin("B", "B"), SymbolPin("E", "E"), SymbolPin("C", "C")]
+    paired = resolve(
+        kicad, "Package_TO_SOT_SMD:SOT-23", "ok", "SOT-23-3_L2.9-W1.6", jlc, pins
+    )
+    assert (paired.status, paired.rotation, paired.confidence) == ("green", 0, "medium")
+    assert "JLC pin B (B) is pad 1 on the footprint" in paired.note_text
+    blind = resolve(
+        [pad._replace(pin_function="") for pad in kicad],
+        "Package_TO_SOT_SMD:SOT-23",
+        "ok",
+        "SOT-23-3_L2.9-W1.6",
+        jlc,
+        pins,
+    )
+    assert (blind.status, blind.fit) == ("unknown", "no_data")
+    assert "fewer than two matching pad names" in blind.note_text
+
+
 # --- item 3: kicad-x2ib ---------------------------------------------------
 
 
