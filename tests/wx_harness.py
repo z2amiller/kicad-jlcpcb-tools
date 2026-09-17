@@ -294,6 +294,11 @@ def mainwindow_stubs(
             "format_hook_error": str,
             "run_configured_hook": lambda **_kwargs: None,
         },
+        "jlc_footprint_check": {
+            "create_footprint_check": lambda *_args, **_kwargs: None,
+            "import_seed": lambda *_args, **_kwargs: None,
+            "is_footprint_check_enabled": lambda _settings: False,
+        },
         "helpers": {
             "PLUGIN_PATH": str(ROOT),
             "GetScaleFactor": lambda _window: 1,

@@ -48,6 +48,7 @@ from .events import (
     EVT_DOWNLOAD_FINISHED_EVENT,
     EVT_DOWNLOAD_PROGRESS_EVENT,
     EVT_DOWNLOAD_STARTED_EVENT,
+    EVT_JLCFOOTPRINT_RESULT_EVENT,
     EVT_LOGBOX_APPEND_EVENT,
     EVT_MESSAGE_EVENT,
     EVT_POPULATE_FOOTPRINT_LIST_EVENT,
@@ -80,6 +81,10 @@ from .helpers import (
     HighResWxSize,
     getVersion,
     loadBitmapScaled,
+)
+from .jlc_footprint_check import (
+    create_footprint_check,
+    is_footprint_check_enabled,
 )
 from .kicad_drc import DRCViolationCounter
 from .library import CorrectionState, Library, LibraryState
@@ -216,6 +221,9 @@ class JLCPCBTools(wx.Frame):
         # Storage invalidation advances it to reject old events; individual
         # reassignments are guarded by each result's expected LCSC identifier.
         self.assembly_enrichment_generation = 0
+        # The JLC footprint check for the open board; None while the setting is off
+        # or project storage is unavailable.
+        self.jlc_footprint_check = None
         # Latch used by on_bom_data_changed to coalesce a burst of mutations
         # into a single recompute. SQLite commits are synchronous, so async
         # event dispatch is safe to defer here.
@@ -707,6 +715,7 @@ class JLCPCBTools(wx.Frame):
             self.on_assembly_enrichment_completed,
         )
         self.Bind(EVT_BOM_DATA_CHANGED_EVENT, self.on_bom_data_changed)
+        self.Bind(EVT_JLCFOOTPRINT_RESULT_EVENT, self.on_jlc_footprint_result)
 
         self.enable_part_specific_toolbar_buttons(False)
 
@@ -883,6 +892,8 @@ class JLCPCBTools(wx.Frame):
             tooltip.stop()
         logger = logging.getLogger(__name__)
         logger.info("quit_dialog()")
+        with suppress(Exception):
+            self._stop_jlc_footprint_check()
         layout_ready = getattr(self, "_layout_ready", False)
         selector = getattr(self, "_part_selector", None)
         try:
@@ -983,6 +994,7 @@ class JLCPCBTools(wx.Frame):
         if self.store is not None:
             self.start_assembly_enrichment()
             self.recompute_bom_estimate()
+            self._start_jlc_footprint_check()
 
     def _set_project_storage_error(self, error: Optional[BaseException]) -> None:
         """Keep Settings usable while unavailable project data disables assignments."""
@@ -997,6 +1009,7 @@ class JLCPCBTools(wx.Frame):
             self.partlist_data_model.RemoveAll()
             self.assembly_enrichment_generation += 1
             self.pending_assembly_enrichment.clear()
+            self._stop_jlc_footprint_check()
         self.project_storage_status.SetLabel(
             "Part assignments are unavailable; assignment actions and generation are disabled.\n"
             "Check the log, close other windows using this project, then reopen. Settings remains available."
@@ -1235,6 +1248,7 @@ class JLCPCBTools(wx.Frame):
         assigned = list(footprints)
         if notify:
             self.start_assembly_enrichment(assigned)
+            self._enqueue_jlc_footprint_check(assigned)
             wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
         return assigned
 
@@ -1563,6 +1577,44 @@ class JLCPCBTools(wx.Frame):
         through the BOM controller path.
         """
         wx.PostEvent(self, BomDataChangedEvent(source="enrichment_update"))
+
+    def _start_jlc_footprint_check(self) -> None:
+        """Start the footprint check for the open board when the setting is on."""
+        self._stop_jlc_footprint_check()
+        if self.store is None or not is_footprint_check_enabled(self.settings):
+            return
+        try:
+            check = create_footprint_check(self, self.pcbnew)
+            check.start()
+            check.scan_board()
+        except (sqlite3.Error, OSError) as error:
+            self.logger.warning("JLC footprint check unavailable: %s", error)
+            return
+        self.jlc_footprint_check = check
+
+    def _stop_jlc_footprint_check(self) -> None:
+        """Stop the footprint check's background thread, if one is running."""
+        check = getattr(self, "jlc_footprint_check", None)
+        if check is not None:
+            self.jlc_footprint_check = None
+            check.stop()
+
+    def _enqueue_jlc_footprint_check(self, references: Iterable[str]) -> None:
+        """Have newly assigned parts checked."""
+        check = getattr(self, "jlc_footprint_check", None)
+        if check is not None:
+            check.enqueue_references(references)
+
+    def on_jlc_footprint_result(self, e):
+        """Take one part's finished check; results from a superseded board load are dropped."""
+        check = getattr(self, "jlc_footprint_check", None)
+        if check is None or getattr(e, "generation", None) != check.generation:
+            return
+        self.logger.debug(
+            "JLC footprint check: %s checked for %s",
+            e.lcsc,
+            ", ".join(check.references_for(e.lcsc)) or "no reference",
+        )
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -1978,6 +2030,8 @@ class JLCPCBTools(wx.Frame):
                 self.footprint_list.Refresh()
             elif e.setting == "stock_concern":
                 self.recompute_stock_concerns()
+        elif e.section == "jlcfootprint" and e.setting == "enabled":
+            self._start_jlc_footprint_check()
 
         self.save_settings()
 

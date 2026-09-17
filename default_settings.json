@@ -26,6 +26,9 @@
     "pre_script": "",
     "timeout_seconds": 30
   },
+  "jlcfootprint": {
+    "enabled": true
+  },
   "library": {
     "data_path": "",
     "selected_library": "current-parts"

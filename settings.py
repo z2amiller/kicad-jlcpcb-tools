@@ -625,6 +625,49 @@ class SettingsDialog(wx.Dialog):
         hooks_box_sizer.Add(post_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
         hooks_box_sizer.Add(timeout_sizer, 0, wx.ALL | wx.EXPAND, 5)
 
+        ##### JLC footprint check #####
+
+        self.jlcfootprint_enabled_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Use JLC footprint data for rotations",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="jlcfootprint.enabled",
+        )
+
+        self.jlcfootprint_enabled_setting.SetToolTip(
+            wx.ToolTip(
+                "Derive each part's CPL rotation from its EasyEDA footprint geometry and check "
+                "that the picked part fits the pads; the correction rules are not consulted "
+                "while this is on"
+            )
+        )
+
+        self.jlcfootprint_enabled_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+        self.jlcfootprint_seed_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Seed cache from file",
+        )
+        self.jlcfootprint_seed_button.SetToolTip(
+            wx.ToolTip(
+                "Merge a footprint cache seed file into the global cache; parts the plugin "
+                "fetched itself are kept"
+            )
+        )
+        self.jlcfootprint_seed_button.Bind(wx.EVT_BUTTON, self.seed_footprint_cache)
+
+        jlcfootprint_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        jlcfootprint_sizer.Add(
+            self.jlcfootprint_enabled_setting, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        jlcfootprint_sizer.AddStretchSpacer()
+        jlcfootprint_sizer.Add(
+            self.jlcfootprint_seed_button, 0, wx.ALIGN_CENTER_VERTICAL
+        )
+
         ##### Show BOM Cost Estimator panel #####
 
         self.bom_estimator_show_setting = wx.CheckBox(
@@ -721,6 +764,7 @@ class SettingsDialog(wx.Dialog):
         )
         self._add_setting_row(settings_grid, None, library_sizer, wx.EXPAND)
         self._add_setting_row(settings_grid, None, library_data_path_sizer, wx.EXPAND)
+        self._add_setting_row(settings_grid, None, jlcfootprint_sizer, wx.EXPAND)
 
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(settings_grid, 0, wx.ALL | wx.EXPAND, 5)
@@ -887,8 +931,54 @@ class SettingsDialog(wx.Dialog):
             bool(enabled)
         )
 
+    def update_jlcfootprint_enabled(self, enabled: bool) -> None:
+        """Reflect whether CPL rotations come from the JLC footprint data."""
+        self.jlcfootprint_enabled_setting.SetValue(bool(enabled))
+
+    def seed_footprint_cache(self, *_) -> None:
+        """Ask for a seed file and merge it into the footprint cache."""
+        from .jlc_footprint_check import import_seed  # noqa: PLC0415
+
+        with wx.FileDialog(
+            self,
+            "Seed the footprint cache from a file",
+            wildcard="SQLite databases (*.db)|*.db|All files (*.*)|*.*",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as dialog:
+            if dialog.ShowModal() != wx.ID_OK:
+                return
+            path = dialog.GetPath()
+        try:
+            result = import_seed(self.parent, path)
+        except (OSError, ValueError) as error:
+            self.logger.warning("Seed import failed: %s", error)
+            wx.MessageBox(
+                f"The seed file could not be imported:\n\n{error}",
+                "Seed footprint cache",
+                style=wx.ICON_ERROR,
+            )
+            return
+        self.logger.info(
+            "Seed import: %d parts and %d footprints added or refreshed; %d parts and %d "
+            "footprints the plugin fetched itself were kept",
+            result.parts,
+            result.packages,
+            result.kept_live_parts,
+            result.kept_live_packages,
+        )
+        wx.MessageBox(
+            f"Imported {result.parts} parts and {result.packages} footprints from\n{path}\n\n"
+            f"Kept {result.kept_live_parts} parts and {result.kept_live_packages} footprints "
+            "the plugin had fetched itself.",
+            "Seed footprint cache",
+            style=wx.ICON_INFORMATION,
+        )
+
     def load_settings(self) -> None:
         """Load settings and set checkboxes accordingly."""
+        self.update_jlcfootprint_enabled(
+            self.parent.settings.get("jlcfootprint", {}).get("enabled", True)
+        )
         self.update_tented_vias(
             self.parent.settings.get("gerber", {}).get("tented_vias", True)
         )

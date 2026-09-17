@@ -523,6 +523,14 @@ class PartListDataModel(_StockDataModel):
         )
         self.ItemChanged(self.ObjectToItem(item))
 
+    def set_rotation(self, ref: str, text: str) -> None:
+        """Set the Rotation column text for a given part reference."""
+        if (index := self.find_index(ref)) is None:
+            return
+        item = self.data[index]
+        item[self.columns["ROT_COL"]] = text
+        self.ItemChanged(self.ObjectToItem(item))
+
     def remove_lcsc_number(self, item: Any) -> None:
         """Remove the LCSC number of an item."""
         obj = self.ItemToObject(item)
