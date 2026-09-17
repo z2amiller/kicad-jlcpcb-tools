@@ -203,5 +203,11 @@
    "pin_function": "",
    "shape": "oval"
   }
+ ],
+ "courtyard": [
+  -5.32,
+  -5.27,
+  5.32,
+  4.15
  ]
 }

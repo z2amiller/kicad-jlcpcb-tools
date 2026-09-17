@@ -116,6 +116,14 @@ def mirror_y(pads: list[Pad]) -> list[Pad]:
     return [pad._replace(y=-pad.y) for pad in pads]
 
 
+def mirror_box(
+    box: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Return a box mirrored across the X axis (y -> -y), for bottom-side footprints."""
+    x1, y1, x2, y2 = box
+    return (x1, -y2, x2, -y1)
+
+
 def centroid(pads: list[Pad]) -> tuple[float, float]:
     """Return the mean pad centre; raise ValueError for no pads."""
     if not pads:

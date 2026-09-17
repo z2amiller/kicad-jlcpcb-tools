@@ -47,27 +47,29 @@ class ComponentRecord:
     footprint_shapes: list[str] = field(default_factory=list)
     footprint_source: str = ""  # 'component' | 'puuid-endpoint' | ''
     skipped_shapes: int = 0  # PAD~/P~ shapes that could not be read
+    # The classic drawing's head x/y, subtracted from its pads; (0, 0) for Pro text,
+    # whose coordinates are already about the footprint origin.
+    footprint_origin: tuple[float, float] = (0.0, 0.0)
 
 
-def parse_symbol_pins(shapes: list[Any]) -> tuple[list[SymbolPin], int]:
-    """Return the symbol's pins from its ``P~`` shape strings, plus the count of unreadable ones.
+def classic_pin_records(shapes: list[Any]) -> list[tuple[str, str, float, float]]:
+    """Return ``(number, label, x, y)`` per classic ``P~`` pin shape, unreadable ones skipped.
 
     Sections are separated by ``^^``.  Section 0 is
     ``P~show~locked~spice_number~x~y~rotation~gId~id``; section 3 is
     ``show~x~y~rotation~pin_name~alignment~~~color`` and section 4 is the displayed
     pin number in the same layout.  The displayed number is what the library draws
     next to the pin and what matches the footprint's pad numbers (the SPICE field
-    disagrees on some symbols), so it is preferred when present.
+    disagrees on some symbols), so it is preferred when present.  A pin whose
+    position is unreadable keeps the number and label with a position of 0, 0.
     """
-    pins: list[SymbolPin] = []
-    skipped = 0
+    pins: list[tuple[str, str, float, float]] = []
     for shape in shapes:
         if not isinstance(shape, str) or not shape.startswith("P~"):
             continue
         sections = shape.split("^^")
         header = sections[0].split("~")
         if len(header) < 4:
-            skipped += 1
             continue
         number = header[3].strip()
         label = ""
@@ -79,8 +81,24 @@ def parse_symbol_pins(shapes: list[Any]) -> tuple[list[SymbolPin], int]:
             number_parts = sections[4].split("~")
             if len(number_parts) >= 5 and number_parts[4].strip():
                 number = number_parts[4].strip()
-        pins.append(SymbolPin(number=_normal_number(number), label=label))
-    return pins, skipped
+        x = y = 0.0
+        if len(header) >= 6:
+            try:
+                x, y = float(header[4]), float(header[5])
+            except ValueError:
+                x = y = 0.0
+        pins.append((_normal_number(number), label, x, y))
+    return pins
+
+
+def parse_symbol_pins(shapes: list[Any]) -> tuple[list[SymbolPin], int]:
+    """Return the symbol's pins from its ``P~`` shape strings, plus the count of unreadable ones."""
+    readable = classic_pin_records(shapes)
+    total = sum(1 for s in shapes if isinstance(s, str) and s.startswith("P~"))
+    return (
+        [SymbolPin(number=number, label=label) for number, label, _x, _y in readable],
+        total - len(readable),
+    )
 
 
 def _normal_number(number: str) -> str:
@@ -250,6 +268,7 @@ def parse_component_response(body: Any, lcsc: str) -> ComponentRecord:
         record.pads, skipped_pads = parse_footprint_pads(
             record.footprint_shapes, origin_x, origin_y
         )
+        record.footprint_origin = (origin_x, origin_y)
         record.skipped_shapes += skipped_pads
         record.footprint_source = "component"
         if not record.pads:
@@ -290,6 +309,10 @@ class FootprintRecord:
     footprint_shapes: list[str] = field(default_factory=list)
     footprint_source: str = "puuid-endpoint"
     skipped_shapes: int = 0
+    footprint_origin: tuple[float, float] = (
+        0.0,
+        0.0,
+    )  # classic head x/y; (0, 0) for Pro
 
 
 def pro_shape_lines(text: str) -> list[str]:
@@ -417,6 +440,7 @@ def parse_puuid_response(body: Any, puuid: str) -> FootprintRecord:
         record.pads, record.skipped_shapes = parse_footprint_pads(
             record.footprint_shapes, origin_x, origin_y
         )
+        record.footprint_origin = (origin_x, origin_y)
     if not record.pads:
         record.error = record.error or "no readable pads in the footprint"
         return record
@@ -526,39 +550,58 @@ def pro_doctype(lines: list[str]) -> str:
     return ""
 
 
-def parse_pro_pins(lines: list[str]) -> tuple[list[SymbolPin], int]:
-    """Return the pins of Pro symbol text, plus the count of pins without a number.
+def pro_pin_records(lines: list[Any]) -> list[tuple[str, str, float, float]]:
+    """Return ``(number, label, x, y)`` per Pro ``PIN`` record, in record order.
 
-    A pin is a ``["PIN", id, ...]`` record.  Its displayed name and number are the
-    attribute records ``["ATTR", attrId, pinId, "NAME", text, ...]`` and
-    ``["ATTR", attrId, pinId, "NUMBER", text, ...]``; the number is what matches the
-    footprint's pad numbers.  Pins come out in record order.
+    A pin is a ``["PIN", id, ?, ?, x, y, ...]`` record.  Its displayed name and
+    number are the attribute records ``["ATTR", attrId, pinId, "NAME", text, ...]``
+    and ``["ATTR", attrId, pinId, "NUMBER", text, ...]``; the number is what matches
+    the footprint's pad numbers.  A pin without a number is returned with ``""``.
     """
     order: list[str] = []
+    positions: dict[str, tuple[float, float]] = {}
     names: dict[str, str] = {}
     numbers: dict[str, str] = {}
     for line in lines:
-        if not isinstance(line, str) or not line.startswith(('["PIN"', '["ATTR"')):
-            continue
-        try:
-            parts = json.loads(line)
-        except ValueError:
+        if isinstance(line, list):
+            parts: Any = line
+        elif isinstance(line, str) and line.startswith(('["PIN"', '["ATTR"')):
+            try:
+                parts = json.loads(line)
+            except ValueError:
+                continue
+        else:
             continue
         if not isinstance(parts, list) or len(parts) < 2:
             continue
         if parts[0] == "PIN":
-            order.append(str(parts[1]))
-        elif len(parts) >= 5 and parts[3] in ("NAME", "NUMBER"):
+            pin_id = str(parts[1])
+            order.append(pin_id)
+            try:
+                positions[pin_id] = (float(parts[4]), float(parts[5]))
+            except (IndexError, TypeError, ValueError):
+                positions[pin_id] = (0.0, 0.0)
+        elif parts[0] == "ATTR" and len(parts) >= 5 and parts[3] in ("NAME", "NUMBER"):
             value = "" if parts[4] is None else str(parts[4]).strip()
             (names if parts[3] == "NAME" else numbers)[str(parts[2])] = value
+    return [
+        (numbers.get(pin_id, ""), names.get(pin_id, ""), *positions[pin_id])
+        for pin_id in order
+    ]
+
+
+def parse_pro_pins(lines: list[str]) -> tuple[list[SymbolPin], int]:
+    """Return the pins of Pro symbol text, plus the count of pins without a number.
+
+    Pins come out in record order; see :func:`pro_pin_records` for the records.
+    """
     pins: list[SymbolPin] = []
     skipped = 0
-    for pin_id in order:
-        number = numbers.get(pin_id, "")
+    for number, label, _x, _y in pro_pin_records(lines):
         if not number:
             skipped += 1
             continue
-        pins.append(SymbolPin(number=number, label=names.get(pin_id, "")))
+        pins.append(SymbolPin(number=number, label=label))
     return pins, skipped
 
 

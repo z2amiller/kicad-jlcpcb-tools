@@ -2,12 +2,15 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from jlcfootprint.geometry import Pad, pad_hash
 from jlcfootprint.kicad_adapter import (
     BoardPart,
     board_part,
     board_parts,
     counts_as_pad,
+    footprint_courtyard,
     footprint_pads,
     lcsc_value,
     verdict_key,
@@ -315,3 +318,116 @@ def test_verdict_key_includes_the_pin_functions():
     assert verdict_key(
         [Pad("1", -1, 0, 1, 0.5, 0, "K"), Pad("2", 1, 0, 1, 0.5, 0, "A")]
     ) == verdict_key([Pad("2", 1, 0, 1, 0.5, 0, "a"), Pad("1", -1, 0, 1, 0.5, 0, "k")])
+
+
+class FakeBox:
+    """A BOX2I stand-in."""
+
+    def __init__(self, left, top, right, bottom):
+        self.box = (left, top, right, bottom)
+
+    def GetLeft(self):
+        """Return the left edge."""
+        return self.box[0]
+
+    def GetTop(self):
+        """Return the top edge."""
+        return self.box[1]
+
+    def GetRight(self):
+        """Return the right edge."""
+        return self.box[2]
+
+    def GetBottom(self):
+        """Return the bottom edge."""
+        return self.box[3]
+
+
+class FakeShape:
+    """A PCB_SHAPE stand-in: a layer, a board-frame bounding box and a stroke width."""
+
+    def __init__(self, layer, box, width=0.05, layer_name=""):
+        self.layer, self.box, self.width, self.layer_name = (
+            layer,
+            box,
+            width,
+            layer_name,
+        )
+
+    def GetLayer(self):
+        """Return the layer id."""
+        return self.layer
+
+    def GetLayerName(self):
+        """Return the layer name."""
+        return self.layer_name
+
+    def GetBoundingBox(self):
+        """Return the box, stroke included."""
+        return FakeBox(*self.box)
+
+    def GetWidth(self):
+        """Return the stroke width."""
+        return self.width
+
+
+class Courtyarded:
+    """The footprint calls the courtyard reader makes."""
+
+    def __init__(self, items, x=10.0, y=20.0, rotation=0.0, layer=0):
+        self.items, self.x, self.y, self.rotation, self.layer = (
+            items,
+            x,
+            y,
+            rotation,
+            layer,
+        )
+
+    def GraphicalItems(self):
+        """Return the graphic items."""
+        return self.items
+
+    def GetPosition(self):
+        """Return the board position."""
+        return SimpleNamespace(x=self.x, y=self.y)
+
+    def GetOrientation(self):
+        """Return the orientation."""
+        return Angle(self.rotation)
+
+    def GetLayer(self):
+        """Return the copper layer."""
+        return self.layer
+
+
+PCBNEW = SimpleNamespace(F_CrtYd=44, B_CrtYd=45)
+
+
+def test_footprint_courtyard_shrinks_the_stroke_and_returns_to_the_footprint_frame():
+    """Two courtyard lines at 10, 20 with a 0.05 stroke give the centreline box about the origin."""
+    items = [
+        FakeShape(44, (8.975, 17.975, 12.025, 18.025)),  # a horizontal line at y = 18
+        FakeShape(44, (8.975, 17.975, 9.025, 22.025)),  # a vertical line at x = 9
+        FakeShape(7, (0, 0, 100, 100)),  # silkscreen, ignored
+    ]
+    assert footprint_courtyard(
+        Courtyarded(items), lambda v: v, PCBNEW
+    ) == pytest.approx((-1.0, -2.0, 2.0, 2.0))
+
+
+def test_footprint_courtyard_unrotates_mirrors_and_falls_back_to_layer_names():
+    """A part placed at 90 gives the same footprint-frame box; a bottom part is mirrored; names serve without pcbnew."""
+    turned = [
+        FakeShape(44, (7.975, 18.975, 12.025, 21.025))
+    ]  # board box 8..12 x 19..21 at 90
+    box = footprint_courtyard(Courtyarded(turned, rotation=90.0), lambda v: v, PCBNEW)
+    assert box == pytest.approx((-1.0, -2.0, 1.0, 2.0))
+    bottom = [FakeShape(45, (8.975, 18.975, 11.025, 23.025), layer_name="B.Courtyard")]
+    assert footprint_courtyard(
+        Courtyarded(bottom, layer=31), lambda v: v, PCBNEW
+    ) == pytest.approx((-1.0, -3.0, 1.0, 1.0))
+    assert footprint_courtyard(
+        Courtyarded(bottom, layer=31), lambda v: v
+    ) == pytest.approx((-1.0, -3.0, 1.0, 1.0))
+    assert footprint_courtyard(Courtyarded([]), lambda v: v, PCBNEW) is None
+    assert footprint_courtyard(SimpleNamespace(), lambda v: v, PCBNEW) is None
