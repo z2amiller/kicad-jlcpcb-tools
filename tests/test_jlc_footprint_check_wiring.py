@@ -22,7 +22,7 @@ _PACKAGE = "jlc_footprint_check_wiring_tests"
 def facade():
     """Load the real facade with a fake wx that records posted events."""
     package = f"{_PACKAGE}_facade"
-    stubs = wx_stubs(PostEvent=MagicMock())
+    stubs = wx_stubs(PostEvent=MagicMock(), Dialog=type("Dialog", (), {}))
     stubs.update(package_stubs(package))
     stubs[f"{package}.events"] = load(package, "events", stubs)
     with load_siblings(package, ("jlc_footprint_check",), stubs) as loaded:
@@ -32,10 +32,15 @@ def facade():
 def _window(tmp_path):
     board = SimpleNamespace(
         GetFootprints=lambda: [
-            FakeFootprint("Q1", [FakePad("1", -1, 0.95), FakePad("2", -1, -0.95), FakePad("3", 1, 0)])
+            FakeFootprint(
+                "Q1",
+                [FakePad("1", -1, 0.95), FakePad("2", -1, -0.95), FakePad("3", 1, 0)],
+            )
         ]
     )
-    pcbnew = SimpleNamespace(GetBoard=lambda: board, ToMM=lambda v: v, PAD_ATTRIB_NPTH=3, PAD_SHAPE_CUSTOM=6)
+    pcbnew = SimpleNamespace(
+        GetBoard=lambda: board, ToMM=lambda v: v, PAD_ATTRIB_NPTH=3, PAD_SHAPE_CUSTOM=6
+    )
     with closing(sqlite3.connect(tmp_path / "project.db")) as con:
         con.execute("CREATE TABLE part_info (reference TEXT)")
     window = SimpleNamespace(
@@ -53,7 +58,9 @@ def test_enabled_setting_defaults_on(facade):
     assert not module.is_footprint_check_enabled({"jlcfootprint": {"enabled": False}})
 
 
-def test_create_footprint_check_uses_the_library_directory_and_the_project_db(facade, tmp_path):
+def test_create_footprint_check_uses_the_library_directory_and_the_project_db(
+    facade, tmp_path
+):
     """The cache sits beside corrections.db, verdicts go to project.db, and results post events."""
     module, wx, events = facade
     window, pcbnew = _window(tmp_path)
@@ -62,7 +69,10 @@ def test_create_footprint_check_uses_the_library_directory_and_the_project_db(fa
     assert check.verdicts.db_path == str(tmp_path / "project.db")
     assert (tmp_path / "jlcfootprint-cache.db").exists()
     with closing(sqlite3.connect(tmp_path / "project.db")) as con:
-        tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {
+            row[0]
+            for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
     assert {"part_info", "footprint_verdict"} <= tables
     parts = check.read_board()
     assert [(p.reference, p.lcsc, len(p.pads)) for p in parts] == [("Q1", "C2132", 3)]
@@ -74,7 +84,11 @@ def test_create_footprint_check_uses_the_library_directory_and_the_project_db(fa
     check.message("breaker")
     target, event = wx.PostEvent.call_args.args
     assert isinstance(event, events.MessageEvent)
-    assert (event.title, event.style, event.text) == ("JLC footprint check", "warning", "breaker")
+    assert (event.title, event.style, event.text) == (
+        "JLC footprint check",
+        "warning",
+        "breaker",
+    )
     assert not check.worker.is_running()
 
 
@@ -119,7 +133,11 @@ def mainwindow():
         wx=wx_stubs(Frame=type("Frame", (), {}), NewIdRef=lambda: 1),
         jlc_footprint_check={
             "create_footprint_check": create,
-            "is_footprint_check_enabled": lambda settings: settings.get("jlcfootprint", {}).get("enabled", True),
+            "is_footprint_check_enabled": lambda settings: settings.get(
+                "jlcfootprint", {}
+            ).get("enabled", True),
+            "show_generate_summary": lambda *_args, **_kwargs: "",
+            "wait_for_pending_fetches": lambda *_args, **_kwargs: True,
         },
     )
     return module, checks
@@ -133,6 +151,8 @@ def _make_window(module):
     window.logger = MagicMock()
     window.jlc_footprint_check = None
     window.save_settings = MagicMock()
+    window.partlist_data_model = MagicMock()
+    window.populate_footprint_list = MagicMock()
     return window
 
 
@@ -141,7 +161,7 @@ def test_window_starts_scans_stops_and_enqueues(mainwindow):
     module, checks = mainwindow
     window = _make_window(module)
     window._start_jlc_footprint_check()
-    (owner, pcbnew, check), = checks
+    ((owner, pcbnew, check),) = checks
     assert owner is window and pcbnew is window.pcbnew
     check.start.assert_called_once_with()
     check.scan_board.assert_called_once_with()
@@ -200,11 +220,15 @@ def test_toggling_the_setting_starts_or_stops_the_check(mainwindow):
     """The settings event restarts the check when it turns on and stops it when it turns off."""
     module, checks = mainwindow
     window = _make_window(module)
-    window.update_settings(SimpleNamespace(section="jlcfootprint", setting="enabled", value=True))
+    window.update_settings(
+        SimpleNamespace(section="jlcfootprint", setting="enabled", value=True)
+    )
     assert window.settings == {"jlcfootprint": {"enabled": True}}
     assert len(checks) == 1
     window.save_settings.assert_called_once_with()
-    window.update_settings(SimpleNamespace(section="jlcfootprint", setting="enabled", value=False))
+    window.update_settings(
+        SimpleNamespace(section="jlcfootprint", setting="enabled", value=False)
+    )
     checks[0][2].stop.assert_called_once_with()
     assert window.jlc_footprint_check is None
     assert len(checks) == 1

@@ -85,6 +85,8 @@ from .helpers import (
 from .jlc_footprint_check import (
     create_footprint_check,
     is_footprint_check_enabled,
+    show_generate_summary,
+    wait_for_pending_fetches,
 )
 from .kicad_drc import DRCViolationCounter
 from .library import CorrectionState, Library, LibraryState
@@ -543,7 +545,7 @@ class JLCPCBTools(wx.Frame):
             align=wx.ALIGN_CENTER,
         )
         correction = self.footprint_list.AppendTextColumn(
-            "Correction",
+            "Rotation" if is_footprint_check_enabled(self.settings) else "Correction",
             9,
             width=120,
             mode=dv.DATAVIEW_CELL_INERT,
@@ -995,6 +997,7 @@ class JLCPCBTools(wx.Frame):
             self.start_assembly_enrichment()
             self.recompute_bom_estimate()
             self._start_jlc_footprint_check()
+            self._refresh_jlc_rotation_cells()
 
     def _set_project_storage_error(self, error: Optional[BaseException]) -> None:
         """Keep Settings usable while unavailable project data disables assignments."""
@@ -1606,15 +1609,51 @@ class JLCPCBTools(wx.Frame):
             check.enqueue_references(references)
 
     def on_jlc_footprint_result(self, e):
-        """Take one part's finished check; results from a superseded board load are dropped."""
+        """Repaint the Rotation cells of one checked part; a superseded board load's results are dropped."""
         check = getattr(self, "jlc_footprint_check", None)
         if check is None or getattr(e, "generation", None) != check.generation:
             return
+        references = check.references_for(e.lcsc)
         self.logger.debug(
             "JLC footprint check: %s checked for %s",
             e.lcsc,
-            ", ".join(check.references_for(e.lcsc)) or "no reference",
+            ", ".join(references) or "no reference",
         )
+        for reference in references:
+            self.partlist_data_model.set_rotation(
+                reference, check.display_text(reference) or "raw"
+            )
+
+    def _active_jlc_footprint_check(self):
+        """Return the running footprint check when the setting is on, else None."""
+        if not is_footprint_check_enabled(getattr(self, "settings", {})):
+            return None
+        return getattr(self, "jlc_footprint_check", None)
+
+    def _rotation_cell_text(self, part: dict[str, Any], corrections) -> str:
+        """Return the Rotation column text: the footprint check's decision, else the rule."""
+        check = self._active_jlc_footprint_check()
+        if check is not None:
+            return check.display_text(part["reference"]) or "raw"
+        if corrections is None:
+            return "Unresolved"
+        return str(self.get_correction(part, corrections))
+
+    def _refresh_jlc_rotation_cells(self) -> None:
+        """Repaint every Rotation cell from the footprint check's current decisions."""
+        check = self._active_jlc_footprint_check()
+        if check is None:
+            return
+        model = self.partlist_data_model
+        for row in model.get_all():
+            reference = str(row[model.columns["REF_COL"]] or "")
+            model.set_rotation(reference, check.display_text(reference) or "raw")
+
+    def read_corrections_for_summary(self):
+        """Read the correction rules for the rotation summary's comparison; None when unavailable."""
+        snapshot = self.library.read_correction_data()
+        self.update_correction_status(snapshot)
+        return snapshot.corrections
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -1721,11 +1760,7 @@ class JLCPCBTools(wx.Frame):
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
                     int(is_dnp),
-                    (
-                        str(self.get_correction(part, corrections))
-                        if corrections is not None
-                        else "Unresolved"
-                    ),
+                    self._rotation_cell_text(part, corrections),
                     str(fp.GetLayer()),
                     params_for_part(details),
                     enrichment_status,
@@ -2032,6 +2067,7 @@ class JLCPCBTools(wx.Frame):
                 self.recompute_stock_concerns()
         elif e.section == "jlcfootprint" and e.setting == "enabled":
             self._start_jlc_footprint_check()
+            self.populate_footprint_list()
 
         self.save_settings()
 
@@ -2250,13 +2286,44 @@ class JLCPCBTools(wx.Frame):
         wx.BeginBusyCursor()
         self._current_generation_step = "initialization"
         try:
-            corrections = self.run_generation_step(
-                "Validating corrections",
-                self.read_valid_corrections_for_generation,
+            check = (
+                getattr(self, "jlc_footprint_check", None)
+                if is_footprint_check_enabled(self.settings)
+                else None
             )
-            placements = self.run_generation_step(
-                "Preparing placement data", self.fabrication.prepare_cpl, corrections
-            )
+            if check is None:
+                corrections = self.run_generation_step(
+                    "Validating corrections",
+                    self.read_valid_corrections_for_generation,
+                )
+                placements = self.run_generation_step(
+                    "Preparing placement data",
+                    self.fabrication.prepare_cpl,
+                    corrections,
+                )
+            else:
+                corrections = self.run_generation_step(
+                    "Reading correction rules for the rotation summary",
+                    self.read_corrections_for_summary,
+                )
+                if not self.run_generation_step(
+                    "Waiting for JLC footprint data",
+                    wait_for_pending_fetches,
+                    self,
+                    check,
+                ):
+                    self.report_generation_step(
+                        "JLC footprint data still pending: those parts keep their raw angle"
+                    )
+                decisions = self.run_generation_step(
+                    "Collecting JLC footprint rotations", check.decisions
+                )
+                placements = self.run_generation_step(
+                    "Preparing placement data",
+                    self.fabrication.prepare_cpl,
+                    corrections,
+                    decisions,
+                )
             warnings = self.run_generation_step(
                 "Checking part consistency",
                 self.fabrication.get_part_consistency_warnings,
@@ -2386,6 +2453,14 @@ class JLCPCBTools(wx.Frame):
                 self.fabrication.write_cpl,
                 placements,
             )
+            if check is not None:
+                self.run_generation_step(
+                    "Summarising JLC footprint rotations",
+                    show_generate_summary,
+                    self,
+                    self.fabrication.rotation_report,
+                    corrections is not None,
+                )
 
             self.run_generation_step(
                 "Generating BOM",

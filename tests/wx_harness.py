@@ -298,6 +298,8 @@ def mainwindow_stubs(
             "create_footprint_check": lambda *_args, **_kwargs: None,
             "import_seed": lambda *_args, **_kwargs: None,
             "is_footprint_check_enabled": lambda _settings: False,
+            "show_generate_summary": lambda *_args, **_kwargs: "",
+            "wait_for_pending_fetches": lambda *_args, **_kwargs: True,
         },
         "helpers": {
             "PLUGIN_PATH": str(ROOT),
