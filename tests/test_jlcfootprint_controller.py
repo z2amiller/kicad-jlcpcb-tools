@@ -412,9 +412,10 @@ def test_lookup_misses_and_missing_documents(setup):
     c6 = check.verdicts.get("C16133", board["parts"][1].footprint_hash)
     assert (c6.status, c6.rotation) == ("green", 0)
     assert "polarity from the footprint's + mark" in c6.notes
-    # The RD token orients the LED on its own; only the pin-1 light is unknown.
+    # The RD token orients the LED on its own and says JLC's pad 1 is the anode,
+    # where KiCad's pad 1 is the cathode: the pin-1 marker warning.
     d5 = check.verdicts.get("C5", board["parts"][2].footprint_hash)
-    assert (d5.status, d5.rotation, d5.polarity_light) == ("green", 0, "unknown")
+    assert (d5.status, d5.rotation, d5.polarity_light) == ("yellow", 0, "yellow")
     q1 = check.verdicts.get("C2132", board["parts"][0].footprint_hash)
     assert (q1.status, q1.rotation) == ("green", 180)
     assert all(check.cache.needs(code) == set() for code in ("C2132", "C16133", "C5"))

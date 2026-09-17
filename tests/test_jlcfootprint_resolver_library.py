@@ -247,9 +247,12 @@ def test_seeded_polarity_defers_to_the_name_token():
     assert (seeded.status, seeded.rotation, seeded.polarity_light) == (
         "green",
         0,
-        "unknown",
+        "green",  # the token settles pad 1 as the cathode, like KiCad's pad 1
     )
-    assert "seeded" in seeded.note_text
+    assert (
+        "seeded pin-1 polarity (per footprint) disagrees with the name token; not counted"
+        in seeded.notes
+    )
     real = resolve(
         kicad, "Diode_SMD:D_SMA", "ok", "DO-214AC_L4.3-W2.7-LS5.0-RD", jlc, pins
     )

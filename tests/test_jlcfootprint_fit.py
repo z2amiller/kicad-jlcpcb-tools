@@ -98,6 +98,16 @@ def test_pair_by_function_needs_two_names_and_every_jlc_pad_paired():
     )
 
 
+def test_pair_by_function_ignores_no_connection_names():
+    """NC on both sides names no pin: the two pads pair by elimination, never as a name match."""
+    kicad = [TABPIN2[0]._replace(pin_function="NC")] + TABPIN2[1:]
+    pins = [SymbolPin("3", "D"), SymbolPin("1", "NC"), SymbolPin("2", "S")]
+    pairing = pair_by_function(kicad, JLC_DPAK, pins)
+    assert pairing is not None
+    assert pairing.eliminated == ("1", "1")
+    assert sorted(pairing.differences) == [("D", "2", "3"), ("S", "3", "2")]
+
+
 def test_transformed_box_rotates_and_moves_the_corners():
     """A quarter turn swaps the box's extents; the offset moves it."""
     placement = Placement(90, 10.0, 0.0, False, False, 0.0, 0.0, 2)

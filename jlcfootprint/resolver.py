@@ -31,7 +31,7 @@ from .naming import parse_package_name
 from .polarity import (
     CONVENTION,
     REFERENCE_TERMINAL,
-    drawing_reference_pad,
+    drawing_reference_pads,
     kicad_reference_pad,
     label_reference_pad,
     normalise_function,
@@ -224,6 +224,9 @@ def _resolve_multi_pin(
     """Align by pad name (spec section 7.2), or by pin function when the names fail."""
     kicad, jlc, jlc_rest = pair_by_name(kicad_pads, jlc_pads)
     if len(kicad) < 2:
+        by_function = _resolve_by_function(kicad_pads, jlc_pads, verdict, symbol_pins)
+        if by_function is not None:
+            return by_function
         return verdict.unresolved(
             "unknown", "no_data", "fewer than two matching pad names"
         )
@@ -232,6 +235,11 @@ def _resolve_multi_pin(
     if placement.is_underdetermined:
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
     if placement.is_mirrored:
+        # A numbering that runs the other way is a by-number failure like any
+        # other: the schematic's pin functions may still pair the pins (spec 16.6).
+        by_function = _resolve_by_function(kicad_pads, jlc_pads, verdict, symbol_pins)
+        if by_function is not None:
+            return by_function
         return verdict.unresolved(
             "red",
             "mirror",
@@ -328,21 +336,18 @@ def _resolve_polarized(
             )
     label_pad = label_reference_pad(jlc_named, polarity, reference)
     seeded = polarity_source != "symbol"
-    drawn_pad, drawn_by = drawing_reference_pad(jlc_named, marks, reference)
-    if drawn_by == "conflict":
-        return verdict.unresolved(
-            "red",
-            "no_data",
-            "EasyEDA data inconsistent: the symbol's + mark and the footprint's + mark name different pins",
-        )
+    symbol_drawn, footprint_drawn = drawing_reference_pads(jlc_named, marks, reference)
     if (
         seeded
         and token_pad is not None
         and label_pad is not None
         and token_pad is not label_pad
     ):
+        # The seed was read from one representative part per footprint; against
+        # this part's own name it is set aside (it may still be that the marks
+        # outvote the token below, so the note does not promise the token).
         verdict.notes.append(
-            "seeded pin-1 polarity (per footprint) disagrees with the name token; token used"
+            "seeded pin-1 polarity (per footprint) disagrees with the name token; not counted"
         )
         label_pad = None
         polarity = None
@@ -353,11 +358,10 @@ def _resolve_polarized(
         votes.append(
             (label_pad, "seeded pin-1 polarity" if seeded else "symbol pin-1 label")
         )
-    if drawn_pad is not None:
-        if drawn_by in ("both", "symbol"):
-            votes.append((drawn_pad, "symbol + mark"))
-        if drawn_by in ("both", "footprint"):
-            votes.append((drawn_pad, "footprint + mark"))
+    if symbol_drawn is not None:
+        votes.append((symbol_drawn, "symbol + mark"))
+    if footprint_drawn is not None:
+        votes.append((footprint_drawn, "footprint + mark"))
     if not votes:
         return verdict.unresolved(
             "unknown", "no_data", "polarity unknown; check in JLC preview"
@@ -393,12 +397,22 @@ def _resolve_polarized(
     else:
         source = "drawing"
         if not outvoted:
-            verdict.notes.append(DRAWING_NOTES[drawn_by])
+            drawn_by = [name.split(" ")[0] for name in winners]  # symbol, footprint
+            verdict.notes.append(
+                DRAWING_NOTES["both" if len(drawn_by) == 2 else drawn_by[0]]
+            )
     if source == "seed":
         verdict.notes.append(
             "reference terminal from the seeded per-footprint polarity"
         )
     verdict.polarity_source = source
+    if kind != "other":
+        # The vote settles which EasyEDA pad carries the reference terminal and with it
+        # what JLC's pad 1 means, so the pin-1 light no longer waits for a symbol label:
+        # the token and the marks tell it too, and an outvoted label is overruled.
+        jlc_pad1 = next((p for p in jlc_named if p.number == "1"), None)
+        if jlc_pad1 is not None:
+            polarity = "K" if (jlc_ref is jlc_pad1) == (reference == "cathode") else "A"
     kicad_other = next(p for p in kicad_named if p is not kicad_ref)
     jlc_other = next(p for p in jlc_named if p is not jlc_ref)
     kicad = {"ref": kicad_ref, "other": kicad_other}
