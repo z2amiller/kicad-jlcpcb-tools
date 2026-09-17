@@ -1,6 +1,8 @@
 """Tests for the footprint check controller: scanning, the lookup and document flow, deciding."""
 
 import copy
+import logging
+import threading
 
 import pytest
 
@@ -45,6 +47,9 @@ class FakeClient:
         self.fail_lookups = False
         self.transient_symbols = set()
         self.silent_symbols = set()
+        # Documents that answer a final error (HTTP 401, an unreadable body).
+        self.error_footprints = set()
+        self.error_symbols = set()
 
     def search_by_codes(self, codes):
         """Return hits for the recorded parts and misses for the rest."""
@@ -67,6 +72,10 @@ class FakeClient:
     def fetch_footprint(self, puuid):
         """Return the recorded footprint with this uuid, or none."""
         self.documents.append((FOOTPRINT, puuid))
+        if puuid in self.error_footprints:
+            return Document(
+                FOOTPRINT, puuid, FootprintRecord(puuid=puuid, error="HTTP 401")
+            )
         for record in self.records.values():
             if record.puuid == puuid:
                 return Document(
@@ -93,6 +102,8 @@ class FakeClient:
                 SymbolRecord(uuid=uuid, error="HTTP 500 after retries"),
                 transient=True,
             )
+        if uuid in self.error_symbols:
+            return Document(SYMBOL, uuid, SymbolRecord(uuid=uuid, error="HTTP 401"))
         record = self.records.get(lcsc)
         if record is None or uuid in self.silent_symbols:
             return Document(SYMBOL, uuid, SymbolRecord(uuid=uuid, status="none"))
@@ -199,7 +210,7 @@ def setup(tmp_path):
     return check, board, events, messages, client
 
 
-def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup):
+def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup, caplog):
     """Nothing cached: one lookup, then footprints and symbols, then the verdicts and one event each."""
     check, board, events, messages, client = setup
     summary = check.scan_board()
@@ -210,15 +221,18 @@ def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup):
         summary.pending,
     ) == (3, 1, 2, 2)
     assert summary.queued == {"lookups": 2, "footprints": 0, "symbols": 0}
-    assert "queued: 2 lookup(s), 0 footprint(s), 0 symbol(s), about 2 s" in str(summary)
+    # Two codes: one chunk plus up to two documents each.
+    assert "queued: 2 lookup(s), 0 footprint(s), 0 symbol(s), about 6 s" in str(summary)
     assert check.generation == 1
     assert check.pending_references() == ["D1", "Q1"]
-    assert check.queue_estimate() == (2, 2.0)
+    assert check.queue_estimate() == (2, 6.0)
     assert (
         check.verdicts.get("C2132", board["parts"][0].footprint_hash).status == PENDING
     )
     assert check.display_text("Q1") == "…"
-    assert check.worker.run_pending() == 5
+    with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
+        assert check.worker.run_pending() == 5
+    assert "lookup answered: 2 of 2 part(s) known to EasyEDA" in caplog.text
     assert client.lookups == [["C2132", "C2286"]]
     q1_puuid, d1_puuid = recorded("C2132").puuid, recorded("C2286").puuid
     assert client.documents == [
@@ -350,13 +364,15 @@ def test_transient_failures_trip_the_breaker_and_leave_parts_pending(setup):
     assert events == [("C1", 1), ("C2", 1), ("C3", 1)]
 
 
-def test_a_failed_lookup_marks_its_parts_for_retry(setup):
+def test_a_failed_lookup_marks_its_parts_for_retry(setup, caplog):
     """A refused lookup leaves error rows and unknown verdicts that the next scan asks for again."""
     check, board, events, _, client = setup
     client.fail_lookups = True
     board["parts"] = [sot23("Q9", lcsc="C999")]
     check.scan_board()
-    check.worker.run_pending()
+    with caplog.at_level(logging.WARNING, logger="jlcfootprint.controller"):
+        check.worker.run_pending()
+    assert "lookup of 1 part(s) failed: HTTP 403 after retries" in caplog.text
     assert check.cache.status("C999") == "error"
     assert (
         check.verdicts.get("C999", board["parts"][0].footprint_hash).status == "unknown"
@@ -403,6 +419,79 @@ def test_lookup_misses_and_missing_documents(setup):
     assert all(check.cache.needs(code) == set() for code in ("C2132", "C16133", "C5"))
     assert sorted(events) == [("C16133", 1), ("C2132", 1), ("C404", 1), ("C5", 1)]
     assert check.pending_references() == []
+
+
+def test_a_final_document_error_is_retried_next_session_not_stored(setup):
+    """HTTP 401 on a footprint or a symbol leaves an error row: never none, never an empty pin list."""
+    check, board, events, _, client = setup
+    client.records["C1"] = alias("C1")
+    client.records["C2"] = alias("C2", "C2286")
+    client.error_footprints.add(recorded("C2132").puuid)
+    client.error_symbols.add("sym-C2")
+    board["parts"] = [sot23("Q1", lcsc="C1"), led("D2", lcsc="C2")]
+    check.scan_board()
+    check.worker.run_pending()
+    assert (check.cache.status("C1"), check.cache.status("C2")) == ("error", "error")
+    assert check.cache.needs("C1") == check.cache.needs("C2") == {"lookup"}
+    for part in board["parts"]:
+        verdict = check.verdicts.get(part.lcsc, part.footprint_hash)
+        assert (verdict.status, "will retry" in verdict.notes) == ("unknown", True)
+    # A final failure is not the breaker's business.
+    assert (check.worker.consecutive_failures, check.worker.tripped) == (0, False)
+    assert check.pending_references() == []
+    assert sorted(events) == [("C1", 1), ("C2", 1)]
+    client.error_footprints.clear()
+    client.error_symbols.clear()
+    assert check.scan_board().enqueued == 2
+    check.worker.run_pending()
+    assert check.verdicts.get("C1", board["parts"][0].footprint_hash).status == "green"
+    assert check.verdicts.get("C2", board["parts"][1].footprint_hash).status == "yellow"
+    assert check.waiting == {}
+
+
+def test_a_scan_right_after_a_result_never_parks_the_part(setup):
+    """A scan landing between a lookup's answer and the next job re-requests the part and it resolves."""
+    check, board, events, _, client = setup
+    client.fail_lookups = True
+    board["parts"] = [sot23("Q9", lcsc="C999")]
+    handle = check._on_lookup
+
+    def on_lookup(codes, lookup):
+        handle(codes, lookup)
+        check.worker.on_lookup = (
+            handle  # once: only the failed lookup is followed by a scan
+        )
+        # Generate's scan arriving right after the failed lookup was handled.
+        client.fail_lookups = False
+        client.records["C999"] = alias("C999")
+        check.scan_board()
+
+    check.worker.on_lookup = on_lookup
+    check.scan_board()
+    assert (
+        check.worker.run_pending() == 4
+    )  # the failed lookup, its retry, two documents
+    assert client.lookups == [["C999"], ["C999"]]
+    assert check.waiting == {}
+    assert check.pending_references() == []
+    assert (
+        check.verdicts.get("C999", board["parts"][0].footprint_hash).status == "green"
+    )
+    assert events == [("C999", 1), ("C999", 2)]
+
+
+def test_the_scan_step_and_the_handlers_share_one_lock(setup):
+    """A pending query from another thread waits while the lock is held."""
+    check, *_ = setup
+    check.scan_board()
+    seen = []
+    with check.lock:
+        thread = threading.Thread(target=lambda: seen.append(check.pending_lcscs()))
+        thread.start()
+        thread.join(0.2)
+        assert thread.is_alive() and seen == []
+    thread.join(5.0)
+    assert seen == [{"C2132", "C2286"}]
 
 
 def test_decisions_follow_the_cpl_precedence(setup):
