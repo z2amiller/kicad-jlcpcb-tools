@@ -7,6 +7,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
+PRO_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda_pro"
 
 
 def load_script():
@@ -223,3 +224,64 @@ def test_axis_parts_compare_modulo_180():
         "R1",
         "D1",
     ]
+
+
+def test_pro_fixtures_assemble_a_part_like_the_cache_would(tmp_path):
+    """The batch answer gives the uuids, the documents the pads and pins; gaps read as unrecorded."""
+    import json
+    import shutil
+
+    validator = load_script()
+    index = validator.load_pro_index(PRO_FIXTURES)
+    assert index["C2132"] is not None and len(index) >= 35
+    record = validator.load_pro_record(PRO_FIXTURES, index, "C2132")
+    assert (record.status, record.package_name) == (
+        "ok",
+        "SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR",
+    )
+    assert sorted(p["number"] for p in record.pads) == ["1", "2", "3"]
+    assert sorted((p.number, p.label) for p in record.symbol_pins) == [
+        ("1", "B"),
+        ("2", "E"),
+        ("3", "C"),
+    ]
+    assert record.footprint_source == "puuid-endpoint"
+    assert validator.load_pro_record(PRO_FIXTURES, index, "C999999") is None
+    # A miss the batch was asked about is the checkerboard case; a partial recording is unrecorded.
+    devices = json.loads((PRO_FIXTURES / "devices_corner_case.json").read_text())
+    partial = tmp_path / "pro"
+    partial.mkdir()
+    (partial / "devices_x.json").write_text(
+        json.dumps({"codes": devices["codes"] + ["C404"], "body": devices["body"]})
+    )
+    index = validator.load_pro_index(partial)
+    assert validator.load_pro_record(partial, index, "C404").status == "none"
+    assert validator.load_pro_record(partial, index, "C2132") is None
+    hit = index["C2132"]
+    shutil.copy(PRO_FIXTURES / f"footprint_{hit.puuid}.json", partial)
+    assert validator.load_pro_record(partial, index, "C2132") is None, "symbol missing"
+    shutil.copy(PRO_FIXTURES / f"symbol_{hit.symbol_uuid}.json", partial)
+    assert validator.load_pro_record(partial, index, "C2132").status == "ok"
+    rows = validator.evaluate(
+        ROOT / "scripts" / "corner_case" / "corner_case.kicad_pcb",
+        FIXTURES,
+        pro_fixtures=partial,
+    )
+    by_reference = {row["reference"]: row for row in rows}
+    assert by_reference["Q1"]["verdict"].rotation == 180
+    assert by_reference["U1"]["verdict"] is None
+
+
+def test_pro_fixtures_reject_a_broken_batch_file(tmp_path):
+    """A batch file that is not a recorded answer stops the run with its name."""
+    validator = load_script()
+    broken = tmp_path / "pro"
+    broken.mkdir()
+    (broken / "devices_bad.json").write_text("[]")
+    with pytest.raises(SystemExit, match="devices_bad.json"):
+        validator.load_pro_index(broken)
+    (broken / "devices_bad.json").write_text(
+        '{"codes": ["C1"], "body": {"success": false, "code": 401, "message": "denied"}}'
+    )
+    with pytest.raises(SystemExit, match="401"):
+        validator.load_pro_index(broken)

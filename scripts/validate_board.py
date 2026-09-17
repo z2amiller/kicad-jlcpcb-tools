@@ -2,12 +2,15 @@
 
 Usage:
     python3 scripts/validate_board.py BOARD.kicad_pcb [--fixtures DIR] [--truth truth.csv]
-                                      [--flip-y] [--report out.txt]
+                                      [--flip-y] [--report out.txt] [--pro-fixtures DIR]
 
 Without --truth it prints one verdict per part that has an LCSC field.  With
 --truth it compares the CPL rotation the resolver would emit against the
 rotation JLC's preview settled on, and exits 1 on any disagreement.  This is
-the M0 gate.
+the M0 gate.  With --pro-fixtures the parts are read the way the plugin fetches
+them live (spec section 15): the recorded batch answers ``devices_*.json`` give
+each part's uuids, ``footprint_<uuid>.json`` its pads and ``symbol_<uuid>.json``
+its pins; the classic fixtures are not consulted.
 
 truth.csv columns: reference,observed_rotation.  observed_rotation is JLC's
 final rotation for the part after it was aligned in the placement preview.
@@ -35,7 +38,11 @@ from jlcfootprint.boardfile import (  # noqa: E402
 )
 from jlcfootprint.easyeda_parse import (  # noqa: E402
     ComponentRecord,
+    DeviceHit,
     parse_component_response,
+    parse_devices_response,
+    parse_puuid_response,
+    parse_symbol_response,
 )
 from jlcfootprint.geometry import easyeda_pads_to_mm, mirror_y  # noqa: E402
 from jlcfootprint.resolver import Verdict, resolve  # noqa: E402
@@ -65,14 +72,85 @@ def load_record(fixtures: Path, lcsc: str) -> ComponentRecord | None:
     return parse_component_response(body, lcsc)
 
 
+def load_pro_index(pro_dir: Path) -> dict[str, DeviceHit | None]:
+    """Return every code a recorded batch answer asked, mapped to its hit or None for a miss."""
+    index: dict[str, DeviceHit | None] = {}
+    for path in sorted(pro_dir.glob("devices_*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            codes = list(data["codes"])
+            body = data["body"]
+        except (ValueError, KeyError, TypeError) as error:
+            raise SystemExit(
+                f"{path}: not a recorded batch answer ({error})"
+            ) from error
+        result = parse_devices_response(body, codes)
+        if result.error:
+            raise SystemExit(f"{path}: {result.error}")
+        for code in codes:
+            index[code] = result.hits.get(code)
+    return index
+
+
+def load_pro_record(
+    pro_dir: Path, index: dict[str, DeviceHit | None], lcsc: str
+) -> ComponentRecord | None:
+    """Assemble one part from the Pro fixtures as the plugin's cache would, or None when unrecorded.
+
+    A code the batch was asked about but did not know is ``none``; a footprint that
+    answered nothing makes the part ``none`` too; a missing symbol file leaves the
+    part unrecorded, a symbol that answered nothing leaves it without pins.
+    """
+    if lcsc not in index:
+        return None
+    hit = index[lcsc]
+    if hit is None:
+        return ComponentRecord(lcsc=lcsc, status="none")
+    record = ComponentRecord(
+        lcsc=lcsc,
+        status="ok",
+        symbol_uuid=hit.symbol_uuid,
+        puuid=hit.puuid,
+        package_name=hit.package_name,
+        footprint_source="puuid-endpoint",
+    )
+    footprint_path = pro_dir / f"footprint_{hit.puuid}.json"
+    if not footprint_path.exists():
+        return None
+    footprint = parse_puuid_response(
+        json.loads(footprint_path.read_text(encoding="utf-8")), hit.puuid
+    )
+    if footprint.status != "ok":
+        return ComponentRecord(lcsc=lcsc, status="none")
+    record.package_name = footprint.package_name or hit.package_name
+    record.pads = footprint.pads
+    record.footprint_shapes = footprint.footprint_shapes
+    if hit.symbol_uuid:
+        symbol_path = pro_dir / f"symbol_{hit.symbol_uuid}.json"
+        if not symbol_path.exists():
+            return None
+        symbol = parse_symbol_response(
+            json.loads(symbol_path.read_text(encoding="utf-8")), hit.symbol_uuid
+        )
+        if symbol.status == "ok":
+            record.symbol_pins = symbol.pins
+            record.symbol_shapes = symbol.shapes
+    return record
+
+
 def evaluate_footprints(
-    footprints: list[KiCadFootprint], fixtures: Path, flip_y: bool | None = None
+    footprints: list[KiCadFootprint],
+    fixtures: Path,
+    flip_y: bool | None = None,
+    pro_fixtures: Path | None = None,
 ) -> list[dict]:
     """Resolve every footprint with an LCSC field; each row keeps the board facts and the verdict.
 
     ``flip_y`` None uses the plugin's own ``FLIP_EASYEDA_Y`` constant, so the gate
     tests the convention the plugin ships; ``--flip-y`` overrides it for calibration.
+    ``pro_fixtures`` reads the parts from the Pro-host recordings instead.
     """
+    index = load_pro_index(pro_fixtures) if pro_fixtures is not None else None
     rows: list[dict] = []
     for fp in footprints:
         if not fp.lcsc:
@@ -86,7 +164,10 @@ def evaluate_footprints(
             "package": "",
             "verdict": None,
         }
-        record = load_record(fixtures, fp.lcsc)
+        if pro_fixtures is not None and index is not None:
+            record = load_pro_record(pro_fixtures, index, fp.lcsc)
+        else:
+            record = load_record(fixtures, fp.lcsc)
         if record is not None:
             pads = footprint_pads(fp)
             if fp.is_bottom:
@@ -111,7 +192,12 @@ def reference_key(reference: str) -> tuple:
     return (letters.upper(), int(digits) if digits else -1, rest)
 
 
-def evaluate(board: Path, fixtures: Path, flip_y: bool | None = None) -> list[dict]:
+def evaluate(
+    board: Path,
+    fixtures: Path,
+    flip_y: bool | None = None,
+    pro_fixtures: Path | None = None,
+) -> list[dict]:
     """Parse the board file and evaluate it, rows in reference order.
 
     pcbnew writes footprints in the order of their fresh internal ids, so a
@@ -121,7 +207,7 @@ def evaluate(board: Path, fixtures: Path, flip_y: bool | None = None) -> list[di
     footprints = sorted(
         parse_kicad_pcb(str(board)), key=lambda fp: reference_key(fp.reference)
     )
-    return evaluate_footprints(footprints, fixtures, flip_y)
+    return evaluate_footprints(footprints, fixtures, flip_y, pro_fixtures)
 
 
 def load_truth(path: Path) -> dict[str, str]:
@@ -236,8 +322,15 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="also write the table (without the truth summary) to this file",
     )
+    parser.add_argument(
+        "--pro-fixtures",
+        type=Path,
+        help="read the parts from Pro-host recordings (devices_*, footprint_*, symbol_*) instead",
+    )
     args = parser.parse_args(argv)
-    rows = evaluate(args.board, args.fixtures, True if args.flip_y else None)
+    rows = evaluate(
+        args.board, args.fixtures, True if args.flip_y else None, args.pro_fixtures
+    )
     table = format_rows(rows)
     print(table)
     if args.report:
