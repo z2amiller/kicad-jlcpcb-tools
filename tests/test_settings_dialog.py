@@ -227,6 +227,7 @@ _BOOLEAN_SETTINGS = {
     "stock_concern_setting": ("highlighting", "stock_concern"),
     "highlight_matches_setting": ("highlighting", "matches"),
     "bom_estimator_show_setting": ("general", "bom_estimator_show"),
+    "jlcfootprint_enabled_setting": ("jlcfootprint", "enabled"),
     "part_preferences_remember_lcsc_assignments_setting": (
         "part_preferences",
         "remember_lcsc_assignments",
@@ -254,6 +255,7 @@ _EXPECTED_LABELS = {
     "simplify_stock_setting": "Simplify stock",
     "stock_concern_setting": "Highlight stock concern",
     "bom_estimator_show_setting": "Show BOM cost estimator",
+    "jlcfootprint_enabled_setting": "Use JLC footprint data for rotations",
     "part_preferences_remember_lcsc_assignments_setting": "Remember my part preferences",
     "part_preferences_fill_empty_lcsc_assignments_on_open_setting": (
         "Parts preferences fill in empty LCSC assignments"
@@ -273,6 +275,7 @@ def _settings(flag: bool) -> dict[str, dict[str, Any]]:
         "gerber": {},
         "general": {},
         "highlighting": {},
+        "jlcfootprint": {},
         "part_preferences": {},
         "library": {"selected_library": "current-parts", "data_path": ""},
         "hooks": {"pre_script": "", "post_script": "", "timeout_seconds": 30},
