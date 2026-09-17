@@ -15,6 +15,7 @@ _PRESERVED_FILES = [
     r"plugins/[^/]+/jlcpcb/corrections\.db$",
     r"plugins/[^/]+/jlcpcb/mappings\.db$",
     r"plugins/[^/]+/jlcpcb/global\.db$",
+    r"plugins/[^/]+/jlcpcb/jlcfootprint-cache\.db$",
 ]
 
 
