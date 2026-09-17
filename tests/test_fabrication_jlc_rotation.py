@@ -48,6 +48,7 @@ def decision(
     note="",
     pending=False,
     lcsc="C123",
+    body_excess=None,
 ):
     """Return what the controller's decision carries for one reference."""
     return SimpleNamespace(
@@ -59,6 +60,7 @@ def decision(
         note=note,
         pending=pending,
         lcsc=lcsc,
+        body_excess=body_excess,
     )
 
 
@@ -176,4 +178,14 @@ def test_decision_for_another_part_keeps_the_raw_angle(modules, library, tmp_pat
         None,
     )
     assert "the check saw C999 but the project has C123" in report["U1"].note
+    assert report["U1"].body_excess is None
     assert report["U2"].source == "override" or report["U2"].correction == 270
+
+
+def test_the_body_caveat_reaches_the_rotation_report(modules, library, tmp_path):
+    """A decision's body excess (spec 16.6 item 4) rides on its CPL row for the summary."""
+    fabrication = make_fabrication(modules, library, tmp_path)
+    fabrication.prepare_cpl(None, {"U1": decision(0, body_excess=0.9)})
+    report = {row.reference: row for row in fabrication.rotation_report}
+    assert report["U1"].body_excess == 0.9
+    assert report["U2"].body_excess is None
