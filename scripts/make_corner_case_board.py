@@ -1,16 +1,18 @@
-"""Generate the corner-case validation board (run with KiCad's bundled Python).
+"""Generate a corner-case validation board (run with KiCad's bundled Python).
 
     /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \
-        scripts/make_corner_case_board.py
+        scripts/make_corner_case_board.py [--cases CSV] [--blank BOARD] [--out BOARD]
 
-Reads scripts/corner_case/cases.csv, loads each footprint from KiCad's library,
-places the parts on a grid at the requested rotation and side, sets the LCSC
-field and any pin functions, draws the outline and writes
-scripts/corner_case/corner_case.kicad_pcb.  Spec section 11.
+Reads the cases CSV (scripts/corner_case/cases.csv by default), loads each
+footprint from KiCad's library, places the parts on a grid at the requested
+rotation and side, sets the LCSC field and any pin functions, draws the outline
+and writes the board (scripts/corner_case/corner_case.kicad_pcb by default).
+Spec section 11; the M3 board is scripts/corner_case_m3/ (spec 16.6).
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 from pathlib import Path
 import sys
@@ -27,9 +29,9 @@ PITCH_MM = 12.0
 MARGIN_MM = 10.0
 
 
-def load_cases() -> list[dict]:
-    """Return the non-empty rows of cases.csv."""
-    with CASES.open(newline="", encoding="utf-8") as handle:
+def load_cases(cases: Path = CASES) -> list[dict]:
+    """Return the non-empty rows of the cases CSV."""
+    with cases.open(newline="", encoding="utf-8") as handle:
         return [row for row in csv.DictReader(handle) if row["reference"].strip()]
 
 
@@ -74,17 +76,25 @@ def outline(board, count: int) -> None:
     board.Add(rect)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Generate the board."""
-    board = pcbnew.LoadBoard(str(BLANK))
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--cases", type=Path, default=CASES)
+    parser.add_argument("--blank", type=Path, default=BLANK)
+    parser.add_argument("--out", type=Path, default=OUT)
+    args = parser.parse_args(argv)
+    board = pcbnew.LoadBoard(str(args.blank))
     if board is None:
-        raise SystemExit(f"could not load {BLANK}")
-    cases = load_cases()
+        raise SystemExit(f"could not load {args.blank}")
+    cases = load_cases(args.cases)
     for index, row in enumerate(cases):
         place(board, row, index)
     outline(board, len(cases))
-    pcbnew.SaveBoard(str(OUT), board)
-    print(f"wrote {OUT} with {len(cases)} parts")
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    pcbnew.SaveBoard(str(args.out), board)
+    print(f"wrote {args.out} with {len(cases)} parts")
     return 0
 
 
