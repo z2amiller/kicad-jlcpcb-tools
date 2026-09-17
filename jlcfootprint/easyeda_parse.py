@@ -257,3 +257,140 @@ def parse_component_response(body: Any, lcsc: str) -> ComponentRecord:
         record.status = "error"
         record.error = "no puuid in response"
     return record
+
+
+# ---------------------------------------------------------------------------
+# EasyEDA Pro footprint text: the per-uuid endpoint and the crawl's stored copies
+# ---------------------------------------------------------------------------
+
+# Pro footprint text is in mils with Y up; the classic canvas unit is 10 mil with Y
+# down.  Pro pads are converted to classic canvas units when parsed, so every consumer
+# sees one raw pad form.  Checked on C2132, C46749, C6186, C19213, C7950 and C88744
+# against the classic responses for the same footprints (2026-09-16).
+PRO_MILS_PER_CANVAS_UNIT = 10.0
+
+
+@dataclass
+class FootprintRecord:
+    """One footprint on its own: what the per-uuid endpoint or a seed row yields.
+
+    ``pads`` use the same raw form as ``ComponentRecord.pads``: classic canvas units,
+    Y down, origin subtracted.
+    """
+
+    puuid: str
+    status: str = "error"  # 'ok' | 'none' | 'error'
+    error: str = ""
+    package_name: str = ""
+    pads: list[dict] = field(default_factory=list)
+    footprint_shapes: list[str] = field(default_factory=list)
+    footprint_source: str = "puuid-endpoint"
+    skipped_shapes: int = 0
+
+
+def pro_shape_lines(text: str) -> list[str]:
+    """Split Pro footprint text into its non-empty record lines."""
+    return [line.strip() for line in text.split("\n") if line.strip()]
+
+
+def parse_pro_pads(lines: list[str]) -> tuple[list[dict], int]:
+    """Return raw pads from Pro ``["PAD", ...]`` records, plus the count of unreadable ones.
+
+    A record is ``["PAD", id, net, "", layer, number, x, y, rotation, hole, [shape,
+    width, height, ...], ...]`` in mils with Y up.  The result is in classic canvas
+    units with Y down, the form :func:`jlcfootprint.geometry.easyeda_pads_to_mm`
+    converts; the hole is kept as a radius like the classic ``PAD~`` field.
+    """
+    pads: list[dict] = []
+    skipped = 0
+    for line in lines:
+        if not isinstance(line, str) or not line.startswith('["PAD"'):
+            continue
+        try:
+            parts = json.loads(line)
+            number = str(parts[5]).strip()
+            x = float(parts[6]) / PRO_MILS_PER_CANVAS_UNIT
+            y = -float(parts[7]) / PRO_MILS_PER_CANVAS_UNIT
+            rotation = float(parts[8] or 0.0)
+            layer = str(parts[4])
+            hole = parts[9]
+            shape = parts[10]
+            shape_name = str(shape[0])
+            width = float(shape[1]) / PRO_MILS_PER_CANVAS_UNIT
+            height = float(shape[2]) / PRO_MILS_PER_CANVAS_UNIT
+        except (ValueError, TypeError, IndexError, KeyError):
+            skipped += 1
+            continue
+        hole_radius = 0.0
+        if isinstance(hole, list) and len(hole) > 1:
+            try:
+                hole_radius = float(hole[1]) / PRO_MILS_PER_CANVAS_UNIT / 2.0
+            except (ValueError, TypeError):
+                hole_radius = 0.0
+        pads.append(
+            {
+                "number": number,
+                "x": x,
+                "y": y,
+                "w": width,
+                "h": height,
+                "rotation": rotation,
+                "shape": shape_name,
+                "layer": layer,
+                "hole": hole_radius,
+            }
+        )
+    return pads, skipped
+
+
+def parse_puuid_response(body: Any, puuid: str) -> FootprintRecord:
+    """Classify and parse one per-uuid response (``pro.easyeda.com/api/components/{puuid}``).
+
+    The endpoint answers with ``result.dataStr`` as Pro text (newline-delimited JSON
+    arrays) or, for older footprints, as the classic dict with ``head`` and ``shape``.
+    Status rules follow :func:`parse_component_response`; malformed input never raises.
+    """
+    record = FootprintRecord(puuid=puuid)
+    if not isinstance(body, dict):
+        record.error = "response is not a JSON object"
+        return record
+    if body.get("success") is False:
+        code = body.get("code")
+        record.error = f"code {code}: {body.get('message', '')}".strip(": ")
+        record.status = "none" if code in _NOT_FOUND_CODES else "error"
+        return record
+    result = body.get("result")
+    if result in (None, {}, [], ""):
+        record.status = "none"
+        return record
+    if not isinstance(result, dict):
+        record.error = "result is not an object"
+        return record
+    data_str = result.get("dataStr")
+    record.package_name = str(result.get("display_title") or result.get("title") or "")
+    if isinstance(data_str, str) and data_str.lstrip().startswith("["):
+        record.footprint_shapes = pro_shape_lines(data_str)
+        record.pads, record.skipped_shapes = parse_pro_pads(record.footprint_shapes)
+    else:
+        package_data = _decode_data_str(data_str)
+        head = _dict(package_data.get("head"))
+        record.package_name = record.package_name or str(
+            _dict(head.get("c_para")).get("package") or ""
+        )
+        record.footprint_shapes = _shape_list(package_data)
+        try:
+            origin_x = float(head.get("x", 0.0) or 0.0)
+            origin_y = float(head.get("y", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            origin_x = origin_y = 0.0
+            record.error = (
+                "footprint origin unreadable; pads left in canvas coordinates"
+            )
+        record.pads, record.skipped_shapes = parse_footprint_pads(
+            record.footprint_shapes, origin_x, origin_y
+        )
+    if not record.pads:
+        record.error = record.error or "no readable pads in the footprint"
+        return record
+    record.status = "ok"
+    return record
