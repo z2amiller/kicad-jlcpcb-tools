@@ -6,10 +6,11 @@ Needs KiCad's bundled Python (it imports pcbnew):
         scripts/check_live_adapter.py scripts/corner_case/corner_case.kicad_pcb
 
 For every footprint the adapter's pads (footprint frame, bottom parts un-mirrored,
-pad rotation modulo 180) must equal the validator's file pads and give the same verdict
-key; where a recorded EasyEDA response exists the resolver must return the same
-status, fit and rotation from both.  Exits 1 on any difference.  This is how the
-adapter's frame was confirmed on 2026-09-16 (47 of 47 parts).
+pad rotation modulo 180) and its courtyard box must equal the validator's file pads
+and box and give the same verdict key; where a recorded EasyEDA response exists the
+resolver must return the same status, fit and rotation from both.  Exits 1 on any
+difference.  This is how the adapter's frame was confirmed on 2026-09-16 (47 of 47
+parts) and its courtyard reader on 2026-09-17.
 """
 
 from __future__ import annotations
@@ -25,7 +26,12 @@ if str(ROOT) not in sys.path:
 
 from jlcfootprint.boardfile import footprint_pads, parse_kicad_pcb  # noqa: E402
 from jlcfootprint.easyeda_parse import parse_component_response  # noqa: E402
-from jlcfootprint.geometry import Pad, easyeda_pads_to_mm, mirror_y  # noqa: E402
+from jlcfootprint.geometry import (  # noqa: E402
+    Pad,
+    easyeda_pads_to_mm,
+    mirror_box,
+    mirror_y,
+)
 from jlcfootprint.kicad_adapter import board_parts, verdict_key  # noqa: E402
 from jlcfootprint.resolver import resolve  # noqa: E402
 
@@ -69,8 +75,10 @@ def main(argv: list[str] | None = None) -> int:
             mismatches += 1
             continue
         pads = footprint_pads(fp)
+        courtyard = fp.courtyard
         if fp.is_bottom:
             pads = mirror_y(pads)
+            courtyard = None if courtyard is None else mirror_box(courtyard)
         if (
             pad_key(pads) != pad_key(part.pads)
             or verdict_key(pads) != part.footprint_hash
@@ -80,6 +88,15 @@ def main(argv: list[str] | None = None) -> int:
             for file_row, live_row in zip(pad_key(pads), pad_key(part.pads)):
                 if file_row != live_row:
                     print(f"   file {file_row}\n   live {live_row}")
+        if (courtyard is None) != (part.courtyard is None) or (
+            courtyard is not None
+            and any(abs(a - b) > 1e-4 for a, b in zip(courtyard, part.courtyard))
+        ):
+            mismatches += 1
+            print(
+                f"COURTYARD {reference} {fp.footprint_name} bottom={fp.is_bottom}:"
+                f" file {courtyard} live {part.courtyard}"
+            )
         fixture = args.fixtures / f"{fp.lcsc}.json"
         if not fp.lcsc or not fixture.exists():
             continue
