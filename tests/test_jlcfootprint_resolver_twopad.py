@@ -244,7 +244,8 @@ def test_polarized_cap_fd_is_0_by_convention_and_rd_is_180():
         jlc,
         [],
     )
-    assert (rd.rotation, rd.polarity_light, rd.name_rotation) == (180, "unknown", 180)
+    # RD: JLC's pad 1 is the negative end, KiCad's pad 1 the positive: the marker warning.
+    assert (rd.rotation, rd.polarity_light, rd.name_rotation) == (180, "yellow", 180)
 
 
 def test_inconsistent_token_and_label_is_red():

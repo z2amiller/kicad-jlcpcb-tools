@@ -238,35 +238,31 @@ def label_reference_pad(
     return pad1 if pin1_is_reference else other
 
 
-def drawing_reference_pad(
+def drawing_reference_pads(
     jlc_pads: list[Pad], marks: DrawingMarks | None, reference: str
-) -> tuple[Pad | None, str]:
-    """Return the EasyEDA pad carrying ``reference`` from the drawings' ``+`` marks.
+) -> tuple[Pad | None, Pad | None]:
+    """Return the EasyEDA pad carrying ``reference`` per the symbol's and the footprint's ``+``.
 
     The symbol's ``+`` names a pin number and the footprint's ``+`` a pad number
     (:mod:`jlcfootprint.drawing`); both name the positive terminal, the anode of a
-    diode.  Returns the pad and which drawings said so: ``both``, ``footprint`` or
-    ``symbol``; ``(None, "")`` when neither drawing has a mark; ``(None,
-    "conflict")`` when the two marks name different pads.
+    diode.  A drawing without a mark gives None.  The two come back apart so that
+    each casts its own vote in the resolver (spec 16.6): two marks naming
+    different pads are one disagreement more, outvoted when the token and the
+    label side with one of them and a tie otherwise.
     """
     if marks is None:
-        return None, ""
+        return None, None
     by_number = {pad.number: pad for pad in jlc_pads}
-    footprint = by_number.get(marks.positive_pad) if marks.positive_pad else None
-    symbol = by_number.get(marks.positive_pin) if marks.positive_pin else None
-    if footprint is not None and symbol is not None and footprint is not symbol:
-        return None, "conflict"
-    positive = footprint if footprint is not None else symbol
-    if positive is None:
-        return None, ""
-    if footprint is not None and symbol is not None:
-        source = "both"
-    else:
-        source = "footprint" if footprint is not None else "symbol"
-    if reference in SAME_MEANING["positive"]:
-        return positive, source
-    other = next((pad for pad in jlc_pads if pad is not positive), None)
-    return other, source
+
+    def carrying(number: str | None) -> Pad | None:
+        positive = by_number.get(number) if number else None
+        if positive is None:
+            return None
+        if reference in SAME_MEANING["positive"]:
+            return positive
+        return next((pad for pad in jlc_pads if pad is not positive), None)
+
+    return carrying(marks.positive_pin), carrying(marks.positive_pad)
 
 
 def pin1_meaning(pads: list[Pad], kind: str, diode: bool = False) -> str | None:
