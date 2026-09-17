@@ -319,3 +319,16 @@ def test_seed_rows_never_need_a_symbol(cache):
         )
     assert cache.needs("C9") == set()
     assert not cache.needs_fetch("C9")
+
+
+def test_stored_origin_reads_the_classic_head_and_is_zero_otherwise():
+    """A classic_shapes row keeps its drawing's head x/y; Pro and classic pad rows have none."""
+    from jlcfootprint.cache import stored_origin
+
+    assert stored_origin('{"x": 4000, "y": 3000, "shapes": []}', "classic_shapes") == (
+        4000.0,
+        3000.0,
+    )
+    assert stored_origin("[]", "pro") == (0.0, 0.0)
+    assert stored_origin("[]", "classic") == (0.0, 0.0)
+    assert stored_origin('{"x": "bad"}', "classic_shapes") == (0.0, 0.0)

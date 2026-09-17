@@ -50,6 +50,8 @@ class KiCadFootprint:
     layer: str  # e.g. "F.Cu" (top) or "B.Cu" (bottom)
     lcsc: str | None  # any lcsc/jlc-named property holding C<digits>
     pads: list[KiCadPad] = field(default_factory=list)
+    # The courtyard's box in the footprint frame (mm), None without a courtyard.
+    courtyard: tuple[float, float, float, float] | None = None
 
     @property
     def is_bottom(self) -> bool:
@@ -233,6 +235,55 @@ def _parse_pad(pad_node: list[object]) -> KiCadPad | None:
     )
 
 
+_COURTYARD_LAYERS = ("F.CrtYd", "B.CrtYd")
+_GRAPHIC_TAGS = ("fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly")
+
+
+def _courtyard_box(fp_node: list[object]) -> tuple[float, float, float, float] | None:
+    """Return the box of the footprint's courtyard graphics (their centrelines), or None.
+
+    Lines, rectangles and polygons contribute their points, arcs their three
+    points and circles their full extent; an arc's bulge beyond its points is
+    ignored, which errs on the small side.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    for child in _children(fp_node):
+        tag = _tag(child)
+        if tag not in _GRAPHIC_TAGS:
+            continue
+        layer_node = _find_direct(child, "layer")
+        if layer_node is None or _str_arg(layer_node) not in _COURTYARD_LAYERS:
+            continue
+        if tag == "fp_circle":
+            centre = _find_direct(child, "center")
+            end = _find_direct(child, "end")
+            cx, cy = _float_arg(centre, 1), _float_arg(centre, 2)
+            ex, ey = _float_arg(end, 1), _float_arg(end, 2)
+            if None in (cx, cy, ex, ey):
+                continue
+            radius = ((ex - cx) ** 2 + (ey - cy) ** 2) ** 0.5
+            xs.extend((cx - radius, cx + radius))
+            ys.extend((cy - radius, cy + radius))
+            continue
+        points: list[list[object]] = []
+        for key in ("start", "mid", "end"):
+            node = _find_direct(child, key)
+            if node is not None:
+                points.append(node)
+        pts = _find_direct(child, "pts")
+        if pts is not None:
+            points.extend(_find_all_direct(pts, "xy"))
+        for node in points:
+            x, y = _float_arg(node, 1), _float_arg(node, 2)
+            if x is not None and y is not None:
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        return None
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
 def _parse_footprint(fp_node: list[object]) -> KiCadFootprint | None:
     """Parse a (footprint ...) node into a KiCadFootprint."""
     # fp_node[0] = "footprint", fp_node[1] = library+name string
@@ -296,6 +347,7 @@ def _parse_footprint(fp_node: list[object]) -> KiCadFootprint | None:
         layer=layer,
         lcsc=lcsc,
         pads=pads,
+        courtyard=_courtyard_box(fp_node),
     )
 
 

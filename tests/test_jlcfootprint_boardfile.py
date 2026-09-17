@@ -67,3 +67,45 @@ def test_pads_carry_pin_functions_and_relative_rotation():
     assert [p.number for p in q1_pads] == ["1", "2", "3"]
     assert q1_pads[0].pin_function == ""
     assert q1_pads[0].rotation == 0.0
+
+
+COURTYARD_TEXT = """(kicad_pcb (footprint "Lib:Part" (layer "F.Cu") (at 10 20 90)
+  (property "Reference" "C9")
+  (fp_line (start -1 -2) (end 1 -2) (layer "F.CrtYd"))
+  (fp_rect (start -1.5 -0.5) (end 1.5 0.5) (layer "F.CrtYd"))
+  (fp_circle (center 0 1) (end 0.5 1) (layer "F.CrtYd"))
+  (fp_poly (pts (xy 0 2.5) (xy 0.2 2.6)) (layer "F.CrtYd"))
+  (fp_arc (start -1 0) (mid -1.2 0.5) (end -1 1) (layer "F.CrtYd"))
+  (fp_line (start -9 -9) (end 9 9) (layer "F.SilkS"))
+  (pad "1" smd rect (at -1 0) (size 1 1) (layers "F.Cu"))
+))"""
+
+
+def test_courtyard_box_covers_lines_rectangles_circles_polygons_and_arcs():
+    """Every courtyard graphic's points bound the box; silkscreen is ignored."""
+    from jlcfootprint.boardfile import parse_kicad_pcb_text
+
+    (footprint,) = parse_kicad_pcb_text(COURTYARD_TEXT)
+    assert footprint.courtyard == (-1.5, -2.0, 1.5, 2.6)
+    bare = COURTYARD_TEXT.split("\n")
+    (plain,) = parse_kicad_pcb_text(
+        "\n".join(line for line in bare if "CrtYd" not in line)
+    )
+    assert plain.courtyard is None
+
+
+def test_corner_case_board_courtyards_match_the_library():
+    """C3 (CP_Elec_6.3x7.7) reads its 9.4 x 7.1 mm courtyard from the board file."""
+    from pathlib import Path
+
+    from jlcfootprint.boardfile import parse_kicad_pcb
+
+    board = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "corner_case"
+        / "corner_case.kicad_pcb"
+    )
+    by_reference = {fp.reference: fp for fp in parse_kicad_pcb(str(board))}
+    assert by_reference["C3"].courtyard == (-4.7, -3.55, 4.7, 3.55)
+    assert by_reference["Q5"].courtyard is not None

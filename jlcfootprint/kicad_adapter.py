@@ -19,7 +19,7 @@ import math
 import re
 from typing import Any
 
-from .geometry import Pad, mirror_y, pad_hash
+from .geometry import Pad, mirror_box, mirror_y, pad_hash
 from .polarity import normalise_function
 
 # pcbnew's PAD_SHAPE and PAD_ATTRIB enumerations (KiCad 7 to 10) for boards read
@@ -36,6 +36,8 @@ SHAPE_NAMES = {
 CUSTOM_SHAPE = 6
 NPTH_ATTRIBUTE = 3
 FRONT_COPPER = 0
+# Courtyard layer names as pcbnew reports them (KiCad 7 to 10) and as files spell them.
+COURTYARD_LAYER_NAMES = ("F.Courtyard", "B.Courtyard", "F.CrtYd", "B.CrtYd")
 
 _LCSC_FIELD = re.compile(r"lcsc|jlc", re.IGNORECASE)
 _LCSC_VALUE = re.compile(r"^C\d+$")
@@ -53,6 +55,8 @@ class BoardPart:
     pads: list[Pad] = field(default_factory=list)
     footprint_hash: str = ""  # verdict_key(pads): geometry plus pin functions
     value: str = ""
+    # The courtyard's box in the footprint frame (mm, un-mirrored on the bottom).
+    courtyard: tuple[float, float, float, float] | None = None
 
 
 def verdict_key(pads: list[Pad]) -> str:
@@ -167,6 +171,59 @@ def footprint_pads(
     return pads
 
 
+def _on_courtyard(item: Any, pcbnew: Any = None) -> bool:
+    """Return True for a graphic item on a courtyard layer."""
+    ids = tuple(
+        getattr(pcbnew, name)
+        for name in ("F_CrtYd", "B_CrtYd")
+        if hasattr(pcbnew, name)
+    )
+    if ids:
+        return item.GetLayer() in ids
+    name = getattr(item, "GetLayerName", None)
+    return callable(name) and str(name()) in COURTYARD_LAYER_NAMES
+
+
+def footprint_courtyard(
+    footprint: Any, to_mm: Callable[[float], float], pcbnew: Any = None
+) -> tuple[float, float, float, float] | None:
+    """Return the courtyard's box in the footprint's own frame, un-mirrored on the bottom.
+
+    pcbnew gives the graphics in board coordinates with the stroke in their
+    bounding boxes; the box is shrunk by half the stroke to the centrelines (what
+    the file parser reads) and its corners are taken back into the footprint frame
+    with the pad fallback's rotation.  A placement off a multiple of 90 degrees
+    gives a box on the large side, which only hides a caveat.  None without a
+    courtyard or on a footprint double without graphics.
+    """
+    items = getattr(footprint, "GraphicalItems", None)
+    if not callable(items):
+        return None
+    origin = footprint.GetPosition()
+    theta = math.radians(_degrees(footprint.GetOrientation()))
+    cos, sin = math.cos(theta), math.sin(theta)
+    xs: list[float] = []
+    ys: list[float] = []
+    for item in items():
+        if not _on_courtyard(item, pcbnew):
+            continue
+        box = item.GetBoundingBox()
+        width = getattr(item, "GetWidth", None)
+        half = float(width()) / 2.0 if callable(width) else 0.0
+        left, top = float(box.GetLeft()) + half, float(box.GetTop()) + half
+        right, bottom = float(box.GetRight()) - half, float(box.GetBottom()) - half
+        for bx, by in ((left, top), (right, top), (right, bottom), (left, bottom)):
+            dx, dy = bx - float(origin.x), by - float(origin.y)
+            xs.append(dx * cos - dy * sin)
+            ys.append(dx * sin + dy * cos)
+    if not xs:
+        return None
+    result = (to_mm(min(xs)), to_mm(min(ys)), to_mm(max(xs)), to_mm(max(ys)))
+    if footprint.GetLayer() != FRONT_COPPER:
+        result = mirror_box(result)
+    return result
+
+
 def board_part(
     footprint: Any,
     to_mm: Callable[[float], float],
@@ -185,6 +242,7 @@ def board_part(
         pads=pads,
         footprint_hash=verdict_key(pads),
         value=str(footprint.GetValue()),
+        courtyard=footprint_courtyard(footprint, to_mm, pcbnew),
     )
 
 
