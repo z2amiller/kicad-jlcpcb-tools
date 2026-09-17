@@ -7,8 +7,11 @@ not know, then the footprint and symbol documents their rows still lack.  Result
 arrive on the worker thread: each piece goes into the cache, and once a part's row
 is complete every board part with that LCSC is resolved, its verdict stored, and
 one event posted to the main thread with the session generation so a stale board
-reload can drop it.  The CPL path asks :meth:`FootprintCheck.decisions` for one
-rotation decision per reference.  Stdlib only; wx and pcbnew stay in the caller.
+reload can drop it.  One lock keeps each scan step and each result handler whole
+with respect to the other, so a scan never sees a half-handled result and never
+queues a part behind a request that has just answered.  The CPL path asks
+:meth:`FootprintCheck.decisions` for one rotation decision per reference.  Stdlib
+only; wx and pcbnew stay in the caller.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 import logging
+import threading
 import time
 from typing import Any
 
@@ -116,7 +120,9 @@ class FootprintCheck:
         self.generation = 0
         self.parts: dict[str, BoardPart] = {}
         # Which parts wait on which request: ('lookup', lcsc) or (kind, uuid) -> LCSCs.
+        # Read and written under the lock by the scan (main thread) and the handlers.
         self.waiting: dict[tuple[str, str], set[str]] = {}
+        self.lock = threading.RLock()
         # Shared buckets keep the request rate across restarts of the check in one session.
         self.worker = worker or FetchWorker(
             self._lookup,
@@ -166,29 +172,10 @@ class FootprintCheck:
             if not part.lcsc:
                 summary.without_lcsc += 1
                 continue
-            stored = self.verdicts.get(part.lcsc, part.footprint_hash)
-            needed = self.cache.needs(part.lcsc, self.now())
-            # A verdict is final only while its cache row is: an error row is fetched
-            # again next session and a ``none`` row after thirty days (spec 5.1).
-            if stored is not None and stored.status != PENDING and not needed:
-                summary.already_resolved += 1
-                continue
-            if not needed:
-                cached = self.cache.part(part.lcsc)
-                if cached is not None:
-                    self._resolve_and_store(part, cached)
-                    summary.resolved_from_cache += 1
-                    continue
-                needed = {"lookup"}
-            if part.lcsc in self.pending_lcscs():
-                # Queued or in flight already: that request resolves this part too, and
-                # marking it pending here could overwrite a verdict saved meanwhile.
-                continue
-            self.verdicts.mark_pending(
-                part.lcsc, part.footprint_hash, part.footprint_name, self.now()
-            )
-            self._request(part.lcsc, needed)
-            summary.enqueued += 1
+            # One part at a time, atomically with the worker's result handlers, so a
+            # result landing mid-scan is seen whole: still pending, or complete.
+            with self.lock:
+                self._scan_part(part, summary)
         summary.pending = len(self.pending_lcscs())
         summary.queued = self.worker.counts()
         summary.estimate_s = self.worker.estimate_seconds()
@@ -199,8 +186,34 @@ class FootprintCheck:
         """Re-read the given references after an LCSC assignment and resolve or queue them."""
         return self.scan_board(references)
 
+    def _scan_part(self, part: BoardPart, summary: ScanSummary) -> None:
+        """Resolve one part from the cache or queue what it needs (the caller holds the lock)."""
+        stored = self.verdicts.get(part.lcsc, part.footprint_hash)
+        needed = self.cache.needs(part.lcsc, self.now())
+        # A verdict is final only while its cache row is: an error row is fetched
+        # again next session and a ``none`` row after thirty days (spec 5.1).
+        if stored is not None and stored.status != PENDING and not needed:
+            summary.already_resolved += 1
+            return
+        if not needed:
+            cached = self.cache.part(part.lcsc)
+            if cached is not None:
+                self._resolve_and_store(part, cached)
+                summary.resolved_from_cache += 1
+                return
+            needed = {"lookup"}
+        if part.lcsc in self.pending_lcscs():
+            # Queued or in flight already: that request resolves this part too, and
+            # marking it pending here could overwrite a verdict saved meanwhile.
+            return
+        self.verdicts.mark_pending(
+            part.lcsc, part.footprint_hash, part.footprint_name, self.now()
+        )
+        self._request(part.lcsc, needed)
+        summary.enqueued += 1
+
     def _request(self, lcsc: str, needed: set[str]) -> None:
-        """Queue what a part still needs and remember that the part waits on it."""
+        """Queue what a part still needs and remember that the part waits on it (lock held)."""
         if "lookup" in needed:
             self.worker.enqueue_lookups([lcsc])
             self.waiting.setdefault((LOOKUP, lcsc), set()).add(lcsc)
@@ -263,7 +276,7 @@ class FootprintCheck:
         return stored
 
     def _finish(self, lcsc: str) -> None:
-        """Worker thread: resolve every board part with this LCSC from the cache, post the event."""
+        """Resolve every board part with this LCSC from the cache and post the event (lock held)."""
         cached = self.cache.part(lcsc)
         if cached is not None:
             for part in list(self.parts.values()):
@@ -272,7 +285,7 @@ class FootprintCheck:
         self.post(lcsc, self.generation)
 
     def _fail(self, lcsc: str, error: str) -> None:
-        """Worker thread: record a transient failure so the next session tries again."""
+        """Record a failed fetch as an error row so the next session tries again (lock held)."""
         self.cache.store(
             ComponentRecord(lcsc=lcsc, status="error", error=error or "fetch failed"),
             self.now(),
@@ -303,47 +316,71 @@ class FootprintCheck:
         """Worker thread: store each hit's uuids and queue its documents; misses become none."""
         devices = getattr(lookup, "devices", None)
         error = str(getattr(lookup, "error", "") or "")
-        if devices is None or error:
+        with self.lock:
+            if devices is None or error:
+                logger.warning(
+                    "jlcfootprint: lookup of %d part(s) failed: %s; retried next session",
+                    len(codes),
+                    error or "lookup failed",
+                )
+                for code in codes:
+                    self.waiting.pop((LOOKUP, code), None)
+                    self._fail(code, error or "lookup failed")
+                return
+            logger.info(
+                "jlcfootprint: lookup answered: %d of %d part(s) known to EasyEDA",
+                sum(1 for code in codes if code in devices.hits),
+                len(codes),
+            )
             for code in codes:
                 self.waiting.pop((LOOKUP, code), None)
-                self._fail(code, error or "lookup failed")
-            return
-        for code in codes:
-            self.waiting.pop((LOOKUP, code), None)
-            hit = devices.hits.get(code)
-            if hit is None:
-                self.cache.store_lookup_miss(code, self.now())
-                self._finish(code)
-                continue
-            self.cache.store_lookup(code, hit.symbol_uuid, hit.puuid, self.now())
-            needed = self.cache.needs(code, self.now())
-            if needed:
-                self._request(code, needed)
-            else:
-                self._finish(code)
+                hit = devices.hits.get(code)
+                if hit is None:
+                    self.cache.store_lookup_miss(code, self.now())
+                    self._finish(code)
+                    continue
+                self.cache.store_lookup(code, hit.symbol_uuid, hit.puuid, self.now())
+                needed = self.cache.needs(code, self.now())
+                if needed:
+                    self._request(code, needed)
+                else:
+                    self._finish(code)
 
     def _on_document(self, kind: str, uuid: str, document: Any) -> None:
         """Worker thread: store the document, then resolve every part whose row is complete."""
-        lcscs = sorted(self.waiting.pop((kind, uuid), set()))
-        record = getattr(document, "record", None)
-        if record is None or getattr(document, "transient", False):
-            error = str(getattr(record, "error", "") or getattr(document, "error", ""))
-            for lcsc in lcscs:
-                self._fail(lcsc, error)
-            return
-        if kind == FOOTPRINT:
-            if record.status == "ok":
-                self.cache.store_footprint(record, self.now())
-            else:
-                # No footprint means nothing to align: the checkerboard case.
+        with self.lock:
+            lcscs = sorted(self.waiting.pop((kind, uuid), set()))
+            record = getattr(document, "record", None)
+            transient = bool(getattr(document, "transient", False))
+            if record is None or transient or record.status == "error":
+                # Transient or final, a failed document is never stored as an answer:
+                # the part gets an error row and the next session asks again.
+                error = str(
+                    getattr(record, "error", "") or getattr(document, "error", "")
+                )
+                logger.warning(
+                    "jlcfootprint: %s %s failed for %s: %s",
+                    kind,
+                    uuid,
+                    ", ".join(lcscs) or "no part",
+                    error or "fetch failed",
+                )
                 for lcsc in lcscs:
-                    self.cache.store_lookup_miss(lcsc, self.now())
-        else:
+                    self._fail(lcsc, error)
+                return
+            if kind == FOOTPRINT:
+                if record.status == "ok":
+                    self.cache.store_footprint(record, self.now())
+                else:
+                    # No footprint means nothing to align: the checkerboard case.
+                    for lcsc in lcscs:
+                        self.cache.store_lookup_miss(lcsc, self.now())
+            else:
+                for lcsc in lcscs:
+                    self.cache.store_symbol(lcsc, record, self.now())
             for lcsc in lcscs:
-                self.cache.store_symbol(lcsc, record, self.now())
-        for lcsc in lcscs:
-            if not self.cache.needs(lcsc, self.now()):
-                self._finish(lcsc)
+                if not self.cache.needs(lcsc, self.now()):
+                    self._finish(lcsc)
 
     def _on_tripped(self, message: str) -> None:
         if self.message is not None:
@@ -355,10 +392,11 @@ class FootprintCheck:
 
     def pending_lcscs(self) -> set[str]:
         """Return the LCSCs with a request queued or in flight."""
-        pending: set[str] = set()
-        for lcscs in self.waiting.values():
-            pending.update(lcscs)
-        return pending
+        with self.lock:
+            pending: set[str] = set()
+            for lcscs in self.waiting.values():
+                pending.update(lcscs)
+            return pending
 
     def pending_references(self) -> list[str]:
         """Return the references whose EasyEDA data is still queued or in flight."""
@@ -368,9 +406,13 @@ class FootprintCheck:
         )
 
     def queue_estimate(self) -> tuple[int, float]:
-        """Return the queued request count and roughly how long they take."""
+        """Return the outstanding requests (queued and in flight) and roughly how long they take.
+
+        A backoff the request in flight is sleeping through counts toward the time.
+        """
         counts = self.worker.counts()
-        return sum(counts.values()), self.worker.estimate_seconds()
+        active, backoff = self.worker.active()
+        return sum(counts.values()) + active, self.worker.estimate_seconds() + backoff
 
     def references_for(self, lcsc: str) -> list[str]:
         """Return the references currently carrying this LCSC."""

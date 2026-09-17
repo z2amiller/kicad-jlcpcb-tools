@@ -1,6 +1,7 @@
 """Tests for the EasyEDA Pro client with the network faked: the batch lookup, documents, backoff."""
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -173,16 +174,19 @@ def test_http_404_is_none_and_other_statuses_are_errors():
     assert (document.record.status, document.transient) == ("none", False)
 
 
-def test_rate_limit_backs_off_with_retry_after_then_the_ladder():
+def test_rate_limit_backs_off_with_retry_after_then_the_ladder(caplog):
     """403 honours Retry-After, otherwise waits 60, 120, 240 s, then gives up transiently."""
     network = Network(
         Response(403, headers={"Retry-After": "30"}),
         Response(403),
         Response(body=recorded_document("symbol", SYMBOL_UUID)),
     )
-    document = network.client().fetch_symbol(SYMBOL_UUID)
+    with caplog.at_level(logging.INFO, logger="jlcfootprint.easyeda_client"):
+        document = network.client().fetch_symbol(SYMBOL_UUID)
     assert document.record.status == "ok"
     assert network.waits == [30.0, BACKOFF_S[1]]
+    assert "HTTP 403 from EasyEDA; waiting 30 s" in caplog.text
+    assert "waiting 120 s" in caplog.text
     assert document.requests == 3 and network.tokens == 3
 
 
