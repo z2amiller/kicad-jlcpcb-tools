@@ -6,8 +6,8 @@ Needs KiCad's bundled Python (it imports pcbnew):
         scripts/check_live_adapter.py scripts/corner_case/corner_case.kicad_pcb
 
 For every footprint the adapter's pads (footprint frame, bottom parts un-mirrored,
-pad rotation modulo 180) must equal the validator's file pads and give the same pad
-hash; where a recorded EasyEDA response exists the resolver must return the same
+pad rotation modulo 180) must equal the validator's file pads and give the same verdict
+key; where a recorded EasyEDA response exists the resolver must return the same
 status, fit and rotation from both.  Exits 1 on any difference.  This is how the
 adapter's frame was confirmed on 2026-09-16 (47 of 47 parts).
 """
@@ -25,13 +25,8 @@ if str(ROOT) not in sys.path:
 
 from jlcfootprint.boardfile import footprint_pads, parse_kicad_pcb  # noqa: E402
 from jlcfootprint.easyeda_parse import parse_component_response  # noqa: E402
-from jlcfootprint.geometry import (  # noqa: E402
-    Pad,
-    easyeda_pads_to_mm,
-    mirror_y,
-    pad_hash,
-)
-from jlcfootprint.kicad_adapter import board_parts  # noqa: E402
+from jlcfootprint.geometry import Pad, easyeda_pads_to_mm, mirror_y  # noqa: E402
+from jlcfootprint.kicad_adapter import board_parts, verdict_key  # noqa: E402
 from jlcfootprint.resolver import resolve  # noqa: E402
 
 DEFAULT_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
@@ -76,7 +71,10 @@ def main(argv: list[str] | None = None) -> int:
         pads = footprint_pads(fp)
         if fp.is_bottom:
             pads = mirror_y(pads)
-        if pad_key(pads) != pad_key(part.pads) or pad_hash(pads) != part.footprint_hash:
+        if (
+            pad_key(pads) != pad_key(part.pads)
+            or verdict_key(pads) != part.footprint_hash
+        ):
             mismatches += 1
             print(f"MISMATCH {reference} {fp.footprint_name} bottom={fp.is_bottom}")
             for file_row, live_row in zip(pad_key(pads), pad_key(part.pads)):

@@ -431,6 +431,24 @@ class Fabrication:
         keep the raw angle.  The correction rule that would have matched is only noted.
         """
         raw = self._rotation_for_match(footprint, None)
+        stored_lcsc = str(part["lcsc"] or "")
+        if decision is not None and str(decision.lcsc or "") != stored_lcsc:
+            # The check judged another part than the one the BOM orders (the board
+            # field and the project database disagree); the raw angle is the safe value.
+            note = (
+                f"the check saw {decision.lcsc or 'no LCSC'} but the project has "
+                f"{stored_lcsc or 'none'}; raw angle kept"
+            )
+            self.logger.warning("JLC footprint check: %s: %s", part["reference"], note)
+            decision = SimpleNamespace(
+                rotation=None,
+                source="raw",
+                status="lcsc-mismatch",
+                polarity_light=None,
+                fit=None,
+                note=note,
+                pending=False,
+            )
         correction = None if decision is None else decision.rotation
         rotation = (
             raw if correction is None else self.rotate(footprint, raw, correction)
@@ -522,6 +540,8 @@ class Fabrication:
                 )
                 if decisions is None:
                     position = self._position_for_match(fp, position, match)
+                position = _checked_position(position.x, position.y)
+                if decisions is None:
                     rotation = self._rotation_for_match(fp, match)
                 else:
                     # The footprint check owns the rotation; offsets stay upstream's
@@ -529,7 +549,6 @@ class Fabrication:
                     rotation = self._rotation_for_decision(
                         fp, decisions.get(fp.GetReference()), match, part
                     )
-                position = _checked_position(position.x, position.y)
                 rows.append(
                     (
                         part["reference"],
@@ -546,11 +565,12 @@ class Fabrication:
                     )
                 )
             except (OverflowError, ValueError) as error:
-                source = (
-                    f"correction {match.correction.pattern!r}"
-                    if match
-                    else "no correction"
-                )
+                if decisions is not None:
+                    source = "JLC footprint check"
+                elif match:
+                    source = f"correction {match.correction.pattern!r}"
+                else:
+                    source = "no correction"
                 raise ValueError(
                     f"Cannot generate CPL for {fp.GetReference()} ({source}): {error}"
                 ) from error

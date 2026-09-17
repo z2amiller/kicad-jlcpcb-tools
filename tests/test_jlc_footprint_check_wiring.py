@@ -35,7 +35,11 @@ def _window(tmp_path):
             FakeFootprint(
                 "Q1",
                 [FakePad("1", -1, 0.95), FakePad("2", -1, -0.95), FakePad("3", 1, 0)],
-            )
+                fields={"LCSC": "C1"},
+            ),
+            FakeFootprint(
+                "R1", [FakePad("1", -1, 0), FakePad("2", 1, 0)], fields={"LCSC": "C77"}
+            ),
         ]
     )
     pcbnew = SimpleNamespace(
@@ -43,9 +47,10 @@ def _window(tmp_path):
     )
     with closing(sqlite3.connect(tmp_path / "project.db")) as con:
         con.execute("CREATE TABLE part_info (reference TEXT)")
+    stored = {"Q1": {"lcsc": "C2132"}}
     window = SimpleNamespace(
         library=SimpleNamespace(datadir=str(tmp_path)),
-        store=SimpleNamespace(dbfile=str(tmp_path / "project.db")),
+        store=SimpleNamespace(dbfile=str(tmp_path / "project.db"), get_part=stored.get),
         settings={},
     )
     return window, pcbnew
@@ -75,7 +80,16 @@ def test_create_footprint_check_uses_the_library_directory_and_the_project_db(
         }
     assert {"part_info", "footprint_verdict"} <= tables
     parts = check.read_board()
-    assert [(p.reference, p.lcsc, len(p.pads)) for p in parts] == [("Q1", "C2132", 3)]
+    # The project database's LCSC wins over the footprint field; the field is the fallback.
+    assert [(p.reference, p.lcsc, len(p.pads)) for p in parts] == [
+        ("Q1", "C2132", 3),
+        ("R1", "C77", 2),
+    ]
+    assert check.worker.bucket is module.shared_bucket()
+    assert (
+        module.create_footprint_check(window, pcbnew).worker.bucket
+        is check.worker.bucket
+    )
     check.post("C2132", 7)
     target, event = wx.PostEvent.call_args.args
     assert target is window

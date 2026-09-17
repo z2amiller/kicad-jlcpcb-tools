@@ -47,6 +47,7 @@ def decision(
     fit="fits",
     note="",
     pending=False,
+    lcsc="C123",
 ):
     """Return what the controller's decision carries for one reference."""
     return SimpleNamespace(
@@ -57,6 +58,7 @@ def decision(
         fit=fit,
         note=note,
         pending=pending,
+        lcsc=lcsc,
     )
 
 
@@ -158,3 +160,20 @@ def test_legacy_path_is_unchanged_without_decisions(modules, library, tmp_path):
     assert fabrication.rotation_report == []
     with pytest.raises(TypeError):
         fabrication.prepare_cpl(["not", "a", "tuple"])
+
+
+def test_decision_for_another_part_keeps_the_raw_angle(modules, library, tmp_path):
+    """A decision whose LCSC differs from the project's is refused: raw angle, noted."""
+    fabrication = make_fabrication(modules, library, tmp_path)
+    rows = fabrication.prepare_cpl(
+        None, {"U1": decision(180, lcsc="C999"), "U2": decision(270)}
+    )
+    assert [(row[0], row[5]) for row in rows] == [("U1", 0.0), ("U2", 0.0)]
+    report = {row.reference: row for row in fabrication.rotation_report}
+    assert (report["U1"].source, report["U1"].status, report["U1"].correction) == (
+        "raw",
+        "lcsc-mismatch",
+        None,
+    )
+    assert "the check saw C999 but the project has C123" in report["U1"].note
+    assert report["U2"].source == "override" or report["U2"].correction == 270

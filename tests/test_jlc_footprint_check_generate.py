@@ -234,19 +234,26 @@ def _generate_window(module, check, corrections=()):
 def test_generate_waits_collects_decisions_and_shows_the_summary(mainwindow):
     """With the check on, the CPL takes the decisions and the summary follows the CPL write."""
     module, facade = mainwindow
-    check = SimpleNamespace(decisions=MagicMock(return_value={"R1": "decision"}))
+    check = SimpleNamespace(
+        decisions=MagicMock(return_value={"R1": "decision"}), scan_board=MagicMock()
+    )
     window, steps = _generate_window(module, check, corrections=("rule",))
 
     module.JLCPCBTools.generate_fabrication_data(window)
 
+    check.scan_board.assert_called_once_with()
+    assert steps.index("Checking the board for unchecked parts") < steps.index(
+        "Waiting for JLC footprint data"
+    )
     facade["wait_for_pending_fetches"].assert_called_once_with(window, check)
     window.fabrication.prepare_cpl.assert_called_once_with(
         ("rule",), {"R1": "decision"}
     )
     facade["show_generate_summary"].assert_called_once_with(window, ["row"], True)
     assert steps.index("Summarising JLC footprint rotations") > steps.index(
-        "Generating placement file (CPL)"
+        "Generating BOM"
     )
+    assert steps[-1] == "Summarising JLC footprint rotations"
     assert "Validating corrections" not in steps
     window.update_correction_status.assert_called_once()
     window.generate_button.Enable.assert_any_call(True)
@@ -256,7 +263,9 @@ def test_generate_continues_raw_after_a_cancelled_wait_and_without_rules(mainwin
     """A cancelled wait is reported; unresolved rules only remove the summary's comparison."""
     module, facade = mainwindow
     facade["wait_for_pending_fetches"].return_value = False
-    check = SimpleNamespace(decisions=MagicMock(return_value={}))
+    check = SimpleNamespace(
+        decisions=MagicMock(return_value={}), scan_board=MagicMock()
+    )
     window, steps = _generate_window(module, check, corrections=None)
 
     module.JLCPCBTools.generate_fabrication_data(window)

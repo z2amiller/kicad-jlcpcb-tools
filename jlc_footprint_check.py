@@ -20,9 +20,21 @@ from .jlcfootprint.controller import FootprintCheck
 from .jlcfootprint.kicad_adapter import board_parts
 from .jlcfootprint.report import CplRotation, format_summary, summarise
 from .jlcfootprint.verdicts import VerdictStore
+from .jlcfootprint.worker import TokenBucket
 
 MESSAGE_TITLE = "JLC footprint check"
 POLL_MS = 200
+
+# One request budget per plugin session, however often the check is restarted.
+_shared_bucket: TokenBucket | None = None
+
+
+def shared_bucket() -> TokenBucket:
+    """Return the session's token bucket, created on first use."""
+    global _shared_bucket  # noqa: PLW0603
+    if _shared_bucket is None:
+        _shared_bucket = TokenBucket()
+    return _shared_bucket
 
 
 def is_footprint_check_enabled(settings: dict) -> bool:
@@ -40,9 +52,16 @@ def create_footprint_check(window: Any, pcbnew: Any) -> FootprintCheck:
     cache = Cache(cache_path(window.library.datadir))
     verdicts = VerdictStore(window.store.dbfile)
 
+    def lcsc_of(footprint):
+        # The BOM orders the project database's LCSC, which can differ from the
+        # footprint's field when the database has priority; judge that part.
+        part = window.store.get_part(str(footprint.GetReference()))
+        stored = str((part or {}).get("lcsc") or "").strip()
+        return stored or get_lcsc_value(footprint)
+
     def read_board():
         return board_parts(
-            pcbnew.GetBoard(), pcbnew=pcbnew, counts=count_pad, lcsc_of=get_lcsc_value
+            pcbnew.GetBoard(), pcbnew=pcbnew, counts=count_pad, lcsc_of=lcsc_of
         )
 
     def post(lcsc: str, generation: int) -> None:
@@ -53,7 +72,9 @@ def create_footprint_check(window: Any, pcbnew: Any) -> FootprintCheck:
             window, MessageEvent(title=MESSAGE_TITLE, text=text, style="warning")
         )
 
-    return FootprintCheck(cache, verdicts, read_board, post, message=message)
+    return FootprintCheck(
+        cache, verdicts, read_board, post, message=message, bucket=shared_bucket()
+    )
 
 
 def import_seed(window: Any, path: str) -> SeedImportResult:
