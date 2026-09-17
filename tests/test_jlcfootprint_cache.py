@@ -14,7 +14,12 @@ from jlcfootprint.cache import (
     Cache,
     pads_from_stored,
 )
-from jlcfootprint.easyeda_parse import ComponentRecord, FootprintRecord, SymbolPin
+from jlcfootprint.easyeda_parse import (
+    ComponentRecord,
+    FootprintRecord,
+    SymbolPin,
+    SymbolRecord,
+)
 
 from .jlcfootprint_support import FIXTURES, recorded
 from .test_jlcfootprint_pro_format import PRO_SOT23
@@ -236,3 +241,81 @@ def test_import_seed_rejects_another_schema_version(cache, tmp_path):
     with pytest.raises(ValueError, match="schema version"):
         cache.import_seed(seed.path)
     assert cache.counts() == {"parts": 0, "packages": 0}
+
+
+def test_needs_follows_a_live_row_through_its_pieces(cache):
+    """No row asks for a lookup; the uuids ask for their documents; a complete row asks for nothing."""
+    assert cache.needs("C1") == {"lookup"}
+    cache.store_lookup("C1", "sym-1", "fp-1", now=10)
+    assert cache.needs("C1") == {"footprint", "symbol"}
+    assert cache.needs_fetch("C1")
+    part = cache.part("C1")
+    assert (part.record.status, part.record.puuid, part.record.symbol_uuid) == (
+        "ok",
+        "fp-1",
+        "sym-1",
+    )
+    assert part.record.symbol_pins == [] and part.polarity_source == "none"
+    record = recorded("C2132")
+    cache.store_footprint(
+        FootprintRecord(
+            puuid="fp-1",
+            status="ok",
+            package_name=record.package_name,
+            pads=record.pads,
+        ),
+        now=11,
+    )
+    assert cache.needs("C1") == {"symbol"}
+    symbol = SymbolRecord(
+        uuid="sym-1",
+        status="ok",
+        pins=[SymbolPin("1", "K"), SymbolPin("2", "A")],
+        shapes=['["DOCTYPE","SYMBOL","1.1"]'],
+    )
+    assert cache.store_symbol("C1", symbol, now=12)
+    assert cache.needs("C1") == set()
+    part = cache.part("C1")
+    assert part.polarity_source == "symbol"
+    assert part.record.symbol_pins == symbol.pins
+    assert part.record.symbol_shapes == symbol.shapes
+    assert part.record.package_name == record.package_name
+    assert part.fetched_at == 12
+    assert not cache.store_symbol("C9", symbol, now=12)
+    # A part whose lookup named no symbol is complete once its footprint is in.
+    cache.store_lookup("C2", "", "fp-1", now=10)
+    assert cache.needs("C2") == set()
+    assert cache.part("C2").record.symbol_pins == []
+    # A shared footprint already cached is not asked for again.
+    cache.store_lookup("C3", "sym-3", "fp-1", now=10)
+    assert cache.needs("C3") == {"symbol"}
+
+
+def test_lookup_misses_and_empty_symbols(cache):
+    """A miss is a none row on the 30-day clock; a symbol that answered nothing leaves no pins."""
+    cache.store_lookup_miss("C5", now=100)
+    assert cache.status("C5") == "none"
+    assert cache.needs("C5", now=100) == set()
+    assert cache.needs("C5", now=100 + NONE_RETRY_S) == {"lookup"}
+    cache.store_lookup("C6", "sym-6", "fp-6", now=1)
+    assert cache.store_symbol("C6", SymbolRecord(uuid="sym-6", status="none"), now=2)
+    assert cache.needs("C6") == {"footprint"}
+    part = cache.part("C6")
+    assert part.record.symbol_pins == [] and part.polarity_source == "none"
+    assert part.record.symbol_uuid == "sym-6"
+
+
+def test_seed_rows_never_need_a_symbol(cache):
+    """A seed row with a symbol uuid but no pins is complete: its meaning came with the seed or not at all."""
+    with closing(cache.connect()) as con, con:
+        con.execute(
+            "INSERT INTO lcsc_map (lcsc, puuid, status, symbol_uuid, source, fetched_at)"
+            " VALUES ('C9', 'p9', 'ok', 'sym-9', 'seed', 1)"
+        )
+        con.execute(
+            "INSERT INTO package (puuid, package_name, pads_json, pads_format, source, fetched_at)"
+            " VALUES ('p9', 'LED0603-RD', ?, ?, 'seed', 1)",
+            (json.dumps(PRO_SOT23), PADS_PRO),
+        )
+    assert cache.needs("C9") == set()
+    assert not cache.needs_fetch("C9")
