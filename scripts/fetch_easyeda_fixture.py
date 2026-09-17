@@ -2,21 +2,31 @@
 
 Usage:
     python3 scripts/fetch_easyeda_fixture.py C2132 C1978115 [...] [--out DIR] [--interval 10]
-    python3 scripts/fetch_easyeda_fixture.py --puuid b3b82869fa924bae820e3a6cfb44d689 [--out DIR]
+    python3 scripts/fetch_easyeda_fixture.py --puuid b3b82869fa924bae820e3a6cfb44d689 [--pro] [--out DIR]
+    python3 scripts/fetch_easyeda_fixture.py --batch C2132 C7950 [...] --name corner_case [--interval 1]
+    python3 scripts/fetch_easyeda_fixture.py --footprint UUID [...] --symbol UUID [...] [--interval 1]
+    python3 scripts/fetch_easyeda_fixture.py --from-devices DEVICES.json [...] [--interval 1]
 
-Per-LCSC responses land in ``tests/fixtures/jlcfootprint/easyeda/<lcsc>.json``;
-per-uuid footprint responses (the client's fallback when a per-LCSC response
-carries no ``packageDetail``) land in ``tests/fixtures/jlcfootprint/easyeda_uuid/
-uuid_<uuid>.json`` from the classic host, or ``pro_<uuid>.json`` with ``--pro`` from
-the EasyEDA Pro host (the two hosts have separate uuid spaces; a classic per-LCSC
-response names a classic uuid).  Existing files are skipped, so re-running costs nothing.
+Classic per-LCSC responses land in ``tests/fixtures/jlcfootprint/easyeda/<lcsc>.json``;
+classic per-uuid footprint responses in ``tests/fixtures/jlcfootprint/easyeda_uuid/
+uuid_<uuid>.json`` (``pro_<uuid>.json`` with ``--pro``).  The EasyEDA Pro host's
+answers, which the plugin fetches live (spec section 15), land in
+``tests/fixtures/jlcfootprint/easyeda_pro/``: ``--batch`` records one
+``searchByCodes`` answer as ``devices_<name>.json`` (the codes asked and the body,
+so misses are known), ``--footprint`` and ``--symbol`` record one document each
+as ``footprint_<uuid>.json`` and ``symbol_<uuid>.json``, and ``--from-devices``
+queues every footprint and symbol a recorded batch answer names.  Existing files
+are skipped, so re-running costs nothing.
+
 Requests are spaced ``interval`` seconds apart whatever happened to the previous
-one (EasyEDA returned 403 after about 18 requests at 1.5 s; 10 s has been safe).
-A 403/429/5xx backs off 60, 120 and 240 s before that item is given up, and three
-items failing in a row stop the run: a server that keeps refusing is left alone.
-A response is kept only when the plugin's parser reads it as ``ok`` (data for
-the item) or ``none`` (EasyEDA has nothing for it); anything else is a failure
-and no file is written.  Exits 1 when any item failed or was not attempted.
+one.  The classic host returned 403 after about 18 requests at 1.5 s and 10 s has
+been safe there; the Pro host served the crawl at 2.5 per second, so ``--interval 1``
+is fine for Pro-only runs.  A 403/429/5xx backs off 60, 120 and 240 s before that
+item is given up, and three items failing in a row stop the run: a server that
+keeps refusing is left alone.  A response is kept only when the plugin's parser
+reads it as ``ok`` (data for the item) or ``none`` (EasyEDA has nothing for it);
+anything else is a failure and no file is written.  Exits 1 when any item failed
+or was not attempted.
 """
 
 from __future__ import annotations
@@ -37,7 +47,9 @@ if str(ROOT) not in sys.path:
 
 from jlcfootprint.easyeda_parse import (  # noqa: E402
     parse_component_response,
+    parse_devices_response,
     parse_puuid_response,
+    parse_symbol_response,
 )
 
 URL = "https://easyeda.com/api/products/{lcsc}/components"
@@ -45,6 +57,9 @@ PUUID_URLS = {
     "classic": "https://easyeda.com/api/components/{puuid}",
     "pro": "https://pro.easyeda.com/api/components/{puuid}",
 }
+DEVICES_URL = "https://pro.easyeda.com/api/devices/searchByCodes"
+LCSC_COMPANY_PATH = "0819f05c4eef4c71ace90d822a990e87"
+BATCH_SIZE = 200
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -57,9 +72,11 @@ BACKOFF_S = (60.0, 120.0, 240.0)
 MAX_CONSECUTIVE_FAILURES = 3
 LCSC_RE = re.compile(r"^C\d+$")
 PUUID_RE = re.compile(r"^[0-9a-f]{32}$")
+NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint"
 DEFAULT_OUT = FIXTURES / "easyeda"
 DEFAULT_PUUID_OUT = FIXTURES / "easyeda_uuid"
+DEFAULT_PRO_OUT = FIXTURES / "easyeda_pro"
 
 
 class Pacer:
@@ -76,15 +93,19 @@ class Pacer:
         self.requests += 1
 
 
-def fetch(url: str, pace: Pacer, label: str) -> Any:
+def fetch(url: str, pace: Pacer, label: str, json_body: Any = None) -> Any:
     """Return the decoded response body for one URL, backing off on rate limits.
 
-    Raises ``requests.RequestException`` (the last retryable status included) or
+    A POST when ``json_body`` is given, else a GET.  Raises
+    ``requests.RequestException`` (the last retryable status included) or
     ``ValueError`` (a body that is not JSON).  The parser classifies whatever comes back.
     """
     for delay in (*BACKOFF_S, None):
         pace()
-        response = requests.get(url, headers=HEADERS, timeout=20)
+        if json_body is None:
+            response = requests.get(url, headers=HEADERS, timeout=20)
+        else:
+            response = requests.post(url, headers=HEADERS, json=json_body, timeout=20)
         if response.status_code in RETRYABLE and delay is not None:
             print(f"{label}: HTTP {response.status_code}, sleeping {delay:.0f}s")
             time.sleep(delay)
@@ -101,26 +122,25 @@ def write_fixture(path: Path, body: Any) -> None:
     partial.replace(path)
 
 
+def _accept(status: str, error: str) -> None:
+    if status not in ("ok", "none"):
+        raise ValueError(f"parser says {status!r}: {error or 'no detail'}")
+
+
 def record(lcsc: str, out: Path, pace: Pacer) -> str:
-    """Fetch one part, keep the body when the parser accepts it, and return its status."""
+    """Fetch one part from the classic host, keep the body when the parser accepts it."""
     body = fetch(URL.format(lcsc=lcsc), pace, lcsc)
     parsed = parse_component_response(body, lcsc)
-    if parsed.status not in ("ok", "none"):
-        raise ValueError(
-            f"parser says {parsed.status!r}: {parsed.error or 'no detail'}"
-        )
+    _accept(parsed.status, parsed.error)
     write_fixture(out / f"{lcsc}.json", body)
     return parsed.status
 
 
 def record_puuid(puuid: str, out: Path, pace: Pacer, host: str = "classic") -> str:
-    """Fetch one footprint by uuid, keep the body when the parser accepts it, return its status."""
+    """Fetch one footprint by uuid (classic-style fixture name), keep it when the parser accepts it."""
     body = fetch(PUUID_URLS[host].format(puuid=puuid), pace, puuid)
     parsed = parse_puuid_response(body, puuid)
-    if parsed.status not in ("ok", "none"):
-        raise ValueError(
-            f"parser says {parsed.status!r}: {parsed.error or 'no detail'}"
-        )
+    _accept(parsed.status, parsed.error)
     write_fixture(out / puuid_fixture_name(puuid, host), body)
     return parsed.status
 
@@ -128,6 +148,57 @@ def record_puuid(puuid: str, out: Path, pace: Pacer, host: str = "classic") -> s
 def puuid_fixture_name(puuid: str, host: str) -> str:
     """Return the fixture file name for one footprint uuid on one host."""
     return f"{'pro' if host == 'pro' else 'uuid'}_{puuid}.json"
+
+
+def record_batch(codes: list[str], name: str, out: Path, pace: Pacer) -> str:
+    """Post one chunk of codes to the Pro batch lookup and keep the codes with the answer."""
+    body = fetch(
+        DEVICES_URL,
+        pace,
+        f"batch {name}",
+        json_body={"codes": codes, "path": LCSC_COMPANY_PATH},
+    )
+    parsed = parse_devices_response(body, codes)
+    if parsed.error:
+        raise ValueError(f"parser says {parsed.error!r}")
+    write_fixture(out / f"devices_{name}.json", {"codes": codes, "body": body})
+    return f"{len(parsed.hits)} hit(s), {len(parsed.missing)} miss(es)"
+
+
+def record_footprint(puuid: str, out: Path, pace: Pacer) -> str:
+    """Fetch one footprint document from the Pro host, keep it when the parser accepts it."""
+    body = fetch(PUUID_URLS["pro"].format(puuid=puuid), pace, puuid)
+    parsed = parse_puuid_response(body, puuid)
+    _accept(parsed.status, parsed.error)
+    write_fixture(out / f"footprint_{puuid}.json", body)
+    return parsed.status
+
+
+def record_symbol(uuid: str, out: Path, pace: Pacer) -> str:
+    """Fetch one symbol document from the Pro host, keep it when the parser accepts it."""
+    body = fetch(PUUID_URLS["pro"].format(puuid=uuid), pace, uuid)
+    parsed = parse_symbol_response(body, uuid)
+    _accept(parsed.status, parsed.error)
+    write_fixture(out / f"symbol_{uuid}.json", body)
+    return parsed.status
+
+
+def uuids_from_devices(paths: list[Path]) -> tuple[list[str], list[str]]:
+    """Return the footprint uuids and the symbol uuids the recorded batch answers name."""
+    footprints: list[str] = []
+    symbols: list[str] = []
+    for path in paths:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        codes = list(data["codes"])
+        parsed = parse_devices_response(data["body"], codes)
+        if parsed.error:
+            raise SystemExit(f"{path}: {parsed.error}")
+        for hit in parsed.hits.values():
+            if hit.puuid and hit.puuid not in footprints:
+                footprints.append(hit.puuid)
+            if hit.symbol_uuid and hit.symbol_uuid not in symbols:
+                symbols.append(hit.symbol_uuid)
+    return footprints, symbols
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -147,19 +218,56 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="record --puuid footprints from the EasyEDA Pro host instead of the classic one",
     )
+    parser.add_argument(
+        "--batch",
+        nargs="*",
+        default=[],
+        help="LCSC codes to look up in one Pro batch call (with --name)",
+    )
+    parser.add_argument("--name", help="fixture name for the --batch answer")
+    parser.add_argument(
+        "--footprint",
+        nargs="*",
+        default=[],
+        help="footprint uuids to record from the Pro host as footprint_<uuid>.json",
+    )
+    parser.add_argument(
+        "--symbol",
+        nargs="*",
+        default=[],
+        help="symbol uuids to record from the Pro host as symbol_<uuid>.json",
+    )
+    parser.add_argument(
+        "--from-devices",
+        nargs="*",
+        default=[],
+        type=Path,
+        help="recorded devices_*.json files whose footprints and symbols to record",
+    )
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--interval", type=float, default=10.0)
     args = parser.parse_args(argv)
-    if not args.lcsc and not args.puuid:
-        parser.error("nothing to record: give LCSC codes or --puuid uuids")
-    malformed = [code for code in args.lcsc if not LCSC_RE.match(code)]
+    pro_items = args.batch or args.footprint or args.symbol or args.from_devices
+    if not args.lcsc and not args.puuid and not pro_items:
+        parser.error(
+            "nothing to record: give LCSC codes, --puuid, --batch, --footprint, --symbol or --from-devices"
+        )
+    malformed = [code for code in args.lcsc + args.batch if not LCSC_RE.match(code)]
     if malformed:
         parser.error(
             f"not LCSC codes (expected C followed by digits): {' '.join(malformed)}"
         )
-    malformed = [uuid for uuid in args.puuid if not PUUID_RE.match(uuid)]
+    malformed = [
+        uuid
+        for uuid in args.puuid + args.footprint + args.symbol
+        if not PUUID_RE.match(uuid)
+    ]
     if malformed:
-        parser.error(f"not footprint uuids (32 hex digits): {' '.join(malformed)}")
+        parser.error(f"not uuids (32 hex digits): {' '.join(malformed)}")
+    if args.batch and not (args.name and NAME_RE.match(args.name)):
+        parser.error("--batch needs --name (letters, digits, - and _)")
+    if len(args.batch) > BATCH_SIZE:
+        parser.error(f"--batch takes at most {BATCH_SIZE} codes")
     items: list[tuple[str, Path, Any]] = [
         (code, (args.out or DEFAULT_OUT) / f"{code}.json", record) for code in args.lcsc
     ]
@@ -171,6 +279,29 @@ def main(argv: list[str] | None = None) -> int:
             lambda item, out, pace: record_puuid(item, out, pace, host),
         )
         for uuid in args.puuid
+    ]
+    pro_out = args.out or DEFAULT_PRO_OUT
+    if args.batch:
+        codes = list(args.batch)
+        items.append(
+            (
+                f"batch {args.name}",
+                pro_out / f"devices_{args.name}.json",
+                lambda item, out, pace: record_batch(codes, args.name, out, pace),
+            )
+        )
+    footprints = list(args.footprint)
+    symbols = list(args.symbol)
+    if args.from_devices:
+        more_footprints, more_symbols = uuids_from_devices(args.from_devices)
+        footprints += [uuid for uuid in more_footprints if uuid not in footprints]
+        symbols += [uuid for uuid in more_symbols if uuid not in symbols]
+    items += [
+        (uuid, pro_out / f"footprint_{uuid}.json", record_footprint)
+        for uuid in footprints
+    ]
+    items += [
+        (uuid, pro_out / f"symbol_{uuid}.json", record_symbol) for uuid in symbols
     ]
     for _, path, _ in items:
         path.parent.mkdir(parents=True, exist_ok=True)
