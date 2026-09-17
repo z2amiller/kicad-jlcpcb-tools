@@ -5,7 +5,7 @@ C2,180
 C3,0
 C4,0
 C5,0,"tantalum: the band is the + end and sits at the boxed pad-1 end at zero, so RD puts the band (positive) on the left"
-C6,,"refused by design (CASE-B, no polarity source); preview presses 0"
+C6,0,"CASE-B, no token or label; resolved by the drawing's + marks since M3"
 C7,0,"unpolarized?"
 C8,0,"unpolarized"
 D3,0
@@ -17,7 +17,7 @@ D8,180
 D9,180
 D10,0
 D11,0
-D12,,"refused by design (inconsistent EasyEDA record); preview presses 0"
+D12,0,"name token and symbol label disagree; the footprint's + mark breaks the tie since M3"
 D13,0,"unpolarized"
 D1,0
 J1,0

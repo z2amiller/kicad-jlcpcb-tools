@@ -12,7 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
+from .easyeda_parse import SymbolPin
 from .geometry import Pad, centroid, named_pads, pad_geom
+from .polarity import normalise_function
 from .quality import assess_quality
 from .solver import solve_transform
 
@@ -57,9 +59,115 @@ class FitReport:
     overlap_mean: float = 0.0
 
 
+@dataclass
+class FunctionPairing:
+    """Pads paired by the schematic's pin functions against the symbol's pin names.
+
+    ``kicad`` and ``jlc`` are keyed like :func:`pair_by_name`'s dicts (the JLC pad
+    number, then ``number#1`` for a group's second member).  ``differences`` lists
+    ``(function, kicad_number, jlc_number)`` for every pair whose numbers differ,
+    and ``eliminated`` the one pair made by elimination, if any.
+    """
+
+    kicad: dict[str, Pad]
+    jlc: dict[str, Pad]
+    leftovers: list[Pad]
+    differences: list[tuple[str, str, str]]
+    eliminated: tuple[str, str] | None = None
+
+
 def _area(pad: Pad) -> float:
     """Return the pad's area."""
     return pad.width * pad.height
+
+
+def _pair_groups(
+    pairs: dict[str, str],
+    groups_k: dict[str, list[Pad]],
+    groups_j: dict[str, list[Pad]],
+) -> tuple[dict[str, Pad], dict[str, Pad], list[Pad]]:
+    """Pair the members of matched groups by closest area, keyed by the JLC number."""
+    kicad: dict[str, Pad] = {}
+    jlc: dict[str, Pad] = {}
+    leftovers: list[Pad] = []
+    for number_j, number_k in pairs.items():
+        group_k = list(groups_k[number_k])
+        for index, pad_j in enumerate(sorted(groups_j[number_j], key=_area)):
+            if not group_k:
+                leftovers.append(pad_j)
+                continue
+            pad_k = min(
+                group_k, key=lambda p, target=_area(pad_j): abs(_area(p) - target)
+            )
+            group_k.remove(pad_k)
+            key = number_j if index == 0 else f"{number_j}#{index}"
+            kicad[key] = pad_k
+            jlc[key] = pad_j
+    return kicad, jlc, leftovers
+
+
+def pair_by_function(
+    kicad_pads: list[Pad], jlc_pads: list[Pad], symbol_pins: list[SymbolPin]
+) -> FunctionPairing | None:
+    """Pair pads by pin function when the numbers do not line up, or return None.
+
+    A KiCad pad's function is the schematic pin name it carries (``D_2`` reads as
+    ``D``); a JLC pad's name is its symbol pin's label.  A name that occurs once on
+    each side pairs the two pads (a group of KiCad pads sharing a number counts
+    once).  At least two names must pair; when exactly one KiCad number and one JLC
+    number are then left, they pair by elimination.  Any other unpaired JLC pad
+    means the functions do not describe this part and nothing is returned.
+    """
+    labels: dict[str, str] = {}
+    for pin in symbol_pins:
+        name = normalise_function(pin.label)
+        if name:
+            labels.setdefault(pin.number, name)
+    groups_k: dict[str, list[Pad]] = {}
+    for pad in named_pads(kicad_pads):
+        groups_k.setdefault(pad.number, []).append(pad)
+    groups_j: dict[str, list[Pad]] = {}
+    for pad in named_pads(jlc_pads):
+        groups_j.setdefault(pad.number, []).append(pad)
+    functions_k: dict[str, str] = {}
+    for number, group in groups_k.items():
+        for pad in group:
+            name = normalise_function(pad.pin_function)
+            if name:
+                functions_k[number] = name
+                break
+    by_name_k: dict[str, list[str]] = {}
+    for number, name in functions_k.items():
+        by_name_k.setdefault(name, []).append(number)
+    by_name_j: dict[str, list[str]] = {}
+    for number in groups_j:
+        name = labels.get(number)
+        if name:
+            by_name_j.setdefault(name, []).append(number)
+    pairs: dict[str, str] = {}
+    names: dict[str, str] = {}
+    for name, numbers_j in by_name_j.items():
+        numbers_k = by_name_k.get(name, [])
+        if len(numbers_j) == 1 and len(numbers_k) == 1:
+            pairs[numbers_j[0]] = numbers_k[0]
+            names[numbers_j[0]] = name
+    if len(pairs) < 2:
+        return None
+    rest_j = [n for n in groups_j if n not in pairs]
+    rest_k = [n for n in groups_k if n not in pairs.values()]
+    eliminated = None
+    if len(rest_j) == 1 and len(rest_k) == 1:
+        pairs[rest_j[0]] = rest_k[0]
+        eliminated = (rest_j[0], rest_k[0])
+    elif rest_j:
+        return None
+    kicad, jlc, leftovers = _pair_groups(pairs, groups_k, groups_j)
+    differences = [
+        (names.get(number_j, ""), number_k, number_j)
+        for number_j, number_k in pairs.items()
+        if number_j != number_k
+    ]
+    return FunctionPairing(kicad, jlc, leftovers, differences, eliminated)
 
 
 def pair_by_name(
@@ -135,28 +243,44 @@ def transformed(pad: Pad, placement: Placement) -> tuple[float, float, float, fl
     return x, y, width, height
 
 
+def group_fit(
+    kicad_geoms: list[tuple[float, float, float, float]], jlc_pad: Pad
+) -> tuple[int, float]:
+    """Grade one JLC pad against the KiCad pads sharing a number: 2 fits, 1 tight, 0 misses.
+
+    The group is one terminal whose copper is the union of its pads (a DPAK's tab
+    and the stub of its cut lead are both pad 2), so the overlap is the JLC pad's
+    intersection with all of them over the smaller of the two areas.  Tight means
+    the pads overlap well but the JLC pad's centre falls outside the inner part of
+    every KiCad pad, so the part sits at the edge of its copper.  Pads of one group
+    do not overlap each other in practice, so their intersections are summed.
+    """
+    bx, by, bw, bh = pad_geom(jlc_pad)
+    jlc_area = bw * bh
+    intersection = 0.0
+    union_area = 0.0
+    centred = False
+    for ax, ay, aw, ah in kicad_geoms:
+        ix = max(0.0, min(ax + aw / 2, bx + bw / 2) - max(ax - aw / 2, bx - bw / 2))
+        iy = max(0.0, min(ay + ah / 2, by + bh / 2) - max(ay - ah / 2, by - bh / 2))
+        intersection += ix * iy
+        union_area += aw * ah
+        centred = centred or (
+            abs(bx - ax) <= CENTRE_TOLERANCE * aw / 2
+            and abs(by - ay) <= CENTRE_TOLERANCE * ah / 2
+        )
+    smaller = min(jlc_area, union_area)
+    overlap = min(intersection, jlc_area) / smaller if smaller > 0 else 0.0
+    if overlap < MIN_OVERLAP:
+        return 0, overlap
+    return (2 if centred else 1), overlap
+
+
 def pad_fit(
     kicad_geom: tuple[float, float, float, float], jlc_pad: Pad
 ) -> tuple[int, float]:
-    """Grade one JLC pad against a transformed KiCad pad: 2 fits, 1 tight, 0 misses.
-
-    Returns the grade and the overlap ratio (intersection over the smaller pad's
-    area).  Tight means the pads overlap well but the JLC pad's centre falls outside
-    the inner part of the KiCad pad, so the part sits at the edge of its copper.
-    """
-    ax, ay, aw, ah = kicad_geom
-    bx, by, bw, bh = pad_geom(jlc_pad)
-    ix = max(0.0, min(ax + aw / 2, bx + bw / 2) - max(ax - aw / 2, bx - bw / 2))
-    iy = max(0.0, min(ay + ah / 2, by + bh / 2) - max(ay - ah / 2, by - bh / 2))
-    smaller = min(aw * ah, bw * bh)
-    overlap = (ix * iy) / smaller if smaller > 0 else 0.0
-    if overlap < MIN_OVERLAP:
-        return 0, overlap
-    centred = (
-        abs(bx - ax) <= CENTRE_TOLERANCE * aw / 2
-        and abs(by - ay) <= CENTRE_TOLERANCE * ah / 2
-    )
-    return (2 if centred else 1), overlap
+    """Grade one JLC pad against one transformed KiCad pad (see :func:`group_fit`)."""
+    return group_fit([kicad_geom], jlc_pad)
 
 
 def assess_fit(
@@ -170,8 +294,10 @@ def assess_fit(
 ) -> FitReport:
     """Grade the fit: every JLC pad must land on KiCad copper after the placement.
 
-    Matched pads pair by key.  Each remaining JLC pad (a tab numbered differently, a
-    merged connector pin) pairs with the nearest transformed KiCad pad, which may be
+    Matched pads pair by key, and each is graded against every KiCad pad in
+    ``kicad_all`` that shares its partner's number (spec 16.6: a group is one
+    terminal).  Each remaining JLC pad (a tab numbered differently, a merged
+    connector pin) pairs with the nearest transformed KiCad pad, which may be
     reused; extra KiCad copper is never a misfit.  An unmatched JLC pad that lands on
     nothing is a misfit when it sits at the periphery (a pin the footprint lacks) but
     only a warning when it contains the JLC pad centroid (an exposed pad the footprint
@@ -179,8 +305,16 @@ def assess_fit(
     """
     report = FitReport(fit="fits")
     placed = [(pad, transformed(pad, placement)) for pad in kicad_all]
+    groups: dict[str, list[tuple[float, float, float, float]]] = {}
+    for pad, geom in placed:
+        groups.setdefault(pad.number, []).append(geom)
     pairs = [
-        (kicad[key], transformed(kicad[key], placement), jlc[key], True)
+        (
+            kicad[key],
+            groups.get(kicad[key].number) or [transformed(kicad[key], placement)],
+            jlc[key],
+            True,
+        )
         for key in kicad
     ]
     for jlc_pad in jlc_rest:
@@ -190,10 +324,10 @@ def assess_fit(
             placed,
             key=lambda item: math.hypot(item[1][0] - jlc_pad.x, item[1][1] - jlc_pad.y),
         )
-        pairs.append((pad, geom, jlc_pad, False))
+        pairs.append((pad, [geom], jlc_pad, False))
     grades = [
-        (2, 1.0) if kicad_pad.shape == "custom" else pad_fit(geom, jlc_pad)
-        for kicad_pad, geom, jlc_pad, _ in pairs
+        (2, 1.0) if kicad_pad.shape == "custom" else group_fit(geoms, jlc_pad)
+        for kicad_pad, geoms, jlc_pad, _ in pairs
     ]
     if any(kicad_pad.shape == "custom" for kicad_pad, _, _, _ in pairs):
         report.notes.append("custom-shaped KiCad pad not checked for fit")
@@ -238,6 +372,40 @@ def assess_fit(
     elif any(_area(j) >= SIZE_RATIO * _area(k) for k, j in matched_pairs):
         report.notes.append("KiCad pads are smaller than JLC's land pattern")
     return report
+
+
+def transformed_box(
+    box: tuple[float, float, float, float], placement: Placement
+) -> tuple[float, float, float, float]:
+    """Return a KiCad-frame box after the placement, as the box of its moved corners."""
+    theta = math.radians(placement.rotation_deg)
+    cos, sin = math.cos(theta), math.sin(theta)
+    xs, ys = [], []
+    for x, y in (
+        (box[0], box[1]),
+        (box[2], box[1]),
+        (box[2], box[3]),
+        (box[0], box[3]),
+    ):
+        xs.append(x * cos - y * sin + placement.offset_x)
+        ys.append(x * sin + y * cos + placement.offset_y)
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def courtyard_excess(
+    courtyard: tuple[float, float, float, float],
+    body: tuple[float, float, float, float],
+    placement: Placement,
+) -> float:
+    """Return how far the JLC body box overhangs the placed KiCad courtyard, at most.
+
+    Both boxes end up in JLC's frame: the courtyard is moved by the placement that
+    put the KiCad pads onto the JLC pads.  The result is the largest overhang on
+    any of the four sides, 0.0 when the body sits inside the courtyard.
+    """
+    cx1, cy1, cx2, cy2 = transformed_box(courtyard, placement)
+    bx1, by1, bx2, by2 = body
+    return max(0.0, cx1 - bx1, bx2 - cx2, cy1 - by1, by2 - cy2)
 
 
 def shape_alignment(kicad: list[Pad], jlc: list[Pad]) -> tuple[int, int]:

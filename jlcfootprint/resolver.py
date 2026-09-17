@@ -2,9 +2,11 @@
 
 Pure and stdlib only.  The caller supplies KiCad pads in the footprint's own
 frame, EasyEDA pads already converted to millimetres, and the symbol pins.
-Multi-pin parts align by pad name (``fit``); polarized two-pad parts align by
-terminal meaning (``polarity``) and never by pad number; non-polar two-pad
-parts align by axis.  Fit is graded per JLC pad after the placement.
+Multi-pin parts align by pad name (``fit``), or by pin function when the numbers
+do not line up; polarized two-pad parts align by terminal meaning (``polarity``)
+and never by pad number; non-polar two-pad parts align by axis.  Fit is graded
+per JLC pad after the placement, and a fitting part's body is compared with the
+KiCad courtyard (spec 16.6).
 """
 
 from __future__ import annotations
@@ -12,14 +14,24 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
+from .drawing import DrawingMarks
 from .easyeda_parse import SymbolPin, pin1_polarity
-from .fit import FitReport, Placement, align, assess_fit, pair_by_name, shape_alignment
+from .fit import (
+    FitReport,
+    Placement,
+    align,
+    assess_fit,
+    courtyard_excess,
+    pair_by_function,
+    pair_by_name,
+    shape_alignment,
+)
 from .geometry import Pad, ccw_correction, crawl_to_cpl, named_pads
 from .naming import parse_package_name
 from .polarity import (
     CONVENTION,
     REFERENCE_TERMINAL,
-    band_marks_positive,
+    drawing_reference_pad,
     kicad_reference_pad,
     label_reference_pad,
     normalise_function,
@@ -49,6 +61,17 @@ YELLOW_NOTE = (
     "JLC's pin-1 marker will sit on the other terminal; numbering difference, "
     "not a rotation error; do not renumber the footprint"
 )
+DRAWING_NOTES = {
+    "both": "polarity from the + marks of the symbol and the footprint",
+    "footprint": "polarity from the footprint's + mark",
+    "symbol": "polarity from the symbol's + mark",
+}
+# The body caveat (spec 16.6 item 4): the JLC body may overhang the KiCad courtyard by
+# this fraction of the courtyard's shorter side, never less than the floor (drawing
+# noise on an 0201) nor more than the ceiling (a DIP-40 still flags a wide body).
+BODY_EXCESS_FRACTION = 0.10
+BODY_EXCESS_MIN_MM = 0.15
+BODY_EXCESS_MAX_MM = 1.5
 
 
 @dataclass
@@ -62,6 +85,7 @@ class Verdict:
     confidence: str = "none"  # high | medium | low | none
     name_rotation: int | None = None
     polarity_light: str | None = None  # green | yellow | unknown; None for non-polar
+    polarity_source: str = ""  # token | label | seed | drawing | ""
     non_polar: bool = False  # True when 180 degrees apart is the same placement
     pad_count_kicad: int = 0
     pad_count_jlc: int = 0
@@ -71,7 +95,9 @@ class Verdict:
     overlap_mean: float = 0.0
     angular_rms: float = 0.0
     residual_mm: float = 0.0
+    body_excess_mm: float | None = None  # the caveat: how far the JLC body overhangs
     notes: list[str] = field(default_factory=list)
+    placement: Placement | None = field(default=None, repr=False, compare=False)
 
     @property
     def note_text(self) -> str:
@@ -88,7 +114,8 @@ class Verdict:
         return self
 
     def take_placement(self, placement: Placement) -> None:
-        """Copy the placement's metrics."""
+        """Copy the placement's metrics and keep the placement for the drawing."""
+        self.placement = placement
         self.residual_mm = placement.residual
         self.angular_rms = placement.angular_rms
         self.matched_pads = placement.matched
@@ -111,10 +138,90 @@ def _mismatch_note(verdict: Verdict, fit: str) -> str:
     return f"does not fit: pitch (a JLC pad misses its KiCad pad; worst overlap {verdict.overlap_min:.0%})"
 
 
-def _resolve_multi_pin(
-    kicad_pads: list[Pad], jlc_pads: list[Pad], verdict: Verdict
+def _finish_multi_pin(
+    verdict: Verdict, kicad: dict[str, Pad], placement: Placement
 ) -> Verdict:
-    """Align by pad name (spec section 7.2)."""
+    """Set the rotation and status of a multi-pin part whose pads fit."""
+    verdict.rotation = ccw_correction(placement.rotation_deg)
+    verdict.method = "geometry"
+    if verdict.confidence == "none":
+        verdict.confidence = "high"
+    if len(kicad) == 2:
+        verdict.confidence = "medium"
+        verdict.notes.append(
+            "aligned on two shared pad names; remaining pads matched by position"
+        )
+    if verdict.name_rotation is not None and verdict.name_rotation != verdict.rotation:
+        verdict.confidence = "medium"
+        verdict.notes.append(
+            f"KiCad footprint drawn non-standard; name says {verdict.name_rotation}°"
+        )
+    if verdict.pad_count_kicad != verdict.pad_count_jlc:
+        verdict.notes.append(
+            f"pad counts differ ({verdict.pad_count_kicad} vs {verdict.pad_count_jlc}) "
+            f"but the {len(kicad)} shared names align"
+        )
+    verdict.status = (
+        "yellow"
+        if verdict.missing_central_pad or verdict.fit == "fits_tight"
+        else "green"
+    )
+    return verdict
+
+
+def _resolve_by_function(
+    kicad_pads: list[Pad],
+    jlc_pads: list[Pad],
+    verdict: Verdict,
+    symbol_pins: list[SymbolPin],
+) -> Verdict | None:
+    """Align by pin function when the pad numbers failed; None when that fails too.
+
+    KiCad's ``TO-252-3_TabPin2`` numbers the tab 2 where JLC's DPAK drawing numbers
+    it 3: the numbers differ but the schematic's ``D`` and the symbol's ``D`` are the
+    same physical pin, so the part fits once the pads pair by function (spec 16.6).
+    """
+    pairing = pair_by_function(kicad_pads, jlc_pads, symbol_pins)
+    if pairing is None:
+        return None
+    placement = align(pairing.kicad, pairing.jlc)
+    if placement.is_underdetermined or placement.is_mirrored:
+        return None
+    report = assess_fit(
+        pairing.kicad,
+        pairing.jlc,
+        named_pads(kicad_pads),
+        pairing.leftovers,
+        placement,
+        verdict.pad_count_kicad,
+        verdict.pad_count_jlc,
+    )
+    if report.fit in ("count", "pitch"):
+        return None
+    verdict.take_placement(placement)
+    verdict.take_fit(report)
+    verdict.confidence = "medium"
+    differences = ", ".join(
+        f"JLC pin {jlc_number} ({function}) is pad {kicad_number} on the footprint"
+        for function, kicad_number, jlc_number in pairing.differences
+    )
+    note = "pin numbers differ from JLC's part; paired by pin function"
+    if differences:
+        note += f": {differences}"
+    if pairing.eliminated is not None:
+        jlc_number, kicad_number = pairing.eliminated
+        note += f"; JLC pin {jlc_number} and pad {kicad_number} paired by elimination"
+    verdict.notes.append(note)
+    return _finish_multi_pin(verdict, pairing.kicad, placement)
+
+
+def _resolve_multi_pin(
+    kicad_pads: list[Pad],
+    jlc_pads: list[Pad],
+    verdict: Verdict,
+    symbol_pins: list[SymbolPin],
+) -> Verdict:
+    """Align by pad name (spec section 7.2), or by pin function when the names fail."""
     kicad, jlc, jlc_rest = pair_by_name(kicad_pads, jlc_pads)
     if len(kicad) < 2:
         return verdict.unresolved(
@@ -139,8 +246,11 @@ def _resolve_multi_pin(
         verdict.pad_count_kicad,
         verdict.pad_count_jlc,
     )
-    verdict.take_fit(report)
     if report.fit in ("count", "pitch"):
+        by_function = _resolve_by_function(kicad_pads, jlc_pads, verdict, symbol_pins)
+        if by_function is not None:
+            return by_function
+        verdict.take_fit(report)
         if verdict.pad_count_kicad == verdict.pad_count_jlc:
             angle, landed = shape_alignment(
                 named_pads(kicad_pads), named_pads(jlc_pads)
@@ -155,30 +265,8 @@ def _resolve_multi_pin(
         return verdict.unresolved(
             "red", report.fit, _mismatch_note(verdict, report.fit)
         )
-    verdict.rotation = ccw_correction(placement.rotation_deg)
-    verdict.method = "geometry"
-    verdict.confidence = "high"
-    if len(kicad) == 2:
-        verdict.confidence = "medium"
-        verdict.notes.append(
-            "aligned on two shared pad names; remaining pads matched by position"
-        )
-    if verdict.name_rotation is not None and verdict.name_rotation != verdict.rotation:
-        verdict.confidence = "medium"
-        verdict.notes.append(
-            f"KiCad footprint drawn non-standard; name says {verdict.name_rotation}°"
-        )
-    if verdict.pad_count_kicad != verdict.pad_count_jlc:
-        verdict.notes.append(
-            f"pad counts differ ({verdict.pad_count_kicad} vs {verdict.pad_count_jlc}) "
-            f"but the {len(kicad)} shared names align"
-        )
-    verdict.status = (
-        "yellow"
-        if verdict.missing_central_pad or verdict.fit == "fits_tight"
-        else "green"
-    )
-    return verdict
+    verdict.take_fit(report)
+    return _finish_multi_pin(verdict, kicad, placement)
 
 
 def _two_pad_fit(
@@ -201,14 +289,23 @@ def _resolve_polarized(
     package_name: str,
     symbol_pins: list[SymbolPin],
     polarity_source: str,
-    band_positive: bool = False,
+    marks: DrawingMarks | None = None,
 ) -> Verdict:
-    """Align a polarized two-pad part by terminal meaning, never by pad number (spec 7.3)."""
+    """Align a polarized two-pad part by terminal meaning, never by pad number (spec 7.3).
+
+    The EasyEDA side's reference terminal has up to four sources: the name's FD/RD
+    token, the symbol's pin-1 label, and the ``+`` marks of the symbol and of the
+    footprint (spec 16.6).  Each names a pad; the majority decides and a tie is
+    inconsistent data.  Calibrated on 2026-09-17: the marks named the right pad on
+    all 22 parts with a known truth, the token on all diodes and electrolytics but
+    on a minority of the molded-chip tantalums, where the two marks outvote it.
+    A seeded label is weaker: it yields to a token that disagrees with it.
+    """
     if _coincident(kicad_named) or _coincident(jlc_named):
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
     reference = REFERENCE_TERMINAL[kind]
     diode = kind == "diode"
-    side = token_reference_side(package_name, reference, band_positive)
+    side = token_reference_side(package_name, reference)
     if side == "none":
         # A bidirectional TVS has no reference terminal; KiCad's D_TVS symbol names its
         # pins A1/A2, which would otherwise read as two anodes.
@@ -231,29 +328,77 @@ def _resolve_polarized(
             )
     label_pad = label_reference_pad(jlc_named, polarity, reference)
     seeded = polarity_source != "symbol"
-    if token_pad is not None and label_pad is not None and token_pad is not label_pad:
-        if seeded:
-            verdict.notes.append(
-                "seeded pin-1 polarity (per footprint) disagrees with the name token; token used"
-            )
-            label_pad = None
-            polarity = None
-        else:
-            return verdict.unresolved(
-                "red",
-                "no_data",
-                "EasyEDA data inconsistent: name token and symbol pin-1 label disagree",
-            )
-    jlc_ref = token_pad if token_pad is not None else label_pad
-    if jlc_ref is None:
+    drawn_pad, drawn_by = drawing_reference_pad(jlc_named, marks, reference)
+    if drawn_by == "conflict":
+        return verdict.unresolved(
+            "red",
+            "no_data",
+            "EasyEDA data inconsistent: the symbol's + mark and the footprint's + mark name different pins",
+        )
+    if (
+        seeded
+        and token_pad is not None
+        and label_pad is not None
+        and token_pad is not label_pad
+    ):
+        verdict.notes.append(
+            "seeded pin-1 polarity (per footprint) disagrees with the name token; token used"
+        )
+        label_pad = None
+        polarity = None
+    votes: list[tuple[Pad, str]] = []
+    if token_pad is not None:
+        votes.append((token_pad, "name token"))
+    if label_pad is not None:
+        votes.append(
+            (label_pad, "seeded pin-1 polarity" if seeded else "symbol pin-1 label")
+        )
+    if drawn_pad is not None:
+        if drawn_by in ("both", "symbol"):
+            votes.append((drawn_pad, "symbol + mark"))
+        if drawn_by in ("both", "footprint"):
+            votes.append((drawn_pad, "footprint + mark"))
+    if not votes:
         return verdict.unresolved(
             "unknown", "no_data", "polarity unknown; check in JLC preview"
         )
-    seed_decided = token_pad is None and seeded
-    if seed_decided:
+    sides: dict[int, list[str]] = {}
+    pads_by_id: dict[int, Pad] = {}
+    for pad, name in votes:
+        sides.setdefault(id(pad), []).append(name)
+        pads_by_id[id(pad)] = pad
+    ranked = sorted(sides.values(), key=len, reverse=True)
+    if len(ranked) > 1 and len(ranked[0]) == len(ranked[1]):
+        return verdict.unresolved(
+            "red",
+            "no_data",
+            "EasyEDA data inconsistent: "
+            + " and ".join(", ".join(names) for names in ranked)
+            + " disagree",
+        )
+    winners = ranked[0]
+    jlc_ref = next(pad for pad, name in votes if name == winners[0])
+    outvoted = [name for pad, name in votes if pad is not jlc_ref]
+    if outvoted:
+        verdict.notes.append(
+            f"{', '.join(outvoted)} {'names' if len(outvoted) == 1 else 'name'} the other pad; "
+            f"{', '.join(winners)} {'decides' if len(winners) == 1 else 'decide'}"
+        )
+        if label_pad is not None and label_pad is not jlc_ref:
+            polarity = None
+    if token_pad is jlc_ref:
+        source = "token"
+    elif label_pad is jlc_ref:
+        source = "seed" if seeded else "label"
+    else:
+        source = "drawing"
+        if not outvoted:
+            verdict.notes.append(DRAWING_NOTES[drawn_by])
+    if source == "seed":
         verdict.notes.append(
             "reference terminal from the seeded per-footprint polarity"
         )
+    verdict.polarity_source = source
     kicad_other = next(p for p in kicad_named if p is not kicad_ref)
     jlc_other = next(p for p in jlc_named if p is not jlc_ref)
     kicad = {"ref": kicad_ref, "other": kicad_other}
@@ -266,8 +411,15 @@ def _resolve_polarized(
         return verdict
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "polarity"
-    verdict.confidence = "medium" if assumed or seed_decided else "high"
-    if verdict.name_rotation is not None and verdict.name_rotation != verdict.rotation:
+    verdict.confidence = (
+        "medium" if assumed or outvoted or source in ("seed", "drawing") else "high"
+    )
+    if (
+        source == "token"
+        and verdict.name_rotation is not None
+        and verdict.name_rotation != verdict.rotation
+    ):
+        # Only a token that was applied can accuse the footprint (kicad-z9y4).
         verdict.confidence = "medium"
         verdict.notes.append(
             f"KiCad footprint drawn non-standard; name says {verdict.name_rotation}°"
@@ -324,6 +476,35 @@ def _finite(pads: list[Pad]) -> bool:
     )
 
 
+def body_threshold_mm(courtyard: tuple[float, float, float, float]) -> float:
+    """Return how far the JLC body may overhang this courtyard before the caveat."""
+    shorter = min(courtyard[2] - courtyard[0], courtyard[3] - courtyard[1])
+    return min(
+        max(BODY_EXCESS_FRACTION * shorter, BODY_EXCESS_MIN_MM), BODY_EXCESS_MAX_MM
+    )
+
+
+def _body_caveat(
+    verdict: Verdict,
+    courtyard: tuple[float, float, float, float],
+    body: tuple[float, float, float, float],
+) -> None:
+    """Note a JLC body that overhangs the KiCad courtyard (spec 16.6 item 4).
+
+    The status and the rotation stand: the pads fit, the part is only bigger than
+    the footprint's author allowed for, which the preview shows.
+    """
+    if verdict.placement is None:
+        return
+    excess = courtyard_excess(courtyard, body, verdict.placement)
+    if excess <= body_threshold_mm(courtyard):
+        return
+    verdict.body_excess_mm = round(excess, 2)
+    verdict.notes.append(
+        f"fits, JLC body {excess:.1f} mm larger than the KiCad courtyard"
+    )
+
+
 def resolve(
     kicad_pads: list[Pad],
     kicad_footprint_name: str,
@@ -332,6 +513,8 @@ def resolve(
     jlc_pads: list[Pad],
     symbol_pins: list[SymbolPin],
     polarity_source: str = "symbol",
+    marks: DrawingMarks | None = None,
+    kicad_courtyard: tuple[float, float, float, float] | None = None,
 ) -> Verdict:
     """Return the verdict for one part (spec section 7).
 
@@ -339,6 +522,10 @@ def resolve(
     un-mirrored by the caller); ``jlc_pads`` are millimetres in KiCad's frame.
     ``polarity_source`` is ``symbol`` when ``symbol_pins`` came from the part's own
     symbol and ``seed-puuid`` when they were seeded per footprint from the crawl.
+    ``marks`` are the drawings' ``+`` marks and the JLC body box
+    (:func:`jlcfootprint.drawing.drawing_marks`) and ``kicad_courtyard`` the
+    footprint's courtyard box, both optional; together they add the polarity
+    source of last resort and the body-size caveat.
     """
     verdict = Verdict()
     if record_status == "none":
@@ -353,25 +540,21 @@ def resolve(
         )
     kicad_named = named_pads(kicad_pads)
     jlc_named = named_pads(jlc_pads)
-    verdict.pad_count_kicad = len(kicad_named)
-    verdict.pad_count_jlc = len(jlc_named)
+    # Counts compare distinct numbers: a DPAK's tab and its stub are one pad 2.
+    verdict.pad_count_kicad = len({pad.number for pad in kicad_named})
+    verdict.pad_count_jlc = len({pad.number for pad in jlc_named})
     kind = part_kind(package_name, kicad_footprint_name, kicad_pads, symbol_pins)
-    band_positive = band_marks_positive(package_name, kicad_footprint_name)
     parsed = parse_package_name(package_name, True if kind == "diode" else None)
     if parsed.rotation_source == "naming_rule":
         verdict.name_rotation = crawl_to_cpl(parsed.rotation_correction)
-        if kind == "polar_cap" and band_positive and verdict.name_rotation in (0, 180):
-            # The crawler's (family, token) table reads every capacitor token as an
-            # electrolytic's, whose band is the negative end; a tantalum's band is its
-            # positive end, so the table's answer is half a turn out for them.
-            verdict.name_rotation = (verdict.name_rotation + 180) % 360
     if min(len(kicad_named), len(jlc_named)) < 2:
         return verdict.unresolved(
             "unknown", "no_data", "fewer than two named pads on one side"
         )
-    marked = kind != "other" or token_reference_side(
-        package_name, "positive", band_positive
-    ) in ("left", "right")
+    marked = kind != "other" or token_reference_side(package_name, "positive") in (
+        "left",
+        "right",
+    )
     if len(jlc_named) == 2 and marked:
         if len(kicad_named) != 2:
             # A two-terminal JLC part on a KiCad footprint with extra pads: align by
@@ -393,7 +576,7 @@ def resolve(
             verdict.notes.append(
                 "orientation token on a non-polar part: pin 1 kept where JLC draws it"
             )
-        return _resolve_polarized(
+        _resolve_polarized(
             kicad_named,
             jlc_named,
             verdict,
@@ -401,8 +584,17 @@ def resolve(
             package_name,
             symbol_pins,
             polarity_source,
-            band_positive,
+            marks,
         )
-    if len(kicad_named) == 2 and len(jlc_named) == 2:
-        return _resolve_axis(kicad_named, jlc_named, verdict)
-    return _resolve_multi_pin(kicad_pads, jlc_pads, verdict)
+    elif len(kicad_named) == 2 and len(jlc_named) == 2:
+        _resolve_axis(kicad_named, jlc_named, verdict)
+    else:
+        _resolve_multi_pin(kicad_pads, jlc_pads, verdict, symbol_pins)
+    if (
+        verdict.rotation is not None
+        and kicad_courtyard is not None
+        and marks is not None
+        and marks.body_box is not None
+    ):
+        _body_caveat(verdict, kicad_courtyard, marks.body_box)
+    return verdict

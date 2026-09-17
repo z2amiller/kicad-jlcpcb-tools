@@ -36,6 +36,7 @@ from jlcfootprint.boardfile import (  # noqa: E402
     footprint_pads,
     parse_kicad_pcb,
 )
+from jlcfootprint.drawing import drawing_marks  # noqa: E402
 from jlcfootprint.easyeda_parse import (  # noqa: E402
     ComponentRecord,
     DeviceHit,
@@ -44,7 +45,7 @@ from jlcfootprint.easyeda_parse import (  # noqa: E402
     parse_puuid_response,
     parse_symbol_response,
 )
-from jlcfootprint.geometry import easyeda_pads_to_mm, mirror_y  # noqa: E402
+from jlcfootprint.geometry import easyeda_pads_to_mm, mirror_box, mirror_y  # noqa: E402
 from jlcfootprint.resolver import Verdict, resolve  # noqa: E402
 
 DEFAULT_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
@@ -125,6 +126,7 @@ def load_pro_record(
     record.package_name = footprint.package_name or hit.package_name
     record.pads = footprint.pads
     record.footprint_shapes = footprint.footprint_shapes
+    record.footprint_origin = footprint.footprint_origin
     if hit.symbol_uuid:
         symbol_path = pro_dir / f"symbol_{hit.symbol_uuid}.json"
         if not symbol_path.exists():
@@ -170,8 +172,10 @@ def evaluate_footprints(
             record = load_record(fixtures, fp.lcsc)
         if record is not None:
             pads = footprint_pads(fp)
+            courtyard = fp.courtyard
             if fp.is_bottom:
                 pads = mirror_y(pads)
+                courtyard = None if courtyard is None else mirror_box(courtyard)
             row["package"] = record.package_name
             row["verdict"] = resolve(
                 pads,
@@ -180,6 +184,12 @@ def evaluate_footprints(
                 record.package_name,
                 easyeda_pads_to_mm(record.pads, flip_y=flip_y),
                 record.symbol_pins,
+                marks=drawing_marks(
+                    record.symbol_shapes,
+                    record.footprint_shapes,
+                    record.footprint_origin,
+                ),
+                kicad_courtyard=courtyard,
             )
         rows.append(row)
     return rows

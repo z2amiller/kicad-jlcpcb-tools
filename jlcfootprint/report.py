@@ -1,7 +1,9 @@
-"""The generate-time rotation summary (spec section 8): three groups of placed parts.
+"""The generate-time rotation summary (spec section 8, order per 16.6): four groups.
 
-Pure formatting over what the CPL path recorded for each placed part, so the
-dialog in the plugin only shows text.
+"Does not fit" first, then the applied rotations with caveated fits marked, then
+the pin-1 marker warnings, then the unresolved parts.  Pure formatting over what
+the CPL path recorded for each placed part, so the dialog in the plugin only
+shows text.
 """
 
 from __future__ import annotations
@@ -29,16 +31,27 @@ class CplRotation:
     note: str = ""
     pending: bool = False
     legacy_correction: int | None = None  # what the correction rules would have applied
+    body_excess: float | None = None  # the body-size caveat in mm (spec 16.6 item 4)
 
 
 @dataclass
 class GenerateSummary:
-    """The three groups of the summary dialog."""
+    """The groups of the summary dialog.
+
+    ``red`` holds the parts the check found not to fit (the raw angle emitted);
+    ``unresolved`` the parts it could not judge: unknown, pending, no LCSC.
+    """
 
     applied: list[CplRotation] = field(default_factory=list)
     yellow: list[CplRotation] = field(default_factory=list)
+    red: list[CplRotation] = field(default_factory=list)
     unresolved: list[CplRotation] = field(default_factory=list)
     legacy_available: bool = True
+
+    @property
+    def caveated(self) -> list[CplRotation]:
+        """Return the applied rows whose JLC body overhangs the KiCad courtyard."""
+        return [row for row in self.applied if row.body_excess is not None]
 
     @property
     def differs_from_legacy(self) -> list[CplRotation]:
@@ -53,13 +66,15 @@ class GenerateSummary:
 def summarise(
     rows: list[CplRotation], legacy_available: bool = True
 ) -> GenerateSummary:
-    """Sort the CPL rows into applied, yellow and unresolved."""
+    """Sort the CPL rows into applied (with yellow), red and unresolved."""
     summary = GenerateSummary(legacy_available=legacy_available)
     for row in rows:
         if row.source in ("override", "derived"):
             summary.applied.append(row)
             if row.polarity_light == "yellow":
                 summary.yellow.append(row)
+        elif row.status == "red":
+            summary.red.append(row)
         else:
             summary.unresolved.append(row)
     return summary
@@ -78,9 +93,16 @@ def _reason(row: CplRotation) -> str:
 
 
 def format_summary(summary: GenerateSummary) -> str:
-    """Render the three groups as the dialog shows them."""
+    """Render the groups as the dialog shows them, worst first."""
     lines: list[str] = []
     differs = {id(row) for row in summary.differs_from_legacy}
+    lines.append(f"Does not fit ({len(summary.red)})")
+    for row in summary.red:
+        lines.append(
+            f"  {row.reference:<8} {row.lcsc:<10} {row.footprint}: "
+            f"{row.emitted:g}° raw ({_reason(row)})"
+        )
+    lines.append("")
     lines.append(f"Applied rotations ({len(summary.applied)})")
     if summary.applied:
         if summary.legacy_available:
@@ -90,6 +112,11 @@ def format_summary(summary: GenerateSummary) -> str:
             )
         else:
             lines.append("  (correction rules unavailable; no comparison)")
+        if summary.caveated:
+            lines.append(
+                "  ! marks a part whose JLC body is larger than the KiCad courtyard;"
+                " check the preview"
+            )
     for row in summary.applied:
         mark = "*" if summary.legacy_available and id(row) in differs else " "
         legacy = (
@@ -98,9 +125,14 @@ def format_summary(summary: GenerateSummary) -> str:
             else f", rules {row.legacy_correction if row.legacy_correction is not None else 0:g}°"
         )
         source = "override" if row.source == "override" else "derived"
+        caveat = (
+            f" ! body {row.body_excess:g} mm larger than the courtyard"
+            if row.body_excess is not None
+            else ""
+        )
         lines.append(
             f"{mark} {row.reference:<8} {row.lcsc:<10} {row.footprint}: "
-            f"{row.raw:g}° -> {row.emitted:g}° ({source} {int(row.correction):+d}°{legacy})"
+            f"{row.raw:g}° -> {row.emitted:g}° ({source} {int(row.correction):+d}°{legacy}){caveat}"
         )
     lines.append("")
     lines.append(f"JLC pin-1 marker will look wrong ({len(summary.yellow)})")

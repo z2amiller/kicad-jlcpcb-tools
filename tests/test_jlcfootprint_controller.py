@@ -408,9 +408,10 @@ def test_lookup_misses_and_missing_documents(setup):
     assert check.cache.status("C404") == "none"
     d6 = check.verdicts.get("C404", board["parts"][3].footprint_hash)
     assert d6.status == "unknown" and "no JLC footprint data" in d6.notes
-    # No token in the name and no symbol: never a guess.
+    # No token in the name and no symbol: the footprint's own + mark decides (spec 16.6).
     c6 = check.verdicts.get("C16133", board["parts"][1].footprint_hash)
-    assert c6.status == "unknown" and "polarity unknown" in c6.notes
+    assert (c6.status, c6.rotation) == ("green", 0)
+    assert "polarity from the footprint's + mark" in c6.notes
     # The RD token orients the LED on its own; only the pin-1 light is unknown.
     d5 = check.verdicts.get("C5", board["parts"][2].footprint_hash)
     assert (d5.status, d5.rotation, d5.polarity_light) == ("green", 0, "unknown")

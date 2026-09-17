@@ -2,6 +2,7 @@
 
 import pytest
 
+from jlcfootprint.drawing import drawing_marks
 from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
 from jlcfootprint.naming import parse_package_name
@@ -32,6 +33,9 @@ def verdict_for(library, footprint, lcsc, functions=None):
         record.package_name,
         easyeda_pads_to_mm(record.pads),
         record.symbol_pins,
+        marks=drawing_marks(
+            record.symbol_shapes, record.footprint_shapes, record.footprint_origin
+        ),
     )
 
 
@@ -105,9 +109,25 @@ def test_0402_pads_under_an_0603_part_are_tight():
     assert "edge of your pads" in verdict.note_text
 
 
-def test_tantalum_without_token_or_label_is_unknown():
-    """CASE-B_3528 has no FD/RD token and its symbol pins are just 1 and 2: never guessed."""
+def test_tantalum_without_token_or_label_is_read_from_its_drawings():
+    """CASE-B_3528 has no FD/RD token and its symbol pins are just 1 and 2: the + marks decide (spec 16.6)."""
     verdict = verdict_for("Capacitor_Tantalum_SMD", "CP_EIA-3528-21_Kemet-B", "C16133")
+    assert (verdict.status, verdict.rotation, verdict.polarity_source) == (
+        "green",
+        0,
+        "drawing",
+    )
+    assert verdict.confidence == "medium"
+    assert "polarity from the + marks of the symbol and the footprint" in verdict.notes
+    record = recorded("C16133")
+    verdict = resolve(
+        library_pads("Capacitor_Tantalum_SMD", "CP_EIA-3528-21_Kemet-B"),
+        "Capacitor_Tantalum_SMD:CP_EIA-3528-21_Kemet-B",
+        record.status,
+        record.package_name,
+        easyeda_pads_to_mm(record.pads),
+        record.symbol_pins,
+    )
     assert verdict.status == "unknown"
     assert verdict.rotation is None
     assert "polarity unknown" in verdict.note_text
