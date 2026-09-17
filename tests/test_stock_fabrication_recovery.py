@@ -149,9 +149,11 @@ def generation_window(
         generator: Any,
         corrections: Optional[tuple[Any, ...]] = None,
         parts: Optional[Iterable[dict[str, Any]]] = None,
+        *,
+        decisions: Optional[dict[str, Any]] = None,
     ) -> tuple[tuple[Any, ...], ...]:
         """Observe snapshot capture once without counting reuse of frozen rows."""
-        rows = real_prepare(generator, corrections, parts)
+        rows = real_prepare(generator, corrections, parts, decisions=decisions)
         if parts is not None:
             placements.append(rows)
         return rows
