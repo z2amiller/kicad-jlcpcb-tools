@@ -149,3 +149,18 @@ def test_thread_processes_and_stops():
     assert not worker.is_running()
     assert worker.wait_for(0.0)
     assert not worker.acquire() or worker.bucket.tokens >= 0
+
+
+def test_a_shared_bucket_waits_on_the_asking_worker():
+    """Two workers share one budget; each waits on its own stop event."""
+    clock = Clock()
+    bucket = TokenBucket(clock=clock, jitter=lambda: 0.0)
+    first = FetchWorker(lambda code: None, lambda code, fetched: None, bucket=bucket)
+    second = FetchWorker(lambda code: None, lambda code, fetched: None, bucket=bucket)
+    assert first.bucket is second.bucket
+    for _ in range(BURST):
+        assert bucket.take()
+    first.stop()
+    second.stop()
+    assert not second.acquire()
+    assert not first.acquire()

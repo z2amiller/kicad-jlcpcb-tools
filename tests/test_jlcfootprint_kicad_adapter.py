@@ -10,6 +10,7 @@ from jlcfootprint.kicad_adapter import (
     counts_as_pad,
     footprint_pads,
     lcsc_value,
+    verdict_key,
 )
 
 
@@ -179,7 +180,8 @@ def test_top_part_reads_pads_in_the_footprint_frame():
     ) == ("Q1", "C2132", "Lib:Name", False, 90.0)
     assert part.pads[0] == Pad("1", -1.0, 0.95, 0.9, 0.8, 0.0, "B", "roundrect")
     assert [p.number for p in part.pads] == ["1", "2", "3"]
-    assert part.footprint_hash == pad_hash(part.pads)
+    assert part.footprint_hash == verdict_key(part.pads)
+    assert part.footprint_hash != pad_hash(part.pads)
     assert part.value == "value"
 
 
@@ -285,3 +287,31 @@ def test_board_parts_reads_every_footprint_with_a_reference():
         ].number
         == "1"
     )
+
+
+def test_verdict_key_includes_the_pin_functions():
+    """Swapped K/A functions give different keys; no function gives the pad hash itself."""
+    cathode_first = [
+        FakePad("1", -1, 0, function="K"),
+        FakePad("2", 1, 0, function="A"),
+    ]
+    anode_first = [FakePad("1", -1, 0, function="A"), FakePad("2", 1, 0, function="K")]
+    plain = [FakePad("1", -1, 0), FakePad("2", 1, 0)]
+    keyed = [
+        board_part(FakeFootprint("D1", pads), to_mm=lambda v: v)
+        for pads in (cathode_first, anode_first, plain)
+    ]
+    assert keyed[0].footprint_hash != keyed[1].footprint_hash
+    assert keyed[2].footprint_hash == pad_hash(keyed[2].pads)
+    assert keyed[0].footprint_hash != keyed[2].footprint_hash
+    spelled = [
+        FakePad("1", -1, 0, function="k_1"),
+        FakePad("2", 1, 0, function="anode"),
+    ]
+    assert (
+        verdict_key(board_part(FakeFootprint("D2", spelled), to_mm=lambda v: v).pads)
+        != keyed[0].footprint_hash
+    )
+    assert verdict_key(
+        [Pad("1", -1, 0, 1, 0.5, 0, "K"), Pad("2", 1, 0, 1, 0.5, 0, "A")]
+    ) == verdict_key([Pad("2", 1, 0, 1, 0.5, 0, "a"), Pad("1", -1, 0, 1, 0.5, 0, "k")])

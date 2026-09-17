@@ -13,11 +13,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+import hashlib
+import json
 import math
 import re
 from typing import Any
 
 from .geometry import Pad, mirror_y, pad_hash
+from .polarity import normalise_function
 
 # pcbnew's PAD_SHAPE and PAD_ATTRIB enumerations (KiCad 7 to 10) for boards read
 # without the module (tests, tools); the live module's values win when present.
@@ -48,8 +51,28 @@ class BoardPart:
     is_bottom: bool
     placed_rotation: float
     pads: list[Pad] = field(default_factory=list)
-    footprint_hash: str = ""
+    footprint_hash: str = ""  # verdict_key(pads): geometry plus pin functions
     value: str = ""
+
+
+def verdict_key(pads: list[Pad]) -> str:
+    """Return the key a verdict is stored under: the pad geometry plus the pin functions.
+
+    Two footprints with the same pads but swapped K/A functions need opposite
+    rotations (the corner-case board's D4 and D5 share C81598 on D_SOD-123), so the
+    functions are part of the key even though ``pad_hash`` leaves them out.  Without
+    any pin function the key is the pad hash itself, so a plain footprint on the top
+    and on the bottom share one verdict.
+    """
+    functions = sorted(
+        (pad.number, normalise_function(pad.pin_function))
+        for pad in pads
+        if normalise_function(pad.pin_function)
+    )
+    if not functions:
+        return pad_hash(pads)
+    payload = json.dumps([pad_hash(pads), functions]).encode("utf-8")
+    return hashlib.blake2b(payload, digest_size=8).hexdigest()
 
 
 def lcsc_value(footprint: Any) -> str:
@@ -160,7 +183,7 @@ def board_part(
         is_bottom=footprint.GetLayer() != FRONT_COPPER,
         placed_rotation=_degrees(footprint.GetOrientation()) % 360,
         pads=pads,
-        footprint_hash=pad_hash(pads),
+        footprint_hash=verdict_key(pads),
         value=str(footprint.GetValue()),
     )
 
