@@ -1,8 +1,8 @@
 """Tests for the two-pad paths: alignment by terminal meaning, and by axis."""
 
+from jlcfootprint.drawing import DrawingMarks
 from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.geometry import Pad
-from jlcfootprint.polarity import band_marks_positive
 from jlcfootprint.resolver import (
     kicad_reference_pad,
     label_reference_pad,
@@ -276,6 +276,9 @@ def test_vertical_jlc_drawing_uses_the_label_when_the_token_cannot_apply():
     )
     assert verdict.rotation == 270  # cathode (pad 2) at the bottom of JLC's drawing
     assert any("vertical" in note for note in verdict.notes)
+    # The token was noted, not applied, so it cannot accuse the footprint (kicad-z9y4).
+    assert verdict.confidence == "high"
+    assert "drawn non-standard" not in verdict.note_text
     cathode_on_top = resolve(
         KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", vertical, D1_PINS
     )
@@ -490,42 +493,23 @@ def test_non_polar_flag_marks_axis_and_marked_parts_only():
     assert not diode.non_polar
 
 
-def test_token_places_the_band_and_the_band_means_a_different_terminal_per_family():
-    """FD puts the band right: cathode on diodes, negative on cans, positive on tantalums."""
-    assert (
-        token_reference_side(
-            "CAP-SMD_L3.2-W1.6-RD-C7171", "positive", band_positive=True
-        )
-        == "left"
-    )
-    assert (
-        token_reference_side("CAP-SMD_L3.2-W1.6-FD", "positive", band_positive=True)
-        == "right"
-    )
+def test_token_places_the_band_which_is_the_cathode_or_the_negative_end():
+    """FD puts the band right: the cathode on diodes and the negative end on capacitors, molded chips included."""
+    assert token_reference_side("CAP-SMD_L3.2-W1.6-RD-C7171", "positive") == "right"
+    assert token_reference_side("CAP-SMD_L3.2-W1.6-FD", "positive") == "left"
+    assert token_reference_side("CAP-SMD_L3.5-W2.8-R-RD", "positive") == "right"
     assert token_reference_side("CAP-SMD_BD6.3-L6.6-W6.6-FD", "positive") == "left"
+    assert token_reference_side("CAP-SMD_BD6.3-L6.6-W6.6-FD", "negative") == "right"
     assert token_reference_side("SMF_L2.8-W1.8-LS3.7-FD-1", "cathode") == "right"
-    assert band_marks_positive(
-        "CAP-SMD_L3.2-W1.6-RD-C7171", "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A"
-    )
-    assert band_marks_positive("CASE-B_3528", "")
-    assert band_marks_positive(
-        "MPN-PACKAGE", "Capacitor_Tantalum_SMD:CP_EIA-3528-21_Kemet-B"
-    )
-    assert not band_marks_positive(
-        "CAP-SMD_BD6.3-L6.6-W6.6-RD", "Capacitor_SMD:CP_Elec_6.3x7.7"
-    )
-    assert not band_marks_positive(  # JLC's can decides over the KiCad hint
-        "CAP-SMD_BD6.3-L6.6-W6.6-RD", "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A"
-    )
-    assert not band_marks_positive("SMF_L2.8-W1.8-LS3.7-RD", "Diode_SMD:D_SMF")
+    assert token_reference_side("SMF_L2.8-W1.8-LS3.7-FD-1", "anode") == "left"
 
 
-def test_tantalum_rd_is_0_because_the_band_is_the_positive_end():
-    """C5 on the corner-case board (C7171): JLC draws the band, its + end, on the left at zero."""
+def test_c7171_marks_outvote_its_token_and_a_can_reads_the_same_token_plainly():
+    """C5 on the corner-case board (C7171): its RD token says 180 but both + marks say 0, and JLC's preview agreed with the marks."""
     kicad = [Pad("1", -1.3525, 0, 1.4, 1.2), Pad("2", 1.3525, 0, 1.4, 1.2)]
     jlc = [Pad("1", -1.53, 0, 1.4, 1.2), Pad("2", 1.53, 0, 1.4, 1.2)]
     numbered = [SymbolPin("1", "1"), SymbolPin("2", "2")]
-    verdict = resolve(
+    token_alone = resolve(
         kicad,
         "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A",
         "ok",
@@ -533,8 +517,30 @@ def test_tantalum_rd_is_0_because_the_band_is_the_positive_end():
         jlc,
         numbered,
     )
-    assert (verdict.rotation, verdict.name_rotation, verdict.status) == (0, 0, "green")
+    assert (token_alone.rotation, token_alone.name_rotation) == (180, 180)
+    assert token_alone.polarity_source == "token"
+    marks = DrawingMarks(positive_pin="1", positive_pad="1")
+    verdict = resolve(
+        kicad,
+        "Capacitor_Tantalum_SMD:CP_EIA-3216-18_Kemet-A",
+        "ok",
+        "CAP-SMD_L3.2-W1.6-RD-C7171",
+        jlc,
+        numbered,
+        marks=marks,
+    )
+    assert (verdict.rotation, verdict.name_rotation, verdict.status) == (
+        0,
+        180,
+        "green",
+    )
+    assert (verdict.polarity_source, verdict.confidence) == ("drawing", "medium")
     assert "assumed KiCad pad 1 = +" in verdict.note_text
+    assert (
+        "name token names the other pad; symbol + mark, footprint + mark decide"
+        in verdict.note_text
+    )
+    assert "drawn non-standard" not in verdict.note_text
     can = resolve(
         kicad,
         "Capacitor_SMD:CP_Elec_4x5.4",

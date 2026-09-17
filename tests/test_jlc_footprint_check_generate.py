@@ -142,7 +142,7 @@ def test_summary_dialog_shows_the_formatted_text(facade, monkeypatch):
     assert shown[0][0] == "window"
     assert shown[0][1] == text
     assert shown[-1] == "destroyed"
-    assert text.startswith("Applied rotations (1)")
+    assert text.startswith("Does not fit (0)\n\nApplied rotations (1)")
     assert "* Q1" in text
 
 

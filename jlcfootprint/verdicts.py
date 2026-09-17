@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS footprint_verdict (
   overlap_mean      REAL,
   angular_rms       REAL,
   residual_mm       REAL,
+  body_excess_mm    REAL,
   override_rotation INTEGER,
   override_note     TEXT,
   notes             TEXT,
@@ -69,6 +70,7 @@ class StoredVerdict:
     overlap_mean: float | None = None
     angular_rms: float | None = None
     residual_mm: float | None = None
+    body_excess_mm: float | None = None  # spec 16.6 item 4: the body-size caveat
     override_rotation: int | None = None
     override_note: str | None = None
     notes: str | None = None
@@ -109,6 +111,8 @@ class StoredVerdict:
 
 
 _COLUMNS = tuple(field.name for field in fields(StoredVerdict))
+# Columns added after the first release, created on an existing table at open.
+_ADDED_COLUMNS = (("body_excess_mm", "REAL"),)
 
 
 class VerdictStore:
@@ -118,6 +122,15 @@ class VerdictStore:
         self.db_path = str(db_path)
         with closing(self.connect()) as con, con:
             con.executescript(SCHEMA)
+            present = {
+                row["name"]
+                for row in con.execute("PRAGMA table_info(footprint_verdict)")
+            }
+            for column, kind in _ADDED_COLUMNS:
+                if column not in present:
+                    con.execute(
+                        f"ALTER TABLE footprint_verdict ADD COLUMN {column} {kind}"
+                    )
 
     def connect(self) -> sqlite3.Connection:
         """Open a connection with row access by name."""
@@ -198,6 +211,7 @@ class VerdictStore:
             overlap_mean=verdict.overlap_mean,
             angular_rms=verdict.angular_rms,
             residual_mm=verdict.residual_mm,
+            body_excess_mm=verdict.body_excess_mm,
             notes=verdict.note_text or None,
             resolved_at=int(time.time() if now is None else now),
         )

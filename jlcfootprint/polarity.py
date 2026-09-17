@@ -2,15 +2,14 @@
 
 Which pad is the cathode or the positive terminal, on the KiCad side from the
 schematic's pin functions and on the EasyEDA side from the footprint name's
-FD/RD token and the symbol's pin-1 label.  Anode and positive terminal are the
+FD/RD token, the symbol's pin-1 label and the drawings' ``+`` marks.  Anode and positive terminal are the
 same idea here, as are cathode and negative terminal: an LED whose symbol says
 ``+``/``-`` and a capacitor whose symbol says ``A``/``K`` must both resolve.
 """
 
 from __future__ import annotations
 
-import re
-
+from .drawing import DrawingMarks
 from .easyeda_parse import PIN1_ANODE_LABELS, PIN1_CATHODE_LABELS, SymbolPin
 from .geometry import Pad
 from .naming import (
@@ -29,6 +28,9 @@ _POSITIVE_TOKENS = frozenset({"+", "POS", "POSITIVE"})
 _NEGATIVE_TOKENS = frozenset({"-", "NEG", "NEGATIVE"})
 _CAP_LABELS = frozenset({"+", "-", "POS", "NEG"})
 _DIODE_LABELS = (PIN1_CATHODE_LABELS | PIN1_ANODE_LABELS) - _CAP_LABELS
+# Pin functions that say "no connection" rather than naming a signal: they carry no
+# terminal and do not disqualify the other pads' functions (kicad-x2ib).
+_NO_FUNCTION_TEXTS = frozenset({"NC", "N/C", "N.C.", "~", "DNC", "NP", "NU"})
 
 # The two terminal names, unified: the reference terminal of a diode is its cathode,
 # of a capacitor its positive terminal, and each name's opposite.
@@ -62,6 +64,23 @@ def normalise_function(text: str) -> str:
     return letters
 
 
+def is_no_function(text: str) -> bool:
+    """Return True for an empty pin function or one that says "not connected"."""
+    raw = text.strip().upper()
+    return (
+        not raw
+        or raw in _NO_FUNCTION_TEXTS
+        or normalise_function(text)
+        in (
+            "",
+            "NC",
+            "DNC",
+            "NP",
+            "NU",
+        )
+    )
+
+
 def terminal_of(pad: Pad, diode: bool = False) -> str:
     """Return ``cathode``, ``anode``, ``positive``, ``negative`` or ``""`` from the pin function.
 
@@ -83,15 +102,18 @@ def function_terminals(pads: list[Pad], diode: bool = False) -> set[str]:
     """Return the terminals the pads' functions name, or nothing when one names something else.
 
     A switch symbol's ``A``/``B`` and a connector's ``A1`` must not read as an anode: the
-    functions count only when every non-empty function on the pads is a terminal name.
+    functions count only when every function on the pads is a terminal name, where
+    an empty or "not connected" function (``NC``, ``DNC``, ``~``) is no function at
+    all rather than a disqualifying one.
     """
     terminals: set[str] = set()
     for pad in pads:
+        if is_no_function(pad.pin_function):
+            continue
         terminal = terminal_of(pad, diode)
-        if normalise_function(pad.pin_function) and not terminal:
+        if not terminal:
             return set()
-        if terminal:
-            terminals.add(terminal)
+        terminals.add(terminal)
     return terminals
 
 
@@ -171,37 +193,16 @@ def side_of(pad: Pad, pads: list[Pad]) -> str | None:
     return "left" if dx < 0 else "right"
 
 
-def band_marks_positive(package_name: str, kicad_footprint_name: str = "") -> bool:
-    """Return True when the part's marking band is its positive terminal.
-
-    The FD/RD token places the band.  On diodes the band is the cathode and on
-    aluminium electrolytic cans and radials (EasyEDA ``BD`` packages) the negative
-    end; on tantalum and other molded chips (``CAP-SMD_L…-W…``, ``CASE-…``, ``TANT…``,
-    KiCad's ``CP_EIA`` and ``Tantalum`` footprints) it is the positive end, so the same
-    token lands the positive terminal on the other side.  JLC's drawing decides when
-    its package name is conclusive; otherwise the KiCad footprint name is the hint.
-    Confirmed on C7171 (``CAP-SMD_L3.2-W1.6-RD``): JLC draws its + end on the left at
-    zero (placement preview, 2026-09-12).
-    """
-    name = package_name.upper()
-    footprint = kicad_footprint_name.rsplit(":", 1)[-1].upper()
-    if name.startswith("CAP") and "BD" in name.split("_", 1)[-1][:4]:
-        return False
-    if name.startswith(("CASE-", "TANT")) or re.match(r"^CAP[^_]*_L\d", name):
-        return True
-    return footprint.startswith(("CP_EIA", "TANTALUM")) or "TANTALUM" in footprint
-
-
-def token_reference_side(
-    package_name: str, reference: str, band_positive: bool = False
-) -> str | None:
+def token_reference_side(package_name: str, reference: str) -> str | None:
     """Return ``left``, ``right``, ``none`` (bidirectional) or None (no token) from FD/RD/BI.
 
     Forward direction puts the part's marking band on the right of the EasyEDA
     drawing (JLC's zero orientation) and reverse direction on the left.  The band
-    is the cathode or negative end unless ``band_positive`` says it is the positive
-    end (see ``band_marks_positive``), so for a diode FD means cathode right, for an
-    electrolytic can positive left, and for a tantalum positive right.
+    is the cathode of a diode and the negative end of a capacitor, so FD means
+    cathode right and positive left.  That reading held on the crawl's 203 marked
+    electrolytic and 39 of 45 marked molded-chip drawings (2026-09-17); the six
+    others, C7171's among them, are decided by the drawings' ``+`` marks in the
+    resolver, which outvote the token.
     """
     polarity = [
         t for t in extract_orientation_tokens(package_name) if t in ("FD", "RD", "BI")
@@ -212,8 +213,7 @@ def token_reference_side(
     if token == "BI":
         return "none"
     band_side = "right" if token == "FD" else "left"
-    band_terminal = "positive" if band_positive else "negative"
-    if reference in SAME_MEANING[band_terminal]:
+    if reference in SAME_MEANING["negative"]:
         return band_side
     return "left" if band_side == "right" else "right"
 
@@ -236,6 +236,37 @@ def label_reference_pad(
         return None
     pin1_is_reference = (polarity == "K") == (reference == "cathode")
     return pad1 if pin1_is_reference else other
+
+
+def drawing_reference_pad(
+    jlc_pads: list[Pad], marks: DrawingMarks | None, reference: str
+) -> tuple[Pad | None, str]:
+    """Return the EasyEDA pad carrying ``reference`` from the drawings' ``+`` marks.
+
+    The symbol's ``+`` names a pin number and the footprint's ``+`` a pad number
+    (:mod:`jlcfootprint.drawing`); both name the positive terminal, the anode of a
+    diode.  Returns the pad and which drawings said so: ``both``, ``footprint`` or
+    ``symbol``; ``(None, "")`` when neither drawing has a mark; ``(None,
+    "conflict")`` when the two marks name different pads.
+    """
+    if marks is None:
+        return None, ""
+    by_number = {pad.number: pad for pad in jlc_pads}
+    footprint = by_number.get(marks.positive_pad) if marks.positive_pad else None
+    symbol = by_number.get(marks.positive_pin) if marks.positive_pin else None
+    if footprint is not None and symbol is not None and footprint is not symbol:
+        return None, "conflict"
+    positive = footprint if footprint is not None else symbol
+    if positive is None:
+        return None, ""
+    if footprint is not None and symbol is not None:
+        source = "both"
+    else:
+        source = "footprint" if footprint is not None else "symbol"
+    if reference in SAME_MEANING["positive"]:
+        return positive, source
+    other = next((pad for pad in jlc_pads if pad is not positive), None)
+    return other, source
 
 
 def pin1_meaning(pads: list[Pad], kind: str, diode: bool = False) -> str | None:
