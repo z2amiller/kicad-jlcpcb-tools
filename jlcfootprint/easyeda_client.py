@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+import logging
 import time
 from typing import Any, Union
 
@@ -27,6 +28,8 @@ from .easyeda_parse import (
     parse_puuid_response,
     parse_symbol_response,
 )
+
+logger = logging.getLogger(__name__)
 
 DEVICES_URL = "https://pro.easyeda.com/api/devices/searchByCodes"
 DOCUMENT_URL = "https://pro.easyeda.com/api/components/{uuid}"
@@ -174,6 +177,11 @@ class EasyEdaClient:
                         f"HTTP {status} after retries", transient=True, status=status
                     )
                 pause = retry_after_seconds(getattr(response, "headers", None)) or delay
+                logger.info(
+                    "jlcfootprint: HTTP %d from EasyEDA; waiting %.0f s before trying again",
+                    status,
+                    pause,
+                )
                 if self.wait(pause):
                     raise FetchError(
                         f"HTTP {status}; stopped while backing off",

@@ -147,10 +147,14 @@ class Buckets:
 
 
 def estimate_seconds(lookups: int, documents: int) -> float:
-    """Return roughly how long the queued requests take at the buckets' paces."""
+    """Return roughly how long the queued requests take at the buckets' paces.
+
+    A queued code counts as its lookup chunk plus the two documents it may need,
+    so the estimate right after a scan covers the fetch, not just the lookups.
+    """
     return (
         math.ceil(lookups / BATCH_SIZE) * LOOKUP_INTERVAL_S
-        + documents * DOCUMENT_INTERVAL_S
+        + (documents + 2 * lookups) * DOCUMENT_INTERVAL_S
     )
 
 
@@ -189,6 +193,8 @@ class FetchWorker:
         self.in_flight: tuple[str, Any] | None = None
         self.current_bucket: TokenBucket | None = None
         self.first_attempt_paid = False
+        # The end of a backoff the job in flight is sleeping through (clock units).
+        self.backoff_until: float | None = None
         self.consecutive_failures = 0
         self.tripped = False
         self.thread = threading.Thread(
@@ -270,8 +276,25 @@ class FetchWorker:
         )
 
     def wait_for(self, seconds: float) -> bool:
-        """Wait up to ``seconds``; True when the worker was asked to stop."""
-        return self.wait(seconds)
+        """Wait up to ``seconds`` (the client's backoff); True when the worker was asked to stop."""
+        with self.lock:
+            self.backoff_until = self.clock() + seconds
+        try:
+            return self.wait(seconds)
+        finally:
+            with self.lock:
+                self.backoff_until = None
+
+    def active(self) -> tuple[int, float]:
+        """Return the jobs in flight (0 or 1) and the seconds left of a backoff one sleeps through."""
+        with self.lock:
+            jobs = 0 if self.in_flight is None else 1
+            remaining = (
+                0.0
+                if self.backoff_until is None
+                else max(0.0, self.backoff_until - self.clock())
+            )
+        return jobs, remaining
 
     def acquire(self) -> bool:
         """Spend a request token for the job in flight; False when stopping.
@@ -365,12 +388,16 @@ class FetchWorker:
             try:
                 self._process(kind, payload)
             finally:
-                with self.lock:
-                    self.in_flight = None
-                    self.current_bucket = None
-                    self.first_attempt_paid = False
+                self._release()
             done += 1
         return done
+
+    def _release(self) -> None:
+        """Clear the in-flight slot; harmless when it is already clear."""
+        with self.lock:
+            self.in_flight = None
+            self.current_bucket = None
+            self.first_attempt_paid = False
 
     def _process(self, kind: str, payload: Any) -> None:
         """Run one job and report it; a raised exception counts as a transient failure."""
@@ -382,6 +409,10 @@ class FetchWorker:
         except Exception as error:
             logger.exception("jlcfootprint: %s %s raised", kind, payload)
             fetched = _Failure(str(error))
+        # The request is over before its handler runs, so a handler, or a scan on
+        # the main thread right after it, that queues this key again is heard
+        # instead of being dropped as in flight.
+        self._release()
         transient = bool(getattr(fetched, "transient", False))
         if transient:
             self.consecutive_failures += 1

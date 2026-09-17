@@ -93,8 +93,9 @@ def test_default_buckets_and_the_estimate_follow_the_spec():
     )
     assert BATCH_SIZE == easyeda_client.BATCH_SIZE == 200
     assert estimate_seconds(0, 0) == 0.0
-    assert estimate_seconds(1, 25) == LOOKUP_INTERVAL_S + 25 * DOCUMENT_INTERVAL_S
-    assert estimate_seconds(201, 0) == 2 * LOOKUP_INTERVAL_S
+    # A queued code is its chunk plus up to two documents.
+    assert estimate_seconds(1, 25) == LOOKUP_INTERVAL_S + 27 * DOCUMENT_INTERVAL_S
+    assert estimate_seconds(201, 0) == 2 * LOOKUP_INTERVAL_S + 402 * DOCUMENT_INTERVAL_S
 
 
 def _worker(lookup=None, fetch=None, on_lookup=None, on_document=None, on_tripped=None):
@@ -122,7 +123,9 @@ def test_lookups_settle_then_go_out_in_chunks():
     assert worker.enqueue_lookups(codes + ["C1", ""]) == 250
     assert worker.enqueue_lookups(["C2"]) == 0
     assert worker.counts() == {"lookups": 250, "footprints": 0, "symbols": 0}
-    assert worker.estimate_seconds() == 2 * LOOKUP_INTERVAL_S
+    assert (
+        worker.estimate_seconds() == 2 * LOOKUP_INTERVAL_S + 500 * DOCUMENT_INTERVAL_S
+    )
     assert worker.pending_lookups() == set(codes)
     assert worker.run_pending() == 2
     assert clock.waits == [COALESCE_S]
@@ -254,6 +257,44 @@ def test_acquire_pays_once_for_the_first_attempt_and_per_retry_after_that():
     worker.run_pending()
     assert seen == [(True, DOCUMENT_BURST - 1), (True, DOCUMENT_BURST - 2)]
     assert worker.acquire() and worker.buckets.documents.tokens == DOCUMENT_BURST - 3
+
+
+def test_a_job_leaves_the_in_flight_slot_before_its_handler_runs():
+    """A handler that queues the key it is handling is heard, not dropped as in flight."""
+    worker, log, _ = _worker()
+    seen = []
+
+    def on_document(kind, uuid, result):
+        log["documents"].append((kind, uuid))
+        if len(log["documents"]) == 1:
+            seen.append((worker.in_flight, worker.active()))
+            seen.append(worker.enqueue_documents([(kind, uuid)]))
+
+    worker.on_document = on_document
+    worker.enqueue_documents([(FOOTPRINT, "f1")])
+    assert worker.run_pending() == 2
+    assert seen == [(None, (0, 0.0)), 1]
+    assert log["documents"] == [(FOOTPRINT, "f1"), (FOOTPRINT, "f1")]
+
+
+def test_active_reports_the_job_in_flight_and_its_backoff():
+    """While a fetch runs one job is active; a backoff it sleeps through is time still to wait."""
+    seen = []
+
+    def fetch(kind, uuid):
+        seen.append(worker.active())
+        worker.wait_for(30.0)
+        seen.append(worker.active())
+        return SimpleNamespace(record=uuid, transient=False)
+
+    worker, _, clock = _worker(fetch=fetch)
+    worker.wait = lambda seconds: (seen.append(worker.active()), clock.wait(seconds))[1]
+    assert worker.active() == (0, 0.0)
+    worker.enqueue_documents([(FOOTPRINT, "f1")])
+    assert worker.run_pending() == 1
+    assert seen == [(1, 0.0), (1, 30.0), (1, 0.0)]
+    assert clock.waits == [30.0]
+    assert worker.active() == (0, 0.0)
 
 
 def test_thread_processes_and_stops():
