@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BOARD = ROOT / "scripts" / "corner_case" / "corner_case.kicad_pcb"
 TRUTH = ROOT / "tests" / "fixtures" / "jlcfootprint" / "truth.csv"
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
+PRO_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda_pro"
 
 
 def load_validator():
@@ -34,3 +35,28 @@ def test_corner_case_board_matches_jlc():
     assert by_reference["U7"].fit == "count"
     assert by_reference["R4"].fit == "fits_tight"
     assert by_reference["D9"].polarity_light == "yellow"
+
+
+def test_corner_case_board_matches_jlc_from_the_pro_fixtures():
+    """Read the way the plugin fetches live (spec 15), the board reproduces the same truth."""
+    if not TRUTH.exists():
+        pytest.skip("truth.csv not recorded yet (plan Task 12)")
+    validator = load_validator()
+    rows = validator.evaluate(BOARD, FIXTURES, pro_fixtures=PRO_FIXTURES)
+    truth = validator.load_truth(TRUTH)
+    assert validator.compare(rows, truth) == []
+    by_reference = {row["reference"]: row["verdict"] for row in rows}
+    assert all(row["verdict"] is not None for row in rows), "every part is recorded"
+    assert by_reference["U7"].fit == "count"
+    assert by_reference["R4"].fit == "fits_tight"
+    assert by_reference["D9"].polarity_light == "yellow"
+    classic = {
+        row["reference"]: row["verdict"] for row in validator.evaluate(BOARD, FIXTURES)
+    }
+    assert {
+        ref: (v.status if v.status != "yellow" else "green", v.rotation)
+        for ref, v in by_reference.items()
+    } == {
+        ref: (v.status if v.status != "yellow" else "green", v.rotation)
+        for ref, v in classic.items()
+    }
