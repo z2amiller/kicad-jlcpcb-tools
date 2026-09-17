@@ -475,6 +475,7 @@ class Fabrication:
                 note=decision.note if decision is not None else "",
                 pending=bool(decision.pending) if decision is not None else False,
                 legacy_correction=None if match is None else match.correction.rotation,
+                body_excess=getattr(decision, "body_excess", None),
             )
         )
         return rotation

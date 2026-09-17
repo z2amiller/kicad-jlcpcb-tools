@@ -6,7 +6,7 @@ import sqlite3
 import pytest
 
 from jlcfootprint.resolver import Verdict
-from jlcfootprint.verdicts import PENDING, StoredVerdict, VerdictStore
+from jlcfootprint.verdicts import PENDING, SCHEMA, StoredVerdict, VerdictStore
 
 SPEC_COLUMNS = [
     "lcsc",
@@ -26,6 +26,7 @@ SPEC_COLUMNS = [
     "overlap_mean",
     "angular_rms",
     "residual_mm",
+    "body_excess_mm",
     "override_rotation",
     "override_note",
     "notes",
@@ -75,6 +76,33 @@ def test_schema_matches_the_spec(store):
     assert columns == SPEC_COLUMNS
     assert keys == ["lcsc", "footprint_hash"]
     VerdictStore(store.db_path)  # idempotent beside upstream's own tables
+
+
+def test_an_older_table_gains_the_caveat_column(tmp_path):
+    """A project.db written before the body caveat is migrated in place, rows kept."""
+    path = tmp_path / "project.db"
+    with closing(sqlite3.connect(path)) as con, con:
+        con.executescript(SCHEMA.replace("  body_excess_mm    REAL,\n", ""))
+        con.execute(
+            "INSERT INTO footprint_verdict (lcsc, footprint_hash, status, rotation,"
+            " override_rotation) VALUES ('C1', 'h', 'green', 90, 180)"
+        )
+    store = VerdictStore(str(path))
+    stored = store.get("C1", "h")
+    assert stored is not None
+    assert (stored.rotation, stored.override_rotation, stored.body_excess_mm) == (
+        90,
+        180,
+        None,
+    )
+    with closing(sqlite3.connect(path)) as con:
+        columns = [
+            row[1] for row in con.execute("PRAGMA table_info(footprint_verdict)")
+        ]
+    assert columns[:-1] == SPEC_COLUMNS[:17] + SPEC_COLUMNS[18:]
+    assert columns[-1] == "body_excess_mm"
+    saved = store.save("C1", "h", "F", "p", _verdict(body_excess_mm=0.9))
+    assert (saved.body_excess_mm, saved.override_rotation) == (0.9, 180)
 
 
 def test_save_and_get_round_trip(store):

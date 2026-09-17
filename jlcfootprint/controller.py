@@ -24,6 +24,7 @@ import time
 from typing import Any
 
 from .cache import Cache, CachedPart
+from .drawing import drawing_marks
 from .easyeda_client import EasyEdaClient
 from .easyeda_parse import ComponentRecord
 from .geometry import easyeda_pads_to_mm
@@ -84,6 +85,7 @@ class Decision:
     fit: str | None = None
     note: str = ""
     pending: bool = False
+    body_excess: float | None = None  # the body-size caveat in mm (spec 16.6 item 4)
     verdict: StoredVerdict | None = field(default=None, repr=False)
 
     @property
@@ -247,6 +249,10 @@ class FootprintCheck:
             easyeda_pads_to_mm(record.pads),
             record.symbol_pins,
             cached.polarity_source,
+            marks=drawing_marks(
+                record.symbol_shapes, record.footprint_shapes, record.footprint_origin
+            ),
+            kicad_courtyard=part.courtyard,
         )
 
     def _resolve_and_store(self, part: BoardPart, cached: CachedPart) -> StoredVerdict:
@@ -448,6 +454,7 @@ class FootprintCheck:
             fit=stored.fit,
             note=stored.override_note or stored.notes or "",
             pending=pending or stored.status == PENDING,
+            body_excess=stored.body_excess_mm,
             verdict=stored,
         )
 
