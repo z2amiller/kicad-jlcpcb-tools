@@ -670,6 +670,10 @@ def window_ui(
             selected_library="old", data_path=str(tmp_path / "catalog")
         )
         settings["part_preferences"]["remember_lcsc_assignments"] = False
+        # The JLC footprint check would scan this board double on open (its
+        # footprints have no position or pads) and fetch from EasyEDA; the
+        # headless harness stubs the check off, and so do these windows.
+        settings["jlcfootprint"]["enabled"] = False
         ui.settings = settings
         ui.defaults_path = tmp_path / "default_settings.json"
         ui.settings_path = tmp_path / "settings.json"

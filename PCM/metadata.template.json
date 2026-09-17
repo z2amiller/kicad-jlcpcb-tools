@@ -25,7 +25,8 @@
         "plugins/[^/]+/settings\\.json$",
         "plugins/[^/]+/jlcpcb/corrections\\.db$",
         "plugins/[^/]+/jlcpcb/mappings\\.db$",
-        "plugins/[^/]+/jlcpcb/global\\.db$"
+        "plugins/[^/]+/jlcpcb/global\\.db$",
+        "plugins/[^/]+/jlcpcb/jlcfootprint-cache\\.db$"
     ],
     "versions": [{
         "version": "VERSION_HERE",
