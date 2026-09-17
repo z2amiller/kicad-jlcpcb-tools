@@ -35,6 +35,7 @@ from pcbnew import (  # pylint: disable=import-error
 
 from .correction_data import Correction, CorrectionMatch, match_correction
 from .footprint_helpers import get_is_dnp
+from .jlcfootprint.report import CplRotation
 
 # JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
 # 128 characters of headroom for the other fields (Comment, Footprint, LCSC,
@@ -96,6 +97,7 @@ class Fabrication:
         self.logger = logging.getLogger(__name__)
         self.board = board
         self.corrections: tuple[Correction, ...] = ()
+        self.rotation_report: list[CplRotation] = []
         self.path, self.filename = os.path.split(self.board.GetFileName())
         self.create_folders()
 
@@ -411,21 +413,71 @@ class Fabrication:
     def generate_cpl(
         self,
         corrections: Optional[tuple[Correction, ...]] = None,  # noqa: UP045
+        decisions: Optional[dict[str, Any]] = None,  # noqa: UP045
     ) -> None:
         """Prepare every placement before opening the output file."""
-        self.write_cpl(self.prepare_cpl(corrections))
+        self.write_cpl(self.prepare_cpl(corrections, decisions))
+
+    def _rotation_for_decision(
+        self,
+        footprint: Any,
+        decision: Any,
+        match: Optional[CorrectionMatch],
+        part: dict,  # noqa: UP045
+    ) -> float:
+        """Apply the footprint check's decision (spec section 8) and record the summary row.
+
+        A decision without a rotation, a pending part and a part without a verdict all
+        keep the raw angle.  The correction rule that would have matched is only noted.
+        """
+        raw = self._rotation_for_match(footprint, None)
+        correction = None if decision is None else decision.rotation
+        rotation = (
+            raw if correction is None else self.rotate(footprint, raw, correction)
+        )
+        self.rotation_report.append(
+            CplRotation(
+                reference=str(part["reference"]),
+                lcsc=str(part["lcsc"] or ""),
+                footprint=str(part["footprint"]),
+                value=str(part["value"]),
+                raw=raw,
+                emitted=rotation,
+                correction=correction,
+                source=(
+                    decision.source
+                    if decision is not None and correction is not None
+                    else "raw"
+                ),
+                status=decision.status if decision is not None else "no-verdict",
+                polarity_light=decision.polarity_light
+                if decision is not None
+                else None,
+                fit=decision.fit if decision is not None else None,
+                note=decision.note if decision is not None else "",
+                pending=bool(decision.pending) if decision is not None else False,
+                legacy_correction=None if match is None else match.correction.rotation,
+            )
+        )
+        return rotation
 
     def prepare_cpl(
         self,
         corrections: Optional[tuple[Correction, ...]] = None,  # noqa: UP045
+        decisions: Optional[dict[str, Any]] = None,  # noqa: UP045
     ) -> tuple[tuple[Any, ...], ...]:
         """Capture placement rows from one complete immutable correction set.
 
         Direct calls read current storage; a supplied preflight tuple stays fixed
         for the operation. Unavailable or unresolved storage is rejected before
         touching the board or opening an existing output file.
+
+        With ``decisions`` (the JLC footprint check's rotation per reference, spec
+        section 8) each rotation is the decision's, or the raw angle when it has
+        none, and no correction rule is applied; the rules are read only when
+        available, to note in ``rotation_report`` what they would have done.
         """
-        if corrections is None:
+        if corrections is None and decisions is None:
             snapshot = self.parent.library.read_correction_data()
             corrections = snapshot.corrections
             if corrections is None:
@@ -434,11 +486,13 @@ class Fabrication:
                     f"database ({snapshot.db_path}). Open Corrections Manager "
                     "to repair or retry loading before generating fabrication files."
                 )
-        if not isinstance(corrections, tuple) or any(
-            not isinstance(correction, Correction) for correction in corrections
+        if corrections is not None and (
+            not isinstance(corrections, tuple)
+            or any(not isinstance(correction, Correction) for correction in corrections)
         ):
             raise TypeError("Expected an immutable tuple of Correction values")
-        self.corrections = corrections
+        self.corrections = corrections if corrections is not None else ()
+        self.rotation_report = []
         aux_origin = self.board.GetDesignSettings().GetAuxOrigin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
@@ -457,14 +511,24 @@ class Fabrication:
                 continue
             if not add_without_lcsc and not part["lcsc"]:
                 continue
-            match = self._correction_for_footprint(fp)
+            match = (
+                self._correction_for_footprint(fp) if corrections is not None else None
+            )
             try:
                 center = self.get_position(fp)
                 # Subtract in Python, before native coordinate arithmetic can wrap.
                 position = SimpleNamespace(
                     x=center.x - aux_origin.x, y=center.y - aux_origin.y
                 )
-                position = self._position_for_match(fp, position, match)
+                if decisions is None:
+                    position = self._position_for_match(fp, position, match)
+                    rotation = self._rotation_for_match(fp, match)
+                else:
+                    # The footprint check owns the rotation; offsets stay upstream's
+                    # pad-bounding-box centre (spec section 8).
+                    rotation = self._rotation_for_decision(
+                        fp, decisions.get(fp.GetReference()), match, part
+                    )
                 position = _checked_position(position.x, position.y)
                 rows.append(
                     (
@@ -477,7 +541,7 @@ class Fabrication:
                         # https://docs.kicad.org/doxygen/base__units_8h.html
                         f"{ToMM(position.x):.6f}",
                         f"{ToMM(position.y) * -1:.6f}",
-                        self._rotation_for_match(fp, match),
+                        rotation,
                         "top" if fp.GetLayer() == 0 else "bottom",
                     )
                 )
