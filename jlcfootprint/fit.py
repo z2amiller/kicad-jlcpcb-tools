@@ -14,7 +14,7 @@ import math
 
 from .easyeda_parse import SymbolPin
 from .geometry import Pad, centroid, named_pads, pad_geom
-from .polarity import normalise_function
+from .polarity import is_no_function, normalise_function
 from .quality import assess_quality
 from .solver import solve_transform
 
@@ -112,7 +112,8 @@ def pair_by_function(
     """Pair pads by pin function when the numbers do not line up, or return None.
 
     A KiCad pad's function is the schematic pin name it carries (``D_2`` reads as
-    ``D``); a JLC pad's name is its symbol pin's label.  A name that occurs once on
+    ``D``; ``NC`` and its kin name nothing); a JLC pad's name is its symbol pin's
+    label.  A name that occurs once on
     each side pairs the two pads (a group of KiCad pads sharing a number counts
     once).  At least two names must pair; when exactly one KiCad number and one JLC
     number are then left, they pair by elimination.  Any other unpaired JLC pad
@@ -121,7 +122,7 @@ def pair_by_function(
     labels: dict[str, str] = {}
     for pin in symbol_pins:
         name = normalise_function(pin.label)
-        if name:
+        if name and not is_no_function(pin.label):
             labels.setdefault(pin.number, name)
     groups_k: dict[str, list[Pad]] = {}
     for pad in named_pads(kicad_pads):
@@ -133,7 +134,8 @@ def pair_by_function(
     for number, group in groups_k.items():
         for pad in group:
             name = normalise_function(pad.pin_function)
-            if name:
+            if name and not is_no_function(pad.pin_function):
+                # NC names no pin: two pads that merely lack a signal never pair.
                 functions_k[number] = name
                 break
     by_name_k: dict[str, list[str]] = {}

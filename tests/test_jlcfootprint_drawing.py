@@ -10,11 +10,13 @@ from jlcfootprint.drawing import (
     drawing_marks,
     footprint_bars,
     footprint_body_box,
+    footprint_edges,
     footprint_pads,
     footprint_positive_pad,
     is_pro,
     plus_marks,
     symbol_bars,
+    symbol_edges,
     symbol_pins,
     symbol_positive_pin,
 )
@@ -199,6 +201,47 @@ def test_outline_corners_t_junctions_and_lone_bars_are_not_a_plus():
     assert footprint_positive_pad(TWO_PADS + tee) is None
     stripe = [pro_fill(13, -64, -30, -56, 30)]
     assert footprint_positive_pad(TWO_PADS + stripe) is None
+
+
+def test_a_polyline_through_the_crossing_rejects_it():
+    """A diode's silk arrow drawn as one polyline ends on its bar where the lead crosses it.
+
+    The classic C2480 silk shows that crossing (the bar and the lead alone form a
+    geometric +, 6 % off centre); the arrow's edges reject it.  A polygon beside a
+    bar's end, as pad outlines are drawn on the document layer, rejects nothing.
+    """
+    shapes = recorded("C2480").footprint_shapes
+    silk = [bar for bar in footprint_bars(shapes) if bar.layer == "silk"]
+    silk_edges = [edge for edge in footprint_edges(shapes) if edge.layer == "silk"]
+    assert len(plus_marks(silk, 15.47, (0.05, 0.7))) == 1
+    assert plus_marks(silk, 15.47, (0.05, 0.7), silk_edges) == []
+    assert footprint_positive_pad(shapes) == "2"
+    arrow = ['["POLY","arrow",0,"",13,6,[-45,-15,"L",-60,0,-45,15,-45,-15],0]']
+    assert footprint_positive_pad(TWO_PADS + plus_at(13, -60, 0) + arrow) is None
+    beside = [
+        '["POLY","pad1",0,"",13,6,[-70,-25,"L",-50,-25,-50,-16,-70,-16,-70,-25],0]'
+    ]
+    assert footprint_positive_pad(TWO_PADS + plus_at(13, -60, 0) + beside) == "1"
+    triangle = pro_record("C2480").symbol_shapes
+    assert any(not (e.horizontal or e.vertical) for e in symbol_edges(triangle))
+
+
+def test_edges_skip_arcs_and_circles():
+    """An arc breaks the edge chain and a circle gives no edge; a wide filled region gives its sides, not a bar."""
+    arc = ['["POLY","e9",0,"",3,15.7,[-134,-68.7,"ARC",359.27,-134,-68.8],0]']
+    assert footprint_edges(arc) == []
+    circle = ['["POLY","e2",0,"",13,15.7,["CIRCLE",-90,-125,7.87],0]']
+    assert footprint_edges(circle) == []
+    square = ['["FILL","f",0,"",13,0.2,0,[[0,0,"L",10,0,10,10,0,10,0,0]],0]']
+    assert len(footprint_edges(square)) == 4 and footprint_bars(square) == []
+    classic = [
+        "TRACK~1~3~~0 0 10 0 10 10~gge1~0",
+        "SOLIDREGION~12~~M 0 0 L 10 0 L 10 10 Z ~solid~gge2~~~~0",
+    ]
+    assert [
+        len([e for e in footprint_edges(classic) if e.layer == layer])
+        for layer in ("silk", "document")
+    ] == [2, 2]
 
 
 def test_a_plus_must_stand_alone_and_its_bars_must_be_alike():

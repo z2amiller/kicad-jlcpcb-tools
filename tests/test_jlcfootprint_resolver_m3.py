@@ -6,7 +6,7 @@ from jlcfootprint.drawing import DrawingMarks, drawing_marks
 from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
 from jlcfootprint.polarity import function_terminals, is_no_function, part_kind
-from jlcfootprint.resolver import body_threshold_mm, resolve
+from jlcfootprint.resolver import YELLOW_NOTE, body_threshold_mm, resolve
 from tests.jlcfootprint_support import library_footprint, pro_record, with_functions
 
 KICAD_SMF = [
@@ -177,8 +177,8 @@ def test_token_and_label_outvote_a_footprint_mark():
     assert verdict.polarity_light == "green"
 
 
-def test_both_marks_outvote_a_live_label_and_the_light_goes_unknown():
-    """Two marks against a label: the marks decide and the label no longer speaks for pin 1's meaning."""
+def test_both_marks_outvote_a_live_label_and_the_light_follows_the_vote():
+    """Two marks against a label: the marks decide, and pin 1's meaning comes from the vote, not the outvoted label."""
     marks = DrawingMarks(positive_pin="1", positive_pad="1")
     verdict = resolve(
         KICAD_SMF,
@@ -190,9 +190,56 @@ def test_both_marks_outvote_a_live_label_and_the_light_goes_unknown():
         marks=marks,
     )
     assert (verdict.rotation, verdict.polarity_source) == (180, "drawing")
-    assert verdict.polarity_light == "unknown"
+    # JLC's pad 1 is the anode by the vote and KiCad's pad 1 is the cathode.
+    assert (verdict.polarity_light, verdict.status) == ("yellow", "yellow")
+    assert YELLOW_NOTE in verdict.notes
     assert (
         "symbol pin-1 label names the other pad; symbol + mark, footprint + mark decide"
+        in verdict.notes
+    )
+
+
+def test_the_light_is_known_whenever_the_vote_settles_pad_1():
+    """Without any label the token or the marks still say what JLC's pad 1 is: green when it matches KiCad's pad 1, yellow when not."""
+    token_only = resolve(
+        KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, NUMBERED
+    )
+    assert (token_only.polarity_light, token_only.status) == ("green", "green")
+    reversed_token = resolve(
+        KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-FD", JLC_SMF, NUMBERED
+    )
+    assert (reversed_token.rotation, reversed_token.polarity_light) == (180, "yellow")
+    marks_only = resolve(
+        KICAD_SMF,
+        "Diode_SMD:D_SMF",
+        "ok",
+        "DIO-SMD_L2.8-W1.8",
+        JLC_SMF,
+        NUMBERED,
+        marks=DrawingMarks(positive_pad="2"),
+    )
+    assert (marks_only.rotation, marks_only.polarity_light) == (0, "green")
+
+
+def test_token_label_and_symbol_mark_outvote_a_footprint_mark():
+    """Marks that name different pads are two votes, not a veto: three sources against the footprint's mark decide."""
+    marks = DrawingMarks(positive_pin="2", positive_pad="1")
+    verdict = resolve(
+        KICAD_SMF,
+        "Diode_SMD:D_SMF",
+        "ok",
+        "SMF_L2.8-W1.8-LS3.7-RD",
+        JLC_SMF,
+        D1_PINS,
+        marks=marks,
+    )
+    assert (verdict.status, verdict.rotation, verdict.confidence) == (
+        "green",
+        0,
+        "medium",
+    )
+    assert (
+        "footprint + mark names the other pad; name token, symbol pin-1 label, symbol + mark decide"
         in verdict.notes
     )
 
@@ -210,9 +257,8 @@ def test_marks_that_contradict_each_other_are_inconsistent():
         marks=marks,
     )
     assert (verdict.status, verdict.rotation) == ("red", None)
-    assert (
-        "the symbol's + mark and the footprint's + mark name different pins"
-        in verdict.note_text
+    assert verdict.note_text.endswith(
+        "EasyEDA data inconsistent: symbol + mark and footprint + mark disagree"
     )
 
 
@@ -255,6 +301,35 @@ def test_a_lone_footprint_mark_decides_when_nothing_else_speaks():
         "medium",
     )
     assert "polarity from the footprint's + mark" in verdict.notes
+
+
+def test_reversed_numbering_with_pin_functions_pairs_by_function():
+    """A JLC SOT-23 numbered the other way round is a mirror by number; the schematic's B/E/C pair the pins and the part fits as drawn."""
+    kicad = [
+        Pad("1", -0.95, 1.0, 0.6, 1.0, 0.0, "B"),
+        Pad("2", 0.95, 1.0, 0.6, 1.0, 0.0, "E"),
+        Pad("3", 0.0, -1.0, 0.6, 1.0, 0.0, "C"),
+    ]
+    jlc = [
+        Pad("2", -0.95, 1.0, 0.6, 1.0),
+        Pad("1", 0.95, 1.0, 0.6, 1.0),
+        Pad("3", 0.0, -1.0, 0.6, 1.0),
+    ]
+    pins = [SymbolPin("1", "E"), SymbolPin("2", "B"), SymbolPin("3", "C")]
+    paired = resolve(
+        kicad, "Package_TO_SOT_SMD:SOT-23", "ok", "SOT-23-3_L2.9-W1.6", jlc, pins
+    )
+    assert (paired.status, paired.rotation, paired.confidence) == ("green", 0, "medium")
+    assert "JLC pin 2 (B) is pad 1 on the footprint" in paired.note_text
+    blind = resolve(
+        [pad._replace(pin_function="") for pad in kicad],
+        "Package_TO_SOT_SMD:SOT-23",
+        "ok",
+        "SOT-23-3_L2.9-W1.6",
+        jlc,
+        pins,
+    )
+    assert (blind.status, blind.fit, blind.rotation) == ("red", "mirror", None)
 
 
 # --- item 3: kicad-x2ib ---------------------------------------------------
