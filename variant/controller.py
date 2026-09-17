@@ -634,12 +634,16 @@ class VariantMainController:
         if self.session.reliable:
             self.recompute()
 
-    def begin_generation(self, corrections: Any) -> None:
+    def begin_generation(self, corrections: Any, *, decisions: Any = None) -> None:
         """Freeze the explicit output source before preparing any fabrication data."""
         snapshot, variant = self.session.begin_generation()
         self._publish_output()
         self.dialog.fabrication.begin_generation(
-            snapshot, variant, corrections, self.session.validate_generation
+            snapshot,
+            variant,
+            corrections,
+            self.session.validate_generation,
+            decisions=decisions,
         )
 
     def end_generation(self) -> None:

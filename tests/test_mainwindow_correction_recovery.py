@@ -546,7 +546,7 @@ def test_unknown_archive_warnings_keep_healthy_display_and_generation_ready(
     runtime.mainwindow.JLCPCBTools.generate_fabrication_data(generation)
     assert steps[0] == "Validating corrections"
     generation.fabrication.begin_ordinary_generation.assert_called_once_with(
-        snapshot.corrections
+        snapshot.corrections, decisions=None
     )
     generation.fabrication.write_cpl.assert_called_once_with(
         generation.fabrication.begin_ordinary_generation.return_value.cpl_rows

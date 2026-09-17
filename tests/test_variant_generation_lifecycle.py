@@ -103,11 +103,15 @@ def generation(mainwindow_module: Any, modules: Any, tmp_path: Path) -> Generati
         destination.write_bytes(("previous " + key).encode())
     previous = {key: path.read_bytes() for key, path in paths.items()}
 
-    def begin(corrections: Any) -> None:
+    def begin(corrections: Any, *, decisions: Any = None) -> None:
         """Use the controller's production session/exporter call sequence."""
         snapshot, name = session.begin_generation()
         exporter.begin_generation(
-            snapshot, name, corrections, session.validate_generation
+            snapshot,
+            name,
+            corrections,
+            session.validate_generation,
+            decisions=decisions,
         )
 
     def end() -> None:
