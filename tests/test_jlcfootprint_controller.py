@@ -7,7 +7,7 @@ from jlcfootprint.controller import Decision, FootprintCheck
 from jlcfootprint.easyeda_client import Fetched
 from jlcfootprint.easyeda_parse import ComponentRecord
 from jlcfootprint.geometry import pad_hash
-from jlcfootprint.kicad_adapter import BoardPart
+from jlcfootprint.kicad_adapter import BoardPart, verdict_key
 from jlcfootprint.verdicts import PENDING, VerdictStore
 from jlcfootprint.worker import FetchWorker
 
@@ -79,7 +79,13 @@ def setup(tmp_path):
     messages = []
     cache = Cache(str(tmp_path / "cache.db"))
     verdicts = VerdictStore(str(tmp_path / "project.db"))
-    client = FakeClient({"C2132": recorded("C2132"), "C2286": recorded("C2286")})
+    client = FakeClient(
+        {
+            "C2132": recorded("C2132"),
+            "C2286": recorded("C2286"),
+            "C7502694": recorded("C7502694"),
+        }
+    )
     clock = Clock()
     check = FootprintCheck(
         cache,
@@ -272,3 +278,87 @@ def test_client_shares_the_worker_pacing_and_stop(tmp_path):
     check.start()
     check.stop()
     assert not check.worker.is_running()
+
+
+def sod323(reference, functions, lcsc="C7502694"):
+    """Return a SOD-323 diode part with the given pin functions."""
+    pads = with_functions(library_pads("Diode_SMD", "D_SOD-323"), functions)
+    return BoardPart(
+        reference, lcsc, "Diode_SMD:D_SOD-323", False, 0.0, pads, verdict_key(pads)
+    )
+
+
+def test_swapped_pin_functions_get_their_own_verdicts(setup):
+    """Two footprints with the same pads but K/A swapped are keyed apart and rotate 180 apart."""
+    check, board, events, _, client = setup
+    d4 = sod323("D4", {"1": "K", "2": "A"})
+    d5 = sod323("D5", {"1": "A", "2": "K"})
+    assert d4.footprint_hash != d5.footprint_hash
+    board["parts"] = [d4, d5]
+    check.scan_board()
+    check.worker.run_pending()
+    assert client.fetched == ["C7502694"]
+    first = check.verdicts.get("C7502694", d4.footprint_hash)
+    second = check.verdicts.get("C7502694", d5.footprint_hash)
+    # One of them has JLC's pin-1 marker on the other terminal (yellow), never a wrong angle.
+    assert {first.status, second.status} <= {"green", "yellow"}
+    assert (second.rotation - first.rotation) % 360 == 180
+    decisions = check.decisions()
+    assert (decisions["D5"].rotation - decisions["D4"].rotation) % 360 == 180
+
+
+def test_failed_fetch_is_retried_on_the_next_scan(setup):
+    """A transient failure leaves an unknown verdict that the next scan fetches again."""
+    check, board, events, _, client = setup
+    board["parts"] = [sot23("Q9", lcsc="C999")]
+    check.scan_board()
+    check.worker.run_pending()
+    assert (
+        check.verdicts.get("C999", board["parts"][0].footprint_hash).status == "unknown"
+    )
+    assert check.cache.status("C999") == "error"
+    found = recorded("C2132")
+    found.lcsc = "C999"
+    client.records["C999"] = found
+    summary = check.scan_board()
+    assert (summary.already_resolved, summary.enqueued) == (0, 1)
+    check.worker.run_pending()
+    assert (
+        check.verdicts.get("C999", board["parts"][0].footprint_hash).status == "green"
+    )
+    summary = check.scan_board()
+    assert (summary.already_resolved, summary.enqueued) == (1, 0)
+
+
+def test_pending_is_per_part_and_in_flight_parts_are_not_marked_again(setup):
+    """A resolved part is not pending for its LCSC's other geometry; a queued LCSC resolves new parts too."""
+    check, board, events, _, client = setup
+    q1 = board["parts"][0]
+    check.scan_board()
+    other = sot23("Q2")
+    other.pads = other.pads[:2]
+    other.footprint_hash = pad_hash(other.pads)
+    board["parts"].append(other)
+    summary = check.enqueue_references(["Q2"])
+    assert (summary.enqueued, summary.pending) == (0, 2)
+    assert check.verdicts.get("C2132", other.footprint_hash) is None
+    assert check.decision(other).pending
+    check.verdicts.save(
+        "C2132",
+        q1.footprint_hash,
+        q1.footprint_name,
+        "p",
+        check.resolve_part(q1, _cached(check, "C2132")),
+        5,
+    )
+    assert not check.decision(q1).pending
+    assert check.decision(other).pending
+    check.worker.run_pending()
+    assert check.verdicts.get("C2132", other.footprint_hash).status != PENDING
+    assert not check.decision(other).pending
+
+
+def _cached(check, lcsc):
+    """Store the recorded part in the cache and return it as the controller reads it."""
+    check.cache.store(recorded(lcsc), now=1)
+    return check.cache.part(lcsc)

@@ -644,7 +644,7 @@ class JLCPCBTools(wx.Frame):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
-        correction = self.footprint_list.AppendTextColumn(
+        self.rotation_column = correction = self.footprint_list.AppendTextColumn(
             "Rotation" if is_footprint_check_enabled(self.settings) else "Correction",
             9,
             width=120,
@@ -2340,6 +2340,12 @@ class JLCPCBTools(wx.Frame):
         except (sqlite3.Error, OSError) as error:
             self.logger.warning("JLC footprint check unavailable: %s", error)
             return
+        except BoardContextChanged as error:
+            # The scan reads each LCSC through the store, which refuses a closed or
+            # replaced board: stop the new check and recover as upstream does.
+            check.stop()
+            self._set_project_storage_error(error)
+            return
         self.jlc_footprint_check = check
 
     def _stop_jlc_footprint_check(self) -> None:
@@ -2887,6 +2893,9 @@ class JLCPCBTools(wx.Frame):
                 self.recompute_stock_concerns()
         elif e.section == "jlcfootprint" and e.setting == "enabled":
             self._start_jlc_footprint_check()
+            column = getattr(self, "rotation_column", None)
+            if column is not None:
+                column.SetTitle("Rotation" if e.value else "Correction")
             self.populate_footprint_list()
 
         self.save_settings()
@@ -3121,6 +3130,10 @@ class JLCPCBTools(wx.Frame):
                 # resolver path applies none, so generation gets an empty set.
                 rules_available = corrections is not None
                 corrections = corrections if rules_available else ()
+                # Parts placed since the plugin opened get their check now (spec 10).
+                self.run_generation_step(
+                    "Checking the board for unchecked parts", check.scan_board
+                )
                 if not self.run_generation_step(
                     "Waiting for JLC footprint data",
                     wait_for_pending_fetches,
@@ -3278,14 +3291,6 @@ class JLCPCBTools(wx.Frame):
                 self.fabrication.write_cpl,
                 placements,
             )
-            if check is not None:
-                self.run_generation_step(
-                    "Summarising JLC footprint rotations",
-                    show_generate_summary,
-                    self,
-                    self.fabrication.rotation_report,
-                    rules_available,
-                )
 
             self.run_generation_step(
                 "Generating BOM",
@@ -3312,6 +3317,16 @@ class JLCPCBTools(wx.Frame):
                 generation_count=generation_count,
             )
             self.run_generate_hook("post", post_hook_env, allow_continue=False)
+
+            if check is not None:
+                # Last, so a problem showing the summary leaves every file written.
+                self.run_generation_step(
+                    "Summarising JLC footprint rotations",
+                    show_generate_summary,
+                    self,
+                    self.fabrication.rotation_report,
+                    rules_available,
+                )
 
             self.report_generation_step("Fabrication data generation complete")
             self.reset_gauge()

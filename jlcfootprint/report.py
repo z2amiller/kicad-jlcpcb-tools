@@ -100,7 +100,7 @@ def format_summary(summary: GenerateSummary) -> str:
         source = "override" if row.source == "override" else "derived"
         lines.append(
             f"{mark} {row.reference:<8} {row.lcsc:<10} {row.footprint}: "
-            f"{row.raw:g}° -> {row.emitted:g}° ({source} {row.correction:+d}°{legacy})"
+            f"{row.raw:g}° -> {row.emitted:g}° ({source} {int(row.correction):+d}°{legacy})"
         )
     lines.append("")
     lines.append(f"JLC pin-1 marker will look wrong ({len(summary.yellow)})")

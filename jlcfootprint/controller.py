@@ -25,7 +25,7 @@ from .geometry import easyeda_pads_to_mm
 from .kicad_adapter import BoardPart
 from .resolver import Verdict, resolve
 from .verdicts import PENDING, StoredVerdict, VerdictStore
-from .worker import FetchWorker
+from .worker import FetchWorker, TokenBucket
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,7 @@ class FootprintCheck:
         worker: FetchWorker | None = None,
         message: Callable[[str], None] | None = None,
         now: Callable[[], float] = time.time,
+        bucket: TokenBucket | None = None,
     ) -> None:
         self.cache = cache
         self.verdicts = verdicts
@@ -97,8 +98,9 @@ class FootprintCheck:
         self.now = now
         self.generation = 0
         self.parts: dict[str, BoardPart] = {}
+        # A shared bucket keeps the request rate across restarts of the check in one session.
         self.worker = worker or FetchWorker(
-            self._fetch, self._on_fetched, on_tripped=self._on_tripped
+            self._fetch, self._on_fetched, on_tripped=self._on_tripped, bucket=bucket
         )
         self.client = client or EasyEdaClient()
         # The per-uuid fallback and every retry spend the worker's tokens too.
@@ -142,17 +144,20 @@ class FootprintCheck:
                 summary.without_lcsc += 1
                 continue
             stored = self.verdicts.get(part.lcsc, part.footprint_hash)
-            if stored is not None and stored.status != PENDING:
+            refetch = self.cache.needs_fetch(part.lcsc, self.now())
+            # A verdict is final only while its cache row is: an error row is fetched
+            # again next session and a ``none`` row after thirty days (spec 5.1).
+            if stored is not None and stored.status != PENDING and not refetch:
                 summary.already_resolved += 1
                 continue
-            cached = (
-                None
-                if self.cache.needs_fetch(part.lcsc, self.now())
-                else self.cache.part(part.lcsc)
-            )
+            cached = None if refetch else self.cache.part(part.lcsc)
             if cached is not None:
                 self._resolve_and_store(part, cached)
                 summary.resolved_from_cache += 1
+                continue
+            if part.lcsc in self.worker.pending():
+                # Queued or in flight already: that fetch resolves this part too, and
+                # marking it pending here could overwrite a verdict saved meanwhile.
                 continue
             self.verdicts.mark_pending(
                 part.lcsc, part.footprint_hash, part.footprint_name, self.now()
@@ -257,8 +262,12 @@ class FootprintCheck:
         """Return the CPL decision for one board part (spec section 8)."""
         if not part.lcsc:
             return Decision(part.reference, "", status="no-lcsc", note="no LCSC number")
-        pending = part.lcsc in self.worker.pending()
         stored = self.verdicts.get(part.lcsc, part.footprint_hash)
+        # Pending is per part: a resolved part is not pending because another pad
+        # geometry of the same LCSC is still being fetched.
+        pending = part.lcsc in self.worker.pending() and (
+            stored is None or stored.status == PENDING
+        )
         if stored is None:
             return Decision(
                 part.reference,

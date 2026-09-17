@@ -141,3 +141,19 @@ def test_removing_a_number_re_reads_the_part_before_the_cell_is_rewritten(
     module.JLCPCBTools.remove_lcsc_number(window)
 
     assert calls == [("re-read", ["R1"]), ("refresh", ["R1"])]
+
+
+def test_a_board_replaced_before_the_first_scan_recovers_like_upstream(mainwindow):
+    """The store refuses a replaced board mid-scan: the new check stops, storage recovers."""
+    module, _ = mainwindow
+    error = module.BoardContextChanged("replaced")
+    check = MagicMock(scan_board=MagicMock(side_effect=error))
+    module.create_footprint_check = MagicMock(return_value=check)
+    window = _window(module)
+    window._set_project_storage_error = MagicMock()
+
+    window._start_jlc_footprint_check()
+
+    check.stop.assert_called_once_with()
+    window._set_project_storage_error.assert_called_once_with(error)
+    assert window.jlc_footprint_check is None

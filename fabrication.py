@@ -937,6 +937,24 @@ class Fabrication:
         keep the raw angle.  The correction rule that would have matched is only noted.
         """
         raw = self._rotation_for_match(footprint, None)
+        stored_lcsc = str(part["lcsc"] or "")
+        if decision is not None and str(decision.lcsc or "") != stored_lcsc:
+            # The check judged another part than the one this row places (a variant
+            # can order another part than the board's own); the raw angle is safe.
+            note = (
+                f"the check saw {decision.lcsc or 'no LCSC'} but the project has "
+                f"{stored_lcsc or 'none'}; raw angle kept"
+            )
+            self.logger.warning("JLC footprint check: %s: %s", part["reference"], note)
+            decision = SimpleNamespace(
+                rotation=None,
+                source="raw",
+                status="lcsc-mismatch",
+                polarity_light=None,
+                fit=None,
+                note=note,
+                pending=False,
+            )
         correction = None if decision is None else decision.rotation
         rotation = (
             raw if correction is None else self.rotate(footprint, raw, correction)
@@ -1062,6 +1080,8 @@ class Fabrication:
             position = SimpleNamespace(x=center.x - origin.x, y=center.y - origin.y)
             if decisions is None:
                 position = self._position_for_match(footprint, position, match)
+            position = _checked_position(position.x, position.y)
+            if decisions is None:
                 rotation = self._rotation_for_match(footprint, match)
             else:
                 # The footprint check owns the rotation; offsets stay upstream's
@@ -1075,7 +1095,6 @@ class Fabrication:
                 rotation = self._rotation_for_decision(
                     footprint, decisions.get(identity[0]), match, part
                 )
-            position = _checked_position(position.x, position.y)
             return (
                 *identity,
                 # Six decimal millimetres retain KiCad's nanometre resolution.
@@ -1085,9 +1104,12 @@ class Fabrication:
                 "top" if footprint.GetLayer() == 0 else "bottom",
             )
         except (OverflowError, ValueError) as error:
-            source = (
-                f"correction {match.correction.key!r}" if match else "no correction"
-            )
+            if decisions is not None:
+                source = "JLC footprint check"
+            elif match:
+                source = f"correction {match.correction.key!r}"
+            else:
+                source = "no correction"
             raise ValueError(
                 f"Cannot generate CPL for {identity[0]} ({source}): {error}"
             ) from error

@@ -62,8 +62,13 @@ class TokenBucket:
         if self.tokens >= self.burst:
             self.next_refill = max(self.next_refill, now + self._spacing())
 
-    def take(self) -> bool:
-        """Block until a token is available and spend it; False when asked to stop."""
+    def take(self, wait: Callable[[float], bool] | None = None) -> bool:
+        """Block until a token is available and spend it; False when asked to stop.
+
+        ``wait`` is the caller's stop-aware sleep, so a bucket shared by successive
+        workers waits on the worker that is asking, not on the one that created it.
+        """
+        wait = wait or self.wait
         while True:
             with self.lock:
                 self._refill()
@@ -71,7 +76,7 @@ class TokenBucket:
                     self.tokens -= 1
                     return True
                 pause = max(0.0, self.next_refill - self.clock())
-            if self.wait(pause):
+            if wait(pause):
                 return False
 
 
@@ -85,12 +90,15 @@ class FetchWorker:
         on_tripped: Callable[[str], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         jitter: Callable[[], float] = random.random,
+        bucket: TokenBucket | None = None,
     ) -> None:
         self.fetch = fetch
         self.on_done = on_done
         self.on_tripped = on_tripped
         self.stop_event = threading.Event()
-        self.bucket = TokenBucket(clock=clock, wait=self.stop_event.wait, jitter=jitter)
+        self.bucket = bucket or TokenBucket(
+            clock=clock, wait=self.stop_event.wait, jitter=jitter
+        )
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.queue: collections.deque = collections.deque()
@@ -133,7 +141,7 @@ class FetchWorker:
 
     def acquire(self) -> bool:
         """Spend a request token, waiting for one; False when stopping."""
-        return self.bucket.take()
+        return self.bucket.take(self.stop_event.wait)
 
     # ------------------------------------------------------------------
     # Thread
