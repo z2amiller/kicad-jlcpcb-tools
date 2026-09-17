@@ -5,8 +5,10 @@ data is keyed per footprint uuid because footprints are shared.  Pads are stored
 as EasyEDA sent them and converted when read, so a change to the frame
 convention never invalidates the cache.  Rows never expire on their own: ``none``
 rows are retried after 30 days, ``error`` rows next session, ``ok`` rows only on
-an explicit refresh.  Stdlib only; safe to use from the worker thread and the
-main thread at once (each call opens its own connection).
+an explicit refresh.  A live row is filled in steps (spec section 15): the batch
+lookup writes the uuids, the footprint and the symbol documents follow, and
+``needs`` says which piece is still missing.  Stdlib only; safe to use from the
+worker thread and the main thread at once (each call opens its own connection).
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from .easyeda_parse import (
     ComponentRecord,
     FootprintRecord,
     SymbolPin,
+    SymbolRecord,
     parse_footprint_pads,
     parse_pro_pads,
     pin1_polarity,
@@ -192,18 +195,50 @@ class Cache:
             ).fetchone()
         return None if row is None else str(row["status"])
 
-    def needs_fetch(self, lcsc: str, now: float | None = None) -> bool:
-        """Return True when the part must hit the network: no row, an error, or an old none."""
+    def needs(self, lcsc: str, now: float | None = None) -> set[str]:
+        """Return what the part still needs from the network (spec section 15.4).
+
+        ``{'lookup'}`` when there is no row, an ``error`` row or a ``none`` row older
+        than thirty days; otherwise the subset of ``{'footprint', 'symbol'}`` that is
+        missing: a ``puuid`` without a package row, or a live row whose symbol uuid
+        is known but whose symbol has not been fetched.  Seed rows never ask for a
+        symbol: their pin meaning came with the seed or is absent for good.
+        """
         with closing(self.connect()) as con:
             row = con.execute(
-                "SELECT status, fetched_at FROM lcsc_map WHERE lcsc = ?", (lcsc,)
+                "SELECT status, fetched_at, puuid, symbol_uuid, symbol_pins_json,"
+                " pin1_polarity, source FROM lcsc_map WHERE lcsc = ?",
+                (lcsc,),
             ).fetchone()
-        if row is None or row["status"] == "error":
-            return True
-        if row["status"] == "none":
-            current = time.time() if now is None else now
-            return current - float(row["fetched_at"]) >= NONE_RETRY_S
-        return False
+            if row is None or row["status"] == "error":
+                return {"lookup"}
+            if row["status"] == "none":
+                current = time.time() if now is None else now
+                if current - float(row["fetched_at"]) >= NONE_RETRY_S:
+                    return {"lookup"}
+                return set()
+            needed: set[str] = set()
+            if row["puuid"] and not self._has_package(con, str(row["puuid"])):
+                needed.add("footprint")
+            if (
+                row["source"] == "live"
+                and row["symbol_uuid"]
+                and row["symbol_pins_json"] is None
+                and row["pin1_polarity"] is None
+            ):
+                needed.add("symbol")
+        return needed
+
+    def needs_fetch(self, lcsc: str, now: float | None = None) -> bool:
+        """Return True when the part must hit the network for anything."""
+        return bool(self.needs(lcsc, now))
+
+    @staticmethod
+    def _has_package(con: sqlite3.Connection, puuid: str) -> bool:
+        return (
+            con.execute("SELECT 1 FROM package WHERE puuid = ?", (puuid,)).fetchone()
+            is not None
+        )
 
     def part(self, lcsc: str) -> CachedPart | None:
         """Return the part's record with its footprint joined in, or None without a row."""
@@ -227,10 +262,11 @@ class Cache:
             puuid=str(row["puuid"] or ""),
         )
         polarity_source = "none"
-        if row["symbol_pins_json"]:
+        pins = json.loads(row["symbol_pins_json"]) if row["symbol_pins_json"] else []
+        if pins:
             record.symbol_pins = [
                 SymbolPin(number=str(pin["number"]), label=str(pin.get("label", "")))
-                for pin in json.loads(row["symbol_pins_json"])
+                for pin in pins
             ]
             polarity_source = str(row["polarity_source"] or "symbol")
         elif row["pin1_polarity"]:
@@ -320,10 +356,73 @@ class Cache:
                     ),
                 )
 
+    def store_lookup(
+        self,
+        lcsc: str,
+        symbol_uuid: str,
+        puuid: str,
+        now: float | None = None,
+    ) -> None:
+        """Store what the batch lookup knows about a part: its uuids, no drawings yet.
+
+        A part with no symbol uuid gets an empty pin list, so ``needs`` never asks
+        for a symbol that does not exist.
+        """
+        fetched_at = int(time.time() if now is None else now)
+        row = {
+            "lcsc": lcsc,
+            "puuid": puuid or None,
+            "status": "ok",
+            "error": None,
+            "symbol_uuid": symbol_uuid or None,
+            "symbol_pins_json": None if symbol_uuid else "[]",
+            "pin1_polarity": None,
+            "polarity_source": None,
+            "symbol_blob": None,
+            "source": "live",
+            "fetched_at": fetched_at,
+        }
+        with closing(self.connect()) as con, con:
+            _upsert(con, "lcsc_map", _LCSC_COLUMNS, row)
+
+    def store_lookup_miss(self, lcsc: str, now: float | None = None) -> None:
+        """Store that EasyEDA has nothing for a part: a ``none`` row retried after 30 days."""
+        self.store(ComponentRecord(lcsc=lcsc, status="none"), now)
+
+    def store_symbol(
+        self, lcsc: str, symbol: SymbolRecord, now: float | None = None
+    ) -> bool:
+        """Store a part's fetched symbol on its row; return False when the part has no row.
+
+        A symbol that answered ``none`` or could not be read leaves an empty pin
+        list: the part resolves by geometry and a polarized one reads as unknown.
+        """
+        pins = symbol.pins if symbol.status == "ok" else []
+        fetched_at = int(time.time() if now is None else now)
+        with closing(self.connect()) as con, con:
+            cursor = con.execute(
+                "UPDATE lcsc_map SET symbol_uuid = ?, symbol_pins_json = ?,"
+                " pin1_polarity = ?, polarity_source = ?, symbol_blob = ?,"
+                " fetched_at = ? WHERE lcsc = ?",
+                (
+                    symbol.uuid or None,
+                    json.dumps(
+                        [{"number": pin.number, "label": pin.label} for pin in pins],
+                        separators=(",", ":"),
+                    ),
+                    pin1_polarity(pins) if pins else None,
+                    "symbol" if pins else None,
+                    compress(symbol.shapes) if pins else None,
+                    fetched_at,
+                    lcsc,
+                ),
+            )
+            return cursor.rowcount > 0
+
     def store_footprint(
         self, footprint: FootprintRecord, now: float | None = None, source: str = "live"
     ) -> None:
-        """Store one footprint fetched by uuid (the per-uuid fallback)."""
+        """Store one footprint fetched by uuid (spec section 15.2)."""
         if not footprint.pads:
             return
         fetched_at = int(time.time() if now is None else now)
