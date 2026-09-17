@@ -9,6 +9,7 @@ from jlcfootprint.geometry import (
     centroid,
     crawl_to_cpl,
     easyeda_pads_to_mm,
+    mirror_box,
     mirror_y,
     named_pads,
     pad_geom,
@@ -126,3 +127,8 @@ def test_ccw_correction_snaps_and_wraps():
 def test_crawl_to_cpl_negates():
     """The crawl table's 90 is the CPL's 270; 0 and 180 are their own negatives."""
     assert [crawl_to_cpl(a) for a in (0, 90, 180, 270)] == [0, 270, 180, 90]
+
+
+def test_mirror_box_flips_y():
+    """A bottom-side box mirrors across the X axis and keeps its corners ordered."""
+    assert mirror_box((1.0, 2.0, 3.0, 4.0)) == (1.0, -4.0, 3.0, -2.0)

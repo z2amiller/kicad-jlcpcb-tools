@@ -230,3 +230,25 @@ def test_string_valued_package_datastr_is_decoded():
     assert record.pads[0]["x"] == pytest.approx(1.0) and record.pads[0][
         "y"
     ] == pytest.approx(2.0)
+
+
+def test_pin_records_carry_positions_and_the_classic_origin_travels_with_the_record():
+    """Both pin readers give (number, label, x, y); a classic record remembers its head x/y."""
+    from jlcfootprint.easyeda_parse import classic_pin_records, pro_pin_records
+    from tests.jlcfootprint_support import pro_record, recorded
+
+    classic = recorded("C16133")
+    assert classic_pin_records(classic.symbol_shapes) == [
+        ("1", "1", 30.0, 0.0),
+        ("2", "2", 0.0, 0.0),
+    ]
+    assert classic.footprint_origin == (4000.0, 3000.0)
+    pro = pro_record("C7175")
+    assert pro_pin_records(pro.symbol_shapes) == [
+        ("1", "1", 15.0, 0.0),
+        ("2", "2", -15.0, 0.0),
+    ]
+    assert pro.footprint_origin == (0.0, 0.0)
+    assert pro_pin_records(
+        ['["PIN","x",1,null,"a","b"]', '["ATTR","y","x","NUMBER","7"]']
+    ) == [("7", "", 0.0, 0.0)]

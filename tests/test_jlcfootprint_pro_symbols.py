@@ -181,6 +181,7 @@ def test_corner_case_recordings_are_complete_and_names_agree():
             assert symbol.status == "ok", hit
     assert sorted(p.name for p in PRO_FIXTURES.glob("devices_*.json")) == [
         "devices_corner_case.json",
+        "devices_m3.json",
         "devices_misses.json",
     ]
 

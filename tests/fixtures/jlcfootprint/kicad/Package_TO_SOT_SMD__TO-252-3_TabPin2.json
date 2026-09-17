@@ -43,5 +43,11 @@
    "pin_function": "",
    "shape": "roundrect"
   }
+ ],
+ "courtyard": [
+  -6.39,
+  -3.5,
+  4.71,
+  3.5
  ]
 }

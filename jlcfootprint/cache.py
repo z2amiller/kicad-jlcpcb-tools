@@ -156,6 +156,17 @@ def pads_from_stored(pads_json: str, pads_format: str) -> list[dict]:
     return list(stored)
 
 
+def stored_origin(pads_json: str, pads_format: str) -> tuple[float, float]:
+    """Return the classic drawing's head x/y from a stored ``pads_json``; (0, 0) otherwise."""
+    if pads_format != PADS_CLASSIC_SHAPES:
+        return (0.0, 0.0)
+    stored = json.loads(pads_json)
+    try:
+        return (float(stored.get("x") or 0.0), float(stored.get("y") or 0.0))
+    except (AttributeError, TypeError, ValueError):
+        return (0.0, 0.0)
+
+
 def _upsert(con: sqlite3.Connection, table: str, columns: tuple, row: dict) -> None:
     """Insert or replace one row by primary key."""
     placeholders = ",".join("?" for _ in columns)
@@ -281,6 +292,9 @@ class Cache:
             record.pads = pads_from_stored(package["pads_json"], package["pads_format"])
             record.footprint_shapes = decompress(package["footprint_blob"])
             record.footprint_source = str(package["footprint_source"] or "")
+            record.footprint_origin = stored_origin(
+                package["pads_json"], package["pads_format"]
+            )
         return CachedPart(
             record=record,
             polarity_source=polarity_source,
