@@ -1,18 +1,25 @@
-"""Background fetch worker: one daemon thread, a token bucket and a breaker (spec section 10).
+"""Background fetch worker: one daemon thread, two paced queues and a breaker (spec section 15).
 
-Parts are queued by LCSC code, de-duplicated, and fetched one at a time.  A token
-bucket allows a burst of ten requests, then one every ten seconds with a little
-jitter (EasyEDA answers 403 to faster clients; section 2).  Three consecutive
-transient failures trip the session's breaker: the remaining parts stay queued
-as pending and one message is reported.  Each part is processed in isolation, so
-nothing raises out of the thread.  Stdlib only.
+The lookup queue holds LCSC codes and is served in chunks of up to 200 through the
+batch endpoint; the document queue holds footprint and symbol uuids, footprints
+first, served one per request.  Each queue has its own token bucket: lookups get a
+burst of two, then one every two seconds; documents a burst of ten, then one per
+second with a little jitter (the crawl ran the Pro host at 2.5 per second without a
+refusal).  Each pass serves the first queue, lookups then documents, that is
+non-empty and holds a token; when neither does the thread waits for the earliest
+refill.  A lookup waits half a second after the newest code arrived so a burst of
+assignments shares one call.  Three consecutive transient failures trip the
+session's breaker: both queues stay pending and one message is reported.  Each job
+is processed in isolation, so nothing raises out of the thread.  Stdlib only.
 """
 
 from __future__ import annotations
 
 import collections
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 import logging
+import math
 import random
 import threading
 import time
@@ -20,26 +27,39 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-BURST = 10
-INTERVAL_S = 10.0
-JITTER_S = 2.0
+LOOKUP_BURST = 2
+LOOKUP_INTERVAL_S = 2.0
+LOOKUP_JITTER_S = 0.0
+DOCUMENT_BURST = 10
+DOCUMENT_INTERVAL_S = 1.0
+DOCUMENT_JITTER_S = 0.2
+BATCH_SIZE = 200  # equals easyeda_client.BATCH_SIZE (checked by a test)
+COALESCE_S = 0.5
 MAX_CONSECUTIVE_FAILURES = 3
+FOOTPRINT = "footprint"
+SYMBOL = "symbol"
+LOOKUP = "lookup"
 BREAKER_MESSAGE = (
-    "EasyEDA refused {failures} requests in a row; the remaining {pending} part(s) stay "
-    "pending until the plugin is reopened."
+    "EasyEDA refused {failures} requests in a row; the remaining {pending} request(s) "
+    "stay pending until the plugin is reopened."
 )
 
 
 class TokenBucket:
-    """Ten tokens to start, one more every interval plus jitter; ``take`` waits for one."""
+    """``burst`` tokens to start, one more every interval plus jitter.
+
+    ``take`` waits for a token; ``try_take`` spends one only when it is there;
+    ``seconds_until_token`` says how long ``take`` would wait.
+    """
 
     def __init__(
         self,
         clock: Callable[[], float] = time.monotonic,
         wait: Callable[[float], bool] | None = None,
         jitter: Callable[[], float] = random.random,
-        burst: int = BURST,
-        interval: float = INTERVAL_S,
+        burst: int = DOCUMENT_BURST,
+        interval: float = DOCUMENT_INTERVAL_S,
+        jitter_s: float = DOCUMENT_JITTER_S,
     ) -> None:
         self.clock = clock
         # wait(seconds) returns True when the caller should stop instead of waiting.
@@ -47,12 +67,13 @@ class TokenBucket:
         self.jitter = jitter
         self.burst = burst
         self.interval = interval
+        self.jitter_s = jitter_s
         self.tokens = float(burst)
         self.next_refill = clock() + self._spacing()
         self.lock = threading.Lock()
 
     def _spacing(self) -> float:
-        return self.interval + self.jitter() * JITTER_S
+        return self.interval + self.jitter() * self.jitter_s
 
     def _refill(self) -> None:
         now = self.clock()
@@ -62,6 +83,23 @@ class TokenBucket:
         if self.tokens >= self.burst:
             self.next_refill = max(self.next_refill, now + self._spacing())
 
+    def try_take(self) -> bool:
+        """Spend a token when one is available; never waits."""
+        with self.lock:
+            self._refill()
+            if self.tokens >= 1:
+                self.tokens -= 1
+                return True
+            return False
+
+    def seconds_until_token(self) -> float:
+        """Return how long the next token takes, 0 when one is available now."""
+        with self.lock:
+            self._refill()
+            if self.tokens >= 1:
+                return 0.0
+            return max(0.0, self.next_refill - self.clock())
+
     def take(self, wait: Callable[[float], bool] | None = None) -> bool:
         """Block until a token is available and spend it; False when asked to stop.
 
@@ -70,40 +108,87 @@ class TokenBucket:
         """
         wait = wait or self.wait
         while True:
-            with self.lock:
-                self._refill()
-                if self.tokens >= 1:
-                    self.tokens -= 1
-                    return True
-                pause = max(0.0, self.next_refill - self.clock())
-            if wait(pause):
+            if self.try_take():
+                return True
+            if wait(self.seconds_until_token()):
                 return False
 
 
+@dataclass
+class Buckets:
+    """The two request budgets, one per queue; shared across restarts of the check."""
+
+    lookups: TokenBucket
+    documents: TokenBucket
+
+    @classmethod
+    def default(
+        cls,
+        clock: Callable[[], float] = time.monotonic,
+        jitter: Callable[[], float] = random.random,
+    ) -> Buckets:
+        """Return the buckets with the paces spec section 15.3 gives."""
+        return cls(
+            lookups=TokenBucket(
+                clock=clock,
+                jitter=jitter,
+                burst=LOOKUP_BURST,
+                interval=LOOKUP_INTERVAL_S,
+                jitter_s=LOOKUP_JITTER_S,
+            ),
+            documents=TokenBucket(
+                clock=clock,
+                jitter=jitter,
+                burst=DOCUMENT_BURST,
+                interval=DOCUMENT_INTERVAL_S,
+                jitter_s=DOCUMENT_JITTER_S,
+            ),
+        )
+
+
+def estimate_seconds(lookups: int, documents: int) -> float:
+    """Return roughly how long the queued requests take at the buckets' paces."""
+    return (
+        math.ceil(lookups / BATCH_SIZE) * LOOKUP_INTERVAL_S
+        + documents * DOCUMENT_INTERVAL_S
+    )
+
+
 class FetchWorker:
-    """Drain queued LCSC codes through ``fetch`` on a daemon thread, reporting each result."""
+    """Drain the two queues through ``lookup`` and ``fetch`` on a daemon thread."""
 
     def __init__(
         self,
-        fetch: Callable[[str], Any],
-        on_done: Callable[[str, Any], None],
+        lookup: Callable[[list[str]], Any],
+        fetch: Callable[[str, str], Any],
+        on_lookup: Callable[[list[str], Any], None],
+        on_document: Callable[[str, str, Any], None],
         on_tripped: Callable[[str], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         jitter: Callable[[], float] = random.random,
-        bucket: TokenBucket | None = None,
+        buckets: Buckets | None = None,
     ) -> None:
+        self.lookup = lookup
         self.fetch = fetch
-        self.on_done = on_done
+        self.on_lookup = on_lookup
+        self.on_document = on_document
         self.on_tripped = on_tripped
+        self.clock = clock
         self.stop_event = threading.Event()
-        self.bucket = bucket or TokenBucket(
-            clock=clock, wait=self.stop_event.wait, jitter=jitter
-        )
+        # The stop-aware sleep every wait goes through; tests replace it with a fake clock's.
+        self.wait = self.stop_event.wait
+        self.buckets = buckets or Buckets.default(clock=clock, jitter=jitter)
         self.lock = threading.Lock()
         self.wake = threading.Event()
-        self.queue: collections.deque = collections.deque()
-        self.queued: set[str] = set()
-        self.in_flight: str | None = None
+        self.lookups: collections.deque = collections.deque()
+        self.queued_lookups: set[str] = set()
+        self.lookup_added_at = clock()
+        self.footprints: collections.deque = collections.deque()
+        self.symbols: collections.deque = collections.deque()
+        self.queued_documents: set[tuple[str, str]] = set()
+        self.in_flight: tuple[str, Any] | None = None
+        self.current_bucket: TokenBucket | None = None
+        self.first_attempt_paid = False
         self.consecutive_failures = 0
         self.tripped = False
         self.thread = threading.Thread(
@@ -111,37 +196,96 @@ class FetchWorker:
         )
 
     # ------------------------------------------------------------------
-    # Queue
+    # Queues
     # ------------------------------------------------------------------
 
-    def enqueue(self, codes: Iterable[str]) -> int:
+    def enqueue_lookups(self, codes: Iterable[str]) -> int:
         """Queue codes not already queued or in flight; return how many were added."""
         added = 0
         with self.lock:
+            in_flight = self._in_flight_lookup()
             for code in codes:
-                if code and code not in self.queued and code != self.in_flight:
-                    self.queue.append(code)
-                    self.queued.add(code)
+                if code and code not in self.queued_lookups and code not in in_flight:
+                    self.lookups.append(code)
+                    self.queued_lookups.add(code)
                     added += 1
+            if added:
+                self.lookup_added_at = self.clock()
         if added:
             self.wake.set()
         return added
 
-    def pending(self) -> set[str]:
+    def enqueue_documents(self, items: Iterable[tuple[str, str]]) -> int:
+        """Queue (kind, uuid) pairs not already queued or in flight; return how many were added."""
+        added = 0
+        with self.lock:
+            for kind, uuid in items:
+                item = (kind, uuid)
+                if (
+                    not uuid
+                    or kind not in (FOOTPRINT, SYMBOL)
+                    or item in self.queued_documents
+                    or item == self.in_flight
+                ):
+                    continue
+                (self.footprints if kind == FOOTPRINT else self.symbols).append(uuid)
+                self.queued_documents.add(item)
+                added += 1
+        if added:
+            self.wake.set()
+        return added
+
+    def _in_flight_lookup(self) -> set[str]:
+        if self.in_flight is not None and self.in_flight[0] == LOOKUP:
+            return set(self.in_flight[1])
+        return set()
+
+    def pending_lookups(self) -> set[str]:
         """Return the codes still queued or in flight."""
         with self.lock:
-            pending = set(self.queued)
-            if self.in_flight is not None:
+            return set(self.queued_lookups) | self._in_flight_lookup()
+
+    def pending_documents(self) -> set[tuple[str, str]]:
+        """Return the (kind, uuid) pairs still queued or in flight."""
+        with self.lock:
+            pending = set(self.queued_documents)
+            if self.in_flight is not None and self.in_flight[0] != LOOKUP:
                 pending.add(self.in_flight)
             return pending
 
+    def counts(self) -> dict[str, int]:
+        """Return how many codes, footprints and symbols are queued (in flight excluded)."""
+        with self.lock:
+            return {
+                "lookups": len(self.lookups),
+                "footprints": len(self.footprints),
+                "symbols": len(self.symbols),
+            }
+
+    def estimate_seconds(self) -> float:
+        """Return roughly how long the queued requests take."""
+        counts = self.counts()
+        return estimate_seconds(
+            counts["lookups"], counts["footprints"] + counts["symbols"]
+        )
+
     def wait_for(self, seconds: float) -> bool:
-        """Wait up to ``seconds`` for work; True when the worker was asked to stop."""
-        return self.stop_event.wait(seconds)
+        """Wait up to ``seconds``; True when the worker was asked to stop."""
+        return self.wait(seconds)
 
     def acquire(self) -> bool:
-        """Spend a request token, waiting for one; False when stopping."""
-        return self.bucket.take(self.stop_event.wait)
+        """Spend a request token for the job in flight; False when stopping.
+
+        The scheduler already paid for the first attempt of the job it dispatched;
+        the client's retries pay as they go.
+        """
+        if self.stop_event.is_set():
+            return False
+        if self.first_attempt_paid:
+            self.first_attempt_paid = False
+            return True
+        bucket = self.current_bucket or self.buckets.documents
+        return bucket.take(self.wait)
 
     # ------------------------------------------------------------------
     # Thread
@@ -153,7 +297,7 @@ class FetchWorker:
             self.thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
-        """Ask the thread to stop (interrupting any backoff) and join it."""
+        """Ask the thread to stop (interrupting any wait or backoff) and join it."""
         self.stop_event.set()
         self.wake.set()
         if self.thread.is_alive():
@@ -169,46 +313,94 @@ class FetchWorker:
             self.wake.clear()
             self.run_pending()
 
+    def _choose(self) -> tuple[str, Any, float]:
+        """Pick the next job under the lock: (kind, payload, pause).
+
+        ``kind`` is ``lookup``, ``footprint`` or ``symbol`` with the payload taken off
+        its queue and the bucket charged, ``wait`` with the seconds to pause, or
+        ``idle`` when every queue is empty.
+        """
+        with self.lock:
+            now = self.clock()
+            settling = (
+                COALESCE_S - (now - self.lookup_added_at) if self.lookups else 0.0
+            )
+            if self.lookups and settling <= 0 and self.buckets.lookups.try_take():
+                codes = [
+                    self.lookups.popleft()
+                    for _ in range(min(BATCH_SIZE, len(self.lookups)))
+                ]
+                self.queued_lookups.difference_update(codes)
+                self.in_flight = (LOOKUP, codes)
+                self.current_bucket = self.buckets.lookups
+                return LOOKUP, codes, 0.0
+            if (self.footprints or self.symbols) and self.buckets.documents.try_take():
+                kind = FOOTPRINT if self.footprints else SYMBOL
+                uuid = (self.footprints if self.footprints else self.symbols).popleft()
+                self.queued_documents.discard((kind, uuid))
+                self.in_flight = (kind, uuid)
+                self.current_bucket = self.buckets.documents
+                return kind, uuid, 0.0
+            pauses = []
+            if self.lookups:
+                pauses.append(max(settling, self.buckets.lookups.seconds_until_token()))
+            if self.footprints or self.symbols:
+                pauses.append(self.buckets.documents.seconds_until_token())
+            if not pauses:
+                return "idle", None, 0.0
+            return "wait", None, max(min(pauses), 0.01)
+
     def run_pending(self) -> int:
-        """Process the queue on the calling thread until it is empty, tripped or stopped."""
+        """Process the queues on the calling thread until they are empty, tripped or stopped."""
         done = 0
         while not self.stop_event.is_set() and not self.tripped:
-            with self.lock:
-                if not self.queue:
+            kind, payload, pause = self._choose()
+            if kind == "idle":
+                return done
+            if kind == "wait":
+                if self.wait(pause):
                     return done
-                code = self.queue.popleft()
-                self.queued.discard(code)
-                self.in_flight = code
+                continue
+            self.first_attempt_paid = True
             try:
-                self._process(code)
+                self._process(kind, payload)
             finally:
                 with self.lock:
                     self.in_flight = None
+                    self.current_bucket = None
+                    self.first_attempt_paid = False
             done += 1
         return done
 
-    def _process(self, code: str) -> None:
-        """Fetch one part and report it; a raised exception counts as a transient failure."""
+    def _process(self, kind: str, payload: Any) -> None:
+        """Run one job and report it; a raised exception counts as a transient failure."""
         try:
-            fetched = self.fetch(code)
+            if kind == LOOKUP:
+                fetched = self.lookup(payload)
+            else:
+                fetched = self.fetch(kind, payload)
         except Exception as error:
-            logger.exception("jlcfootprint: fetching %s raised", code)
-            fetched = _Failure(code, str(error))
+            logger.exception("jlcfootprint: %s %s raised", kind, payload)
+            fetched = _Failure(str(error))
         transient = bool(getattr(fetched, "transient", False))
         if transient:
             self.consecutive_failures += 1
         else:
             self.consecutive_failures = 0
         try:
-            self.on_done(code, fetched)
+            if kind == LOOKUP:
+                self.on_lookup(payload, fetched)
+            else:
+                self.on_document(kind, payload, fetched)
         except Exception:
-            logger.exception("jlcfootprint: result handler raised for %s", code)
+            logger.exception(
+                "jlcfootprint: result handler raised for %s %s", kind, payload
+            )
         if self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES and not self.tripped:
             self.tripped = True
-            with self.lock:
-                pending = len(self.queued)
+            counts = self.counts()
             message = BREAKER_MESSAGE.format(
-                failures=self.consecutive_failures, pending=pending
+                failures=self.consecutive_failures, pending=sum(counts.values())
             )
             logger.warning("jlcfootprint: %s", message)
             if self.on_tripped is not None:
@@ -219,11 +411,11 @@ class FetchWorker:
 
 
 class _Failure:
-    """A fetch result standing in for a fetch function that raised."""
+    """A result standing in for a lookup or fetch function that raised."""
 
     transient = True
 
-    def __init__(self, code: str, error: str) -> None:
-        self.code = code
+    def __init__(self, error: str) -> None:
         self.error = error
         self.record = None
+        self.devices = None

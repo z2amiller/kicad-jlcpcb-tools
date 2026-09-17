@@ -1,15 +1,22 @@
-"""Tests for the footprint check controller: scanning, fetching, storing, deciding."""
+"""Tests for the footprint check controller: scanning, the lookup and document flow, deciding."""
+
+import copy
 
 import pytest
 
 from jlcfootprint.cache import Cache
 from jlcfootprint.controller import Decision, FootprintCheck
-from jlcfootprint.easyeda_client import Fetched
-from jlcfootprint.easyeda_parse import ComponentRecord
+from jlcfootprint.easyeda_client import Document, Lookup
+from jlcfootprint.easyeda_parse import (
+    DeviceHit,
+    DevicesResult,
+    FootprintRecord,
+    SymbolRecord,
+)
 from jlcfootprint.geometry import pad_hash
 from jlcfootprint.kicad_adapter import BoardPart, verdict_key
 from jlcfootprint.verdicts import PENDING, VerdictStore
-from jlcfootprint.worker import FetchWorker
+from jlcfootprint.worker import FOOTPRINT, SYMBOL, FetchWorker
 
 from .jlcfootprint_support import (
     footprints_available,
@@ -25,22 +32,80 @@ pytestmark = pytest.mark.skipif(
 
 
 class FakeClient:
-    """Answers from recorded responses; counts the fetches."""
+    """Answer the three Pro calls from recorded classic responses; count every call.
+
+    A part's symbol uuid is ``sym-<lcsc>``; its footprint uuid is the classic
+    record's, so two parts sharing a footprint share one document.
+    """
 
     def __init__(self, records=None):
         self.records = records or {}
-        self.fetched = []
+        self.lookups = []
+        self.documents = []
+        self.fail_lookups = False
+        self.transient_symbols = set()
+        self.silent_symbols = set()
 
-    def fetch_component(self, lcsc):
-        """Return the recorded part or an error."""
-        self.fetched.append(lcsc)
-        record = self.records.get(lcsc)
-        if record is None:
-            return Fetched(
-                ComponentRecord(lcsc=lcsc, status="error", error="HTTP 403"),
+    def search_by_codes(self, codes):
+        """Return hits for the recorded parts and misses for the rest."""
+        codes = list(codes)
+        self.lookups.append(codes)
+        if self.fail_lookups:
+            return Lookup(
+                codes, DevicesResult(error="HTTP 403 after retries"), transient=True
+            )
+        devices = DevicesResult()
+        for code in codes:
+            record = self.records.get(code)
+            if record is not None:
+                devices.hits[code] = DeviceHit(
+                    code, f"sym-{code}", record.puuid, record.package_name
+                )
+        devices.missing = [code for code in codes if code not in devices.hits]
+        return Lookup(codes, devices)
+
+    def fetch_footprint(self, puuid):
+        """Return the recorded footprint with this uuid, or none."""
+        self.documents.append((FOOTPRINT, puuid))
+        for record in self.records.values():
+            if record.puuid == puuid:
+                return Document(
+                    FOOTPRINT,
+                    puuid,
+                    FootprintRecord(
+                        puuid=puuid,
+                        status="ok",
+                        package_name=record.package_name,
+                        pads=record.pads,
+                        footprint_shapes=record.footprint_shapes,
+                    ),
+                )
+        return Document(FOOTPRINT, puuid, FootprintRecord(puuid=puuid, status="none"))
+
+    def fetch_symbol(self, uuid):
+        """Return the recorded symbol pins for ``sym-<lcsc>``; a failure or none when told to."""
+        self.documents.append((SYMBOL, uuid))
+        lcsc = uuid[len("sym-") :]
+        if uuid in self.transient_symbols:
+            return Document(
+                SYMBOL,
+                uuid,
+                SymbolRecord(uuid=uuid, error="HTTP 500 after retries"),
                 transient=True,
             )
-        return Fetched(record)
+        record = self.records.get(lcsc)
+        if record is None or uuid in self.silent_symbols:
+            return Document(SYMBOL, uuid, SymbolRecord(uuid=uuid, status="none"))
+        return Document(
+            SYMBOL,
+            uuid,
+            SymbolRecord(
+                uuid=uuid,
+                status="ok",
+                pins=record.symbol_pins,
+                shapes=record.symbol_shapes,
+            ),
+        )
 
 
 def sot23(reference, lcsc="C2132", is_bottom=False):
@@ -67,6 +132,38 @@ def led(reference, lcsc="C2286"):
     return BoardPart(
         reference, lcsc, "LED_SMD:LED_0603_1608Metric", False, 0.0, pads, pad_hash(pads)
     )
+
+
+def sod323(reference, functions, lcsc="C7502694"):
+    """Return a SOD-323 diode part with the given pin functions."""
+    pads = with_functions(library_pads("Diode_SMD", "D_SOD-323"), functions)
+    return BoardPart(
+        reference, lcsc, "Diode_SMD:D_SOD-323", False, 0.0, pads, verdict_key(pads)
+    )
+
+
+def tantalum(reference, lcsc="C16133"):
+    """Return a case-B tantalum part whose JLC name carries no orientation token."""
+    pads = with_functions(
+        library_pads("Capacitor_Tantalum_SMD", "CP_EIA-3528-21_Kemet-B"),
+        {"1": "+", "2": "-"},
+    )
+    return BoardPart(
+        reference,
+        lcsc,
+        "Capacitor_Tantalum_SMD:CP_EIA-3528-21_Kemet-B",
+        False,
+        0.0,
+        pads,
+        verdict_key(pads),
+    )
+
+
+def alias(lcsc, source="C2132"):
+    """Return the recorded part under another LCSC (same footprint and symbol)."""
+    record = copy.deepcopy(recorded(source))
+    record.lcsc = lcsc
+    return record
 
 
 @pytest.fixture
@@ -97,12 +194,13 @@ def setup(tmp_path):
         message=messages.append,
         now=clock,
     )
-    check.worker.bucket.wait = clock.wait
+    check.worker.wait = clock.wait
+    check.worker.clock = clock
     return check, board, events, messages, client
 
 
 def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup):
-    """Nothing cached: parts go pending, the fetch stores the record and the verdicts, one event each."""
+    """Nothing cached: one lookup, then footprints and symbols, then the verdicts and one event each."""
     check, board, events, messages, client = setup
     summary = check.scan_board()
     assert (
@@ -111,16 +209,27 @@ def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup):
         summary.enqueued,
         summary.pending,
     ) == (3, 1, 2, 2)
+    assert summary.queued == {"lookups": 2, "footprints": 0, "symbols": 0}
+    assert "queued: 2 lookup(s), 0 footprint(s), 0 symbol(s), about 2 s" in str(summary)
     assert check.generation == 1
     assert check.pending_references() == ["D1", "Q1"]
+    assert check.queue_estimate() == (2, 2.0)
     assert (
         check.verdicts.get("C2132", board["parts"][0].footprint_hash).status == PENDING
     )
     assert check.display_text("Q1") == "…"
-    assert check.worker.run_pending() == 2
-    assert client.fetched == ["C2132", "C2286"]
+    assert check.worker.run_pending() == 5
+    assert client.lookups == [["C2132", "C2286"]]
+    q1_puuid, d1_puuid = recorded("C2132").puuid, recorded("C2286").puuid
+    assert client.documents == [
+        (FOOTPRINT, q1_puuid),
+        (FOOTPRINT, d1_puuid),
+        (SYMBOL, "sym-C2132"),
+        (SYMBOL, "sym-C2286"),
+    ]
     assert events == [("C2132", 1), ("C2286", 1)]
     assert check.pending_references() == []
+    assert check.queue_estimate() == (0, 0.0)
     q1 = check.verdicts.get("C2132", board["parts"][0].footprint_hash)
     assert (q1.status, q1.rotation, q1.method) == ("green", 180, "geometry")
     d1 = check.verdicts.get("C2286", board["parts"][1].footprint_hash)
@@ -130,7 +239,13 @@ def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup):
         "polarity",
         "yellow",
     )
-    assert check.cache.part("C2132").source == "live"
+    part = check.cache.part("C2132")
+    assert (part.source, part.polarity_source, part.record.symbol_uuid) == (
+        "live",
+        "symbol",
+        "sym-C2132",
+    )
+    assert check.cache.needs("C2132") == set()
     assert check.display_text("Q1") == "180°"
     assert messages == []
 
@@ -142,7 +257,7 @@ def test_scan_resolves_from_the_cache_without_fetching(setup):
     summary = check.scan_board()
     assert (summary.resolved_from_cache, summary.enqueued) == (1, 1)
     assert check.verdicts.get("C2132", board["parts"][0].footprint_hash).rotation == 180
-    assert client.fetched == []
+    assert client.lookups == []
     assert check.pending_references() == ["D1"]
 
 
@@ -158,7 +273,7 @@ def test_resolved_parts_are_left_alone_on_the_next_scan(setup):
         summary.resolved_from_cache,
     ) == (2, 0, 0)
     assert check.generation == 2
-    assert client.fetched == ["C2132", "C2286"]
+    assert client.lookups == [["C2132", "C2286"]]
 
 
 def test_assignment_rescans_only_the_given_references(setup):
@@ -179,7 +294,7 @@ def test_assignment_rescans_only_the_given_references(setup):
     assert check.references_for("C2132") == ["D2", "Q1", "R1"]
 
 
-def test_one_fetch_resolves_every_part_sharing_the_lcsc(setup):
+def test_one_lookup_resolves_every_part_sharing_the_lcsc(setup):
     """Two footprints with one LCSC and different pad geometry get two verdict rows from one fetch."""
     check, board, events, _, client = setup
     other = sot23("Q2")
@@ -188,7 +303,7 @@ def test_one_fetch_resolves_every_part_sharing_the_lcsc(setup):
     board["parts"].append(other)
     check.scan_board()
     check.worker.run_pending()
-    assert client.fetched == ["C2132", "C2286"]
+    assert client.lookups == [["C2132", "C2286"]]
     assert (
         check.verdicts.get("C2132", board["parts"][0].footprint_hash).status == "green"
     )
@@ -196,21 +311,98 @@ def test_one_fetch_resolves_every_part_sharing_the_lcsc(setup):
     assert events == [("C2132", 1), ("C2286", 1)]
 
 
-def test_transient_failures_trip_the_breaker_and_leave_parts_pending(setup):
-    """Unknown parts fail transiently; after three the message is forwarded and the rest wait."""
-    check, board, events, messages, client = setup
-    board["parts"] = [sot23(f"Q{i}", lcsc=f"C{i}") for i in range(1, 6)]
+def test_a_shared_footprint_is_fetched_once(setup):
+    """Two parts with one footprint uuid cost one footprint document and a symbol each."""
+    check, board, events, _, client = setup
+    client.records["C1"] = alias("C1")
+    client.records["C2"] = alias("C2")
+    board["parts"] = [sot23("Q1", lcsc="C1"), sot23("Q2", lcsc="C2")]
     check.scan_board()
     check.worker.run_pending()
-    assert client.fetched == ["C1", "C2", "C3"]
+    puuid = recorded("C2132").puuid
+    assert client.documents == [
+        (FOOTPRINT, puuid),
+        (SYMBOL, "sym-C1"),
+        (SYMBOL, "sym-C2"),
+    ]
+    assert {check.decision(part).rotation for part in board["parts"]} == {180}
+    assert events == [("C1", 1), ("C2", 1)]
+
+
+def test_transient_failures_trip_the_breaker_and_leave_parts_pending(setup):
+    """Three symbol failures in a row trip the breaker; those parts retry next session, the rest wait."""
+    check, board, events, messages, client = setup
+    for i in range(1, 5):
+        client.records[f"C{i}"] = alias(f"C{i}")
+        client.transient_symbols.add(f"sym-C{i}")
+    board["parts"] = [sot23(f"Q{i}", lcsc=f"C{i}") for i in range(1, 5)]
+    check.scan_board()
+    check.worker.run_pending()
+    assert client.lookups == [["C1", "C2", "C3", "C4"]]
+    assert [kind for kind, _ in client.documents] == [FOOTPRINT, SYMBOL, SYMBOL, SYMBOL]
     assert check.worker.tripped
     assert len(messages) == 1
-    assert check.pending_references() == ["Q4", "Q5"]
+    assert check.pending_references() == ["Q4"]
     assert check.cache.status("C1") == "error"
     assert (
         check.verdicts.get("C1", board["parts"][0].footprint_hash).status == "unknown"
     )
     assert events == [("C1", 1), ("C2", 1), ("C3", 1)]
+
+
+def test_a_failed_lookup_marks_its_parts_for_retry(setup):
+    """A refused lookup leaves error rows and unknown verdicts that the next scan asks for again."""
+    check, board, events, _, client = setup
+    client.fail_lookups = True
+    board["parts"] = [sot23("Q9", lcsc="C999")]
+    check.scan_board()
+    check.worker.run_pending()
+    assert check.cache.status("C999") == "error"
+    assert (
+        check.verdicts.get("C999", board["parts"][0].footprint_hash).status == "unknown"
+    )
+    assert events == [("C999", 1)]
+    assert check.pending_references() == []
+    client.fail_lookups = False
+    client.records["C999"] = alias("C999")
+    summary = check.scan_board()
+    assert (summary.already_resolved, summary.enqueued) == (0, 1)
+    check.worker.run_pending()
+    assert (
+        check.verdicts.get("C999", board["parts"][0].footprint_hash).status == "green"
+    )
+    summary = check.scan_board()
+    assert (summary.already_resolved, summary.enqueued) == (1, 0)
+
+
+def test_lookup_misses_and_missing_documents(setup):
+    """A miss is the checkerboard case; a silent symbol leaves the token or the geometry to decide."""
+    check, board, events, _, client = setup
+    client.records["C16133"] = recorded("C16133")
+    client.records["C5"] = alias("C5", "C2286")
+    client.silent_symbols.update({"sym-C16133", "sym-C5", "sym-C2132"})
+    board["parts"] = [
+        sot23("Q1"),
+        tantalum("C6"),
+        led("D5", lcsc="C5"),
+        led("D6", lcsc="C404"),
+    ]
+    check.scan_board()
+    check.worker.run_pending()
+    assert check.cache.status("C404") == "none"
+    d6 = check.verdicts.get("C404", board["parts"][3].footprint_hash)
+    assert d6.status == "unknown" and "no JLC footprint data" in d6.notes
+    # No token in the name and no symbol: never a guess.
+    c6 = check.verdicts.get("C16133", board["parts"][1].footprint_hash)
+    assert c6.status == "unknown" and "polarity unknown" in c6.notes
+    # The RD token orients the LED on its own; only the pin-1 light is unknown.
+    d5 = check.verdicts.get("C5", board["parts"][2].footprint_hash)
+    assert (d5.status, d5.rotation, d5.polarity_light) == ("green", 0, "unknown")
+    q1 = check.verdicts.get("C2132", board["parts"][0].footprint_hash)
+    assert (q1.status, q1.rotation) == ("green", 180)
+    assert all(check.cache.needs(code) == set() for code in ("C2132", "C16133", "C5"))
+    assert sorted(events) == [("C16133", 1), ("C2132", 1), ("C404", 1), ("C5", 1)]
+    assert check.pending_references() == []
 
 
 def test_decisions_follow_the_cpl_precedence(setup):
@@ -265,7 +457,7 @@ def test_decisions_reread_the_board(setup):
 
 
 def test_client_shares_the_worker_pacing_and_stop(tmp_path):
-    """The real client is wired to the worker's token bucket and stop event."""
+    """The real client is wired to the worker's buckets and stop event."""
     check = FootprintCheck(
         Cache(str(tmp_path / "c.db")),
         VerdictStore(str(tmp_path / "p.db")),
@@ -280,14 +472,6 @@ def test_client_shares_the_worker_pacing_and_stop(tmp_path):
     assert not check.worker.is_running()
 
 
-def sod323(reference, functions, lcsc="C7502694"):
-    """Return a SOD-323 diode part with the given pin functions."""
-    pads = with_functions(library_pads("Diode_SMD", "D_SOD-323"), functions)
-    return BoardPart(
-        reference, lcsc, "Diode_SMD:D_SOD-323", False, 0.0, pads, verdict_key(pads)
-    )
-
-
 def test_swapped_pin_functions_get_their_own_verdicts(setup):
     """Two footprints with the same pads but K/A swapped are keyed apart and rotate 180 apart."""
     check, board, events, _, client = setup
@@ -297,7 +481,8 @@ def test_swapped_pin_functions_get_their_own_verdicts(setup):
     board["parts"] = [d4, d5]
     check.scan_board()
     check.worker.run_pending()
-    assert client.fetched == ["C7502694"]
+    assert client.lookups == [["C7502694"]]
+    assert len(client.documents) == 2
     first = check.verdicts.get("C7502694", d4.footprint_hash)
     second = check.verdicts.get("C7502694", d5.footprint_hash)
     # One of them has JLC's pin-1 marker on the other terminal (yellow), never a wrong angle.
@@ -305,29 +490,6 @@ def test_swapped_pin_functions_get_their_own_verdicts(setup):
     assert (second.rotation - first.rotation) % 360 == 180
     decisions = check.decisions()
     assert (decisions["D5"].rotation - decisions["D4"].rotation) % 360 == 180
-
-
-def test_failed_fetch_is_retried_on_the_next_scan(setup):
-    """A transient failure leaves an unknown verdict that the next scan fetches again."""
-    check, board, events, _, client = setup
-    board["parts"] = [sot23("Q9", lcsc="C999")]
-    check.scan_board()
-    check.worker.run_pending()
-    assert (
-        check.verdicts.get("C999", board["parts"][0].footprint_hash).status == "unknown"
-    )
-    assert check.cache.status("C999") == "error"
-    found = recorded("C2132")
-    found.lcsc = "C999"
-    client.records["C999"] = found
-    summary = check.scan_board()
-    assert (summary.already_resolved, summary.enqueued) == (0, 1)
-    check.worker.run_pending()
-    assert (
-        check.verdicts.get("C999", board["parts"][0].footprint_hash).status == "green"
-    )
-    summary = check.scan_board()
-    assert (summary.already_resolved, summary.enqueued) == (1, 0)
 
 
 def test_pending_is_per_part_and_in_flight_parts_are_not_marked_again(setup):

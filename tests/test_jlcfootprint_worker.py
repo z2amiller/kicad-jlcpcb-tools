@@ -1,14 +1,23 @@
-"""Tests for the fetch worker: token bucket, queue, breaker, isolation, stopping."""
+"""Tests for the fetch worker: buckets, the two queues, chunking, priority, breaker, stopping."""
 
 import threading
 from types import SimpleNamespace
 
+from jlcfootprint import easyeda_client
 from jlcfootprint.worker import (
-    BURST,
-    INTERVAL_S,
+    BATCH_SIZE,
+    COALESCE_S,
+    DOCUMENT_BURST,
+    DOCUMENT_INTERVAL_S,
+    FOOTPRINT,
+    LOOKUP_BURST,
+    LOOKUP_INTERVAL_S,
     MAX_CONSECUTIVE_FAILURES,
+    SYMBOL,
+    Buckets,
     FetchWorker,
     TokenBucket,
+    estimate_seconds,
 )
 
 
@@ -30,32 +39,42 @@ class Clock:
         return False
 
 
+def _bucket(clock, **kwargs):
+    kwargs.setdefault("jitter", lambda: 0.0)
+    return TokenBucket(clock=clock, wait=clock.wait, **kwargs)
+
+
 def test_token_bucket_allows_a_burst_then_one_per_interval():
     """Ten tokens are free; the eleventh waits for the next refill; refills accrue while idle."""
     clock = Clock()
-    bucket = TokenBucket(clock=clock, wait=clock.wait, jitter=lambda: 0.0)
-    for _ in range(BURST):
-        assert bucket.take()
-    assert clock.waits == []
+    bucket = _bucket(clock)
+    for _ in range(DOCUMENT_BURST):
+        assert bucket.try_take()
+    assert not bucket.try_take()
+    assert bucket.seconds_until_token() == DOCUMENT_INTERVAL_S
     assert bucket.take()
-    assert clock.waits == [INTERVAL_S]
-    assert bucket.take()
-    assert clock.waits == [INTERVAL_S, INTERVAL_S]
-    clock.now += 3 * INTERVAL_S
+    assert clock.waits == [DOCUMENT_INTERVAL_S]
+    clock.now += 3 * DOCUMENT_INTERVAL_S
+    assert bucket.seconds_until_token() == 0.0
     for _ in range(3):
-        assert bucket.take()
-    assert clock.waits == [INTERVAL_S, INTERVAL_S]
-    assert bucket.take()
-    assert clock.waits == [INTERVAL_S, INTERVAL_S, INTERVAL_S]
+        assert bucket.try_take()
+    assert not bucket.try_take()
 
 
 def test_token_bucket_jitter_and_stop():
     """Jitter stretches the spacing; a stop request during the wait gives no token."""
     clock = Clock()
-    bucket = TokenBucket(clock=clock, wait=clock.wait, jitter=lambda: 0.5, burst=1)
+    bucket = TokenBucket(
+        clock=clock,
+        wait=clock.wait,
+        jitter=lambda: 0.5,
+        burst=1,
+        interval=2.0,
+        jitter_s=1.0,
+    )
     assert bucket.take()
     assert bucket.take()
-    assert clock.waits == [INTERVAL_S + 1.0]
+    assert clock.waits == [2.5]
     stopping = TokenBucket(
         clock=clock, wait=lambda seconds: True, jitter=lambda: 0.0, burst=1
     )
@@ -63,52 +82,136 @@ def test_token_bucket_jitter_and_stop():
     assert not stopping.take()
 
 
-def _worker(fetch, on_done=None, on_tripped=None):
+def test_default_buckets_and_the_estimate_follow_the_spec():
+    """Lookups: burst 2 then one per 2 s; documents: burst 10 then one per second; one chunk is 200."""
     clock = Clock()
-    done = []
+    buckets = Buckets.default(clock=clock, jitter=lambda: 0.0)
+    assert (buckets.lookups.burst, buckets.lookups.interval) == (LOOKUP_BURST, 2.0)
+    assert (buckets.documents.burst, buckets.documents.interval) == (
+        DOCUMENT_BURST,
+        1.0,
+    )
+    assert BATCH_SIZE == easyeda_client.BATCH_SIZE == 200
+    assert estimate_seconds(0, 0) == 0.0
+    assert estimate_seconds(1, 25) == LOOKUP_INTERVAL_S + 25 * DOCUMENT_INTERVAL_S
+    assert estimate_seconds(201, 0) == 2 * LOOKUP_INTERVAL_S
+
+
+def _worker(lookup=None, fetch=None, on_lookup=None, on_document=None, on_tripped=None):
+    clock = Clock()
+    log = {"lookups": [], "documents": []}
     worker = FetchWorker(
-        fetch,
-        on_done or (lambda code, fetched: done.append((code, fetched))),
+        lookup or (lambda codes: SimpleNamespace(devices=list(codes), transient=False)),
+        fetch
+        or (lambda kind, uuid: SimpleNamespace(record=(kind, uuid), transient=False)),
+        on_lookup or (lambda codes, result: log["lookups"].append(list(codes))),
+        on_document
+        or (lambda kind, uuid, result: log["documents"].append((kind, uuid))),
         on_tripped=on_tripped,
         clock=clock,
         jitter=lambda: 0.0,
     )
-    worker.bucket.wait = clock.wait
-    return worker, done, clock
+    worker.wait = clock.wait
+    return worker, log, clock
 
 
-def test_queue_deduplicates_and_reports_each_result():
-    """Codes are fetched once each in order; results reach the callback; pending empties."""
-    worker, done, _ = _worker(
-        lambda code: SimpleNamespace(record=code, transient=False)
+def test_lookups_settle_then_go_out_in_chunks():
+    """Codes wait half a second for company, then leave 200 at a time; duplicates cost nothing."""
+    worker, log, clock = _worker()
+    codes = [f"C{i}" for i in range(250)]
+    assert worker.enqueue_lookups(codes + ["C1", ""]) == 250
+    assert worker.enqueue_lookups(["C2"]) == 0
+    assert worker.counts() == {"lookups": 250, "footprints": 0, "symbols": 0}
+    assert worker.estimate_seconds() == 2 * LOOKUP_INTERVAL_S
+    assert worker.pending_lookups() == set(codes)
+    assert worker.run_pending() == 2
+    assert clock.waits == [COALESCE_S]
+    assert [len(chunk) for chunk in log["lookups"]] == [200, 50]
+    assert log["lookups"][0][0] == "C0" and log["lookups"][1][-1] == "C249"
+    assert worker.pending_lookups() == set()
+
+
+def test_documents_go_footprints_first_and_are_deduplicated():
+    """Symbols queued before footprints still wait for them; a queued pair is never queued twice."""
+    worker, log, _ = _worker()
+    assert (
+        worker.enqueue_documents(
+            [
+                (SYMBOL, "s1"),
+                (FOOTPRINT, "f1"),
+                (SYMBOL, "s1"),
+                ("other", "x"),
+                (FOOTPRINT, ""),
+            ]
+        )
+        == 2
     )
-    assert worker.enqueue(["C1", "C2", "C1", "", "C3"]) == 3
-    assert worker.enqueue(["C2"]) == 0
-    assert worker.pending() == {"C1", "C2", "C3"}
+    assert worker.pending_documents() == {(SYMBOL, "s1"), (FOOTPRINT, "f1")}
+    assert worker.counts() == {"lookups": 0, "footprints": 1, "symbols": 1}
+    assert worker.run_pending() == 2
+    assert log["documents"] == [(FOOTPRINT, "f1"), (SYMBOL, "s1")]
+    assert worker.pending_documents() == set()
+
+
+def test_lookups_go_before_documents_once_settled():
+    """With both queues ready the lookup goes first; during the settling window a document goes."""
+    worker, log, clock = _worker()
+    order = []
+    worker.on_lookup = lambda codes, result: order.append("lookup")
+    worker.on_document = lambda kind, uuid, result: order.append(kind)
+    worker.enqueue_documents([(FOOTPRINT, "f1")])
+    worker.enqueue_lookups(["C1"])
+    clock.now += COALESCE_S
+    worker.enqueue_documents([(FOOTPRINT, "f2")])
     assert worker.run_pending() == 3
-    assert [code for code, _ in done] == ["C1", "C2", "C3"]
-    assert worker.pending() == set()
-    assert not worker.tripped
+    assert order == ["lookup", FOOTPRINT, FOOTPRINT]
+    assert clock.waits == []
+
+    worker, log, clock = _worker()
+    worker.on_lookup = lambda codes, result: order.append("lookup")
+    worker.on_document = lambda kind, uuid, result: order.append(kind)
+    order.clear()
+    worker.enqueue_lookups(["C1"])
+    worker.enqueue_documents([(SYMBOL, "s1")])
+    assert worker.run_pending() == 2
+    assert order == [SYMBOL, "lookup"]
+    assert clock.waits == [COALESCE_S]
 
 
-def test_breaker_trips_after_three_transient_failures():
-    """The breaker leaves later parts pending and reports once; a success resets the count."""
-    outcomes = {"C1": True, "C2": False, "C3": True, "C4": True, "C5": True, "C6": True}
+def test_the_worker_waits_for_the_earliest_refill():
+    """Past the burst, the next document waits one interval; an idle worker returns at once."""
+    worker, log, clock = _worker()
+    worker.enqueue_documents([(FOOTPRINT, f"f{i}") for i in range(DOCUMENT_BURST + 1)])
+    assert worker.run_pending() == DOCUMENT_BURST + 1
+    assert clock.waits == [DOCUMENT_INTERVAL_S]
+    assert worker.run_pending() == 0
+
+
+def test_breaker_trips_after_three_transient_failures_across_both_queues():
+    """Three failures in a row trip it whichever queue they come from; later work stays queued."""
     messages = []
-    worker, done, _ = _worker(
-        lambda code: SimpleNamespace(record=code, transient=outcomes[code]),
+    worker, log, clock = _worker(
+        lookup=lambda codes: SimpleNamespace(devices=None, transient=True),
+        fetch=lambda kind, uuid: SimpleNamespace(record=uuid, transient=uuid != "ok"),
         on_tripped=messages.append,
     )
-    worker.enqueue(["C1", "C2", "C3", "C4", "C5", "C6"])
+    worker.enqueue_lookups(["C1"])
+    clock.now += COALESCE_S
+    worker.enqueue_documents([(FOOTPRINT, "ok"), (FOOTPRINT, "f1"), (SYMBOL, "s1")])
     worker.run_pending()
-    assert [code for code, _ in done] == ["C1", "C2", "C3", "C4", "C5"]
-    assert worker.tripped
-    assert worker.pending() == {"C6"}
+    assert [len(chunk) for chunk in log["lookups"]] == [1]
+    assert log["documents"] == [(FOOTPRINT, "ok"), (FOOTPRINT, "f1"), (SYMBOL, "s1")]
+    assert not worker.tripped, "the successful footprint reset the count"
+    assert worker.consecutive_failures == 2
+    worker.enqueue_documents([(SYMBOL, "s2"), (SYMBOL, "s3")])
+    worker.run_pending()
+    assert worker.tripped, "s2 was the third failure in a row"
+    assert worker.pending_documents() == {(SYMBOL, "s3")}
     assert len(messages) == 1
     assert "3 requests in a row" in messages[0]
-    assert "1 part(s)" in messages[0]
+    assert "1 request(s)" in messages[0]
     assert worker.consecutive_failures == MAX_CONSECUTIVE_FAILURES
-    assert worker.enqueue(["C7"]) == 1
+    assert worker.enqueue_lookups(["C7"]) == 1
     assert worker.run_pending() == 0
 
 
@@ -116,50 +219,84 @@ def test_exceptions_are_isolated():
     """A fetch that raises counts as a transient failure; a callback that raises is swallowed."""
     calls = []
 
-    def fetch(code):
-        calls.append(code)
-        if code == "C1":
+    def fetch(kind, uuid):
+        calls.append(uuid)
+        if uuid == "f1":
             raise RuntimeError("boom")
-        return SimpleNamespace(record=code, transient=False)
+        return SimpleNamespace(record=uuid, transient=False)
 
-    def on_done(code, fetched):
-        if code == "C2":
+    def on_document(kind, uuid, result):
+        if uuid == "f2":
             raise RuntimeError("handler")
 
-    worker, _, _ = _worker(fetch, on_done=on_done)
-    worker.enqueue(["C1", "C2", "C3"])
+    worker, _, _ = _worker(fetch=fetch, on_document=on_document)
+    worker.enqueue_documents([(FOOTPRINT, "f1"), (FOOTPRINT, "f2"), (FOOTPRINT, "f3")])
     assert worker.run_pending() == 3
-    assert calls == ["C1", "C2", "C3"]
+    assert calls == ["f1", "f2", "f3"]
     assert worker.consecutive_failures == 0
+    worker, _, _ = _worker(lookup=lambda codes: 1 / 0)
+    worker.enqueue_lookups(["C1"])
+    assert worker.run_pending() == 1
+    assert worker.consecutive_failures == 1
+
+
+def test_acquire_pays_once_for_the_first_attempt_and_per_retry_after_that():
+    """The scheduler's token covers the first request; each retry inside the job takes another."""
+    seen = []
+
+    def fetch(kind, uuid):
+        seen.append((worker.acquire(), worker.buckets.documents.tokens))
+        seen.append((worker.acquire(), worker.buckets.documents.tokens))
+        return SimpleNamespace(record=uuid, transient=False)
+
+    worker, _, _ = _worker(fetch=fetch)
+    worker.enqueue_documents([(FOOTPRINT, "f1")])
+    worker.run_pending()
+    assert seen == [(True, DOCUMENT_BURST - 1), (True, DOCUMENT_BURST - 2)]
+    assert worker.acquire() and worker.buckets.documents.tokens == DOCUMENT_BURST - 3
 
 
 def test_thread_processes_and_stops():
     """The daemon thread drains the queue and joins on stop; stop interrupts a wait."""
     processed = threading.Event()
     worker = FetchWorker(
-        lambda code: SimpleNamespace(record=code, transient=False),
-        lambda code, fetched: processed.set(),
+        lambda codes: SimpleNamespace(devices=[], transient=False),
+        lambda kind, uuid: SimpleNamespace(record=uuid, transient=False),
+        lambda codes, result: None,
+        lambda kind, uuid, result: processed.set(),
         jitter=lambda: 0.0,
     )
     worker.start()
-    worker.enqueue(["C1"])
+    worker.enqueue_documents([(FOOTPRINT, "f1")])
     assert processed.wait(5.0)
     assert not worker.wait_for(0.01)
     worker.stop()
     assert not worker.is_running()
     assert worker.wait_for(0.0)
-    assert not worker.acquire() or worker.bucket.tokens >= 0
+    assert not worker.acquire()
 
 
-def test_a_shared_bucket_waits_on_the_asking_worker():
+def test_shared_buckets_wait_on_the_asking_worker():
     """Two workers share one budget; each waits on its own stop event."""
     clock = Clock()
-    bucket = TokenBucket(clock=clock, jitter=lambda: 0.0)
-    first = FetchWorker(lambda code: None, lambda code, fetched: None, bucket=bucket)
-    second = FetchWorker(lambda code: None, lambda code, fetched: None, bucket=bucket)
-    assert first.bucket is second.bucket
-    for _ in range(BURST):
-        assert bucket.take()
+    buckets = Buckets.default(clock=clock, jitter=lambda: 0.0)
+    first = FetchWorker(
+        lambda c: None,
+        lambda k, u: None,
+        lambda c, r: None,
+        lambda k, u, r: None,
+        buckets=buckets,
+    )
+    second = FetchWorker(
+        lambda c: None,
+        lambda k, u: None,
+        lambda c, r: None,
+        lambda k, u, r: None,
+        buckets=buckets,
+    )
+    assert first.buckets is second.buckets
+    for _ in range(DOCUMENT_BURST):
+        assert buckets.documents.try_take()
     first.stop()
     second.stop()
     assert not second.acquire()
