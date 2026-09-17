@@ -1,9 +1,13 @@
-"""Parse recorded EasyEDA component responses (no network; the client is M1).
+"""Parse EasyEDA responses (no network here; the client fetches them).
 
-The per-LCSC response carries two drawings.  ``result.dataStr`` is the schematic
-symbol, per part, whose ``P~`` shapes carry pin numbers and optional labels such
-as ``A`` and ``K``.  ``result.packageDetail.dataStr`` is the footprint, per
-puuid, whose ``PAD~`` shapes carry the pad geometry.  Spec section 2.
+The classic per-LCSC response carries two drawings.  ``result.dataStr`` is the
+schematic symbol, per part, whose ``P~`` shapes carry pin numbers and optional
+labels such as ``A`` and ``K``.  ``result.packageDetail.dataStr`` is the
+footprint, per puuid, whose ``PAD~`` shapes carry the pad geometry.  Spec
+section 2.  The EasyEDA Pro host answers the batch device lookup with one
+record per known part (symbol uuid, footprint uuid, package name) and the
+per-uuid endpoint with one document, a footprint or a symbol, in the Pro text
+form (newline-delimited JSON arrays).  Spec section 15.
 """
 
 from __future__ import annotations
@@ -293,13 +297,33 @@ def pro_shape_lines(text: str) -> list[str]:
     return [line.strip() for line in text.split("\n") if line.strip()]
 
 
+def _poly_extent(points: Any) -> tuple[float, float]:
+    """Return the width and height of a Pro ``POLY`` outline's bounding box in canvas units.
+
+    The outline lists coordinates in mils with letter tokens (``L``, ``A``) between
+    segments; the numbers are read in x/y pairs and the letters skipped.
+    """
+    numbers = [float(value) for value in points if not isinstance(value, str)]
+    if len(numbers) < 4:
+        raise ValueError("polygon pad without an outline")
+    xs = numbers[0::2]
+    ys = numbers[1::2]
+    return (
+        (max(xs) - min(xs)) / PRO_MILS_PER_CANVAS_UNIT,
+        (max(ys) - min(ys)) / PRO_MILS_PER_CANVAS_UNIT,
+    )
+
+
 def parse_pro_pads(lines: list[str]) -> tuple[list[dict], int]:
     """Return raw pads from Pro ``["PAD", ...]`` records, plus the count of unreadable ones.
 
     A record is ``["PAD", id, net, "", layer, number, x, y, rotation, hole, [shape,
-    width, height, ...], ...]`` in mils with Y up.  The result is in classic canvas
-    units with Y down, the form :func:`jlcfootprint.geometry.easyeda_pads_to_mm`
-    converts; the hole is kept as a radius like the classic ``PAD~`` field.
+    width, height, ...], ...]`` in mils with Y up.  A ``POLY`` shape carries its
+    outline as absolute points instead of a size; its bounding box stands in for
+    the size (a merged connector pad, for instance) with no rotation of its own.
+    The result is in classic canvas units with Y down, the form
+    :func:`jlcfootprint.geometry.easyeda_pads_to_mm` converts; the hole is kept as
+    a radius like the classic ``PAD~`` field.
     """
     pads: list[dict] = []
     skipped = 0
@@ -316,8 +340,12 @@ def parse_pro_pads(lines: list[str]) -> tuple[list[dict], int]:
             hole = parts[9]
             shape = parts[10]
             shape_name = str(shape[0])
-            width = float(shape[1]) / PRO_MILS_PER_CANVAS_UNIT
-            height = float(shape[2]) / PRO_MILS_PER_CANVAS_UNIT
+            if shape_name.upper() == "POLY":
+                width, height = _poly_extent(shape[1])
+                rotation = 0.0
+            else:
+                width = float(shape[1]) / PRO_MILS_PER_CANVAS_UNIT
+                height = float(shape[2]) / PRO_MILS_PER_CANVAS_UNIT
         except (ValueError, TypeError, IndexError, KeyError):
             skipped += 1
             continue
@@ -391,6 +419,185 @@ def parse_puuid_response(body: Any, puuid: str) -> FootprintRecord:
         )
     if not record.pads:
         record.error = record.error or "no readable pads in the footprint"
+        return record
+    record.status = "ok"
+    return record
+
+
+# ----------------------------------------------------------------------
+# EasyEDA Pro: the batch device lookup and the per-uuid symbol document
+# ----------------------------------------------------------------------
+
+DOCTYPE_SYMBOL = "SYMBOL"
+DOCTYPE_FOOTPRINT = "FOOTPRINT"
+
+
+@dataclass
+class DeviceHit:
+    """One part the batch lookup knows: its symbol uuid, footprint uuid and package name."""
+
+    lcsc: str
+    symbol_uuid: str
+    puuid: str
+    package_name: str
+
+
+@dataclass
+class DevicesResult:
+    """What one ``searchByCodes`` answer says about the codes it was asked for.
+
+    ``error`` is non-empty when the answer could not be read; nothing is a hit or a
+    miss then and the caller retries the chunk.
+    """
+
+    hits: dict[str, DeviceHit] = field(default_factory=dict)
+    missing: list[str] = field(default_factory=list)
+    error: str = ""
+
+
+def parse_devices_response(body: Any, codes: list[str]) -> DevicesResult:
+    """Read one batch answer; codes absent from a well-formed answer are misses.
+
+    ``result`` is a list of device records, or a dict whose ``lists`` holds them.  A
+    record names its part in ``product_code``, its footprint in ``footprint.uuid``
+    (``attributes.Footprint`` says the same) and its symbol in ``attributes.Symbol``;
+    ``footprint.display_title`` is the suffix-bearing package name.  A record with no
+    footprint uuid is a miss: there is nothing to align.  Never raises.
+    """
+    result = DevicesResult()
+    if not isinstance(body, dict):
+        result.error = "response is not a JSON object"
+        return result
+    if body.get("success") is False:
+        code = body.get("code")
+        result.error = f"code {code}: {body.get('message', '')}".strip(": ")
+        return result
+    raw = body.get("result")
+    if raw is None:
+        raw = []
+    items = raw.get("lists", []) if isinstance(raw, dict) else raw
+    if not isinstance(items, list):
+        result.error = "result is not a list of devices"
+        return result
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        lcsc = str(item.get("product_code") or "").strip()
+        footprint = _dict(item.get("footprint"))
+        attributes = _dict(item.get("attributes"))
+        puuid = str(footprint.get("uuid") or attributes.get("Footprint") or "").strip()
+        if not lcsc or not puuid:
+            continue
+        result.hits[lcsc] = DeviceHit(
+            lcsc=lcsc,
+            symbol_uuid=str(attributes.get("Symbol") or "").strip(),
+            puuid=puuid,
+            package_name=str(
+                footprint.get("display_title") or footprint.get("title") or ""
+            ).strip(),
+        )
+    result.missing = [code for code in codes if code not in result.hits]
+    return result
+
+
+@dataclass
+class SymbolRecord:
+    """One schematic symbol on its own: what the per-uuid endpoint yields for a symbol uuid."""
+
+    uuid: str
+    status: str = "error"  # 'ok' | 'none' | 'error'
+    error: str = ""
+    title: str = ""
+    pins: list[SymbolPin] = field(default_factory=list)
+    shapes: list[str] = field(default_factory=list)  # the Pro record lines
+    skipped_pins: int = 0  # PIN records without a displayed number
+
+
+def pro_doctype(lines: list[str]) -> str:
+    """Return the document kind named by the first ``["DOCTYPE", kind, ...]`` record, or ''."""
+    for line in lines:
+        if not isinstance(line, str) or not line.startswith('["DOCTYPE"'):
+            continue
+        try:
+            parts = json.loads(line)
+        except ValueError:
+            return ""
+        return str(parts[1]).upper() if len(parts) > 1 else ""
+    return ""
+
+
+def parse_pro_pins(lines: list[str]) -> tuple[list[SymbolPin], int]:
+    """Return the pins of Pro symbol text, plus the count of pins without a number.
+
+    A pin is a ``["PIN", id, ...]`` record.  Its displayed name and number are the
+    attribute records ``["ATTR", attrId, pinId, "NAME", text, ...]`` and
+    ``["ATTR", attrId, pinId, "NUMBER", text, ...]``; the number is what matches the
+    footprint's pad numbers.  Pins come out in record order.
+    """
+    order: list[str] = []
+    names: dict[str, str] = {}
+    numbers: dict[str, str] = {}
+    for line in lines:
+        if not isinstance(line, str) or not line.startswith(('["PIN"', '["ATTR"')):
+            continue
+        try:
+            parts = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(parts, list) or len(parts) < 2:
+            continue
+        if parts[0] == "PIN":
+            order.append(str(parts[1]))
+        elif len(parts) >= 5 and parts[3] in ("NAME", "NUMBER"):
+            value = "" if parts[4] is None else str(parts[4]).strip()
+            (names if parts[3] == "NAME" else numbers)[str(parts[2])] = value
+    pins: list[SymbolPin] = []
+    skipped = 0
+    for pin_id in order:
+        number = numbers.get(pin_id, "")
+        if not number:
+            skipped += 1
+            continue
+        pins.append(SymbolPin(number=number, label=names.get(pin_id, "")))
+    return pins, skipped
+
+
+def parse_symbol_response(body: Any, uuid: str) -> SymbolRecord:
+    """Classify and parse one per-uuid answer for a symbol uuid; never raises.
+
+    Status rules follow :func:`parse_puuid_response`.  A body whose document is a
+    footprint, is not in the Pro text form or has no readable pin reads as ``error``:
+    the uuid names no usable symbol.
+    """
+    record = SymbolRecord(uuid=uuid)
+    if not isinstance(body, dict):
+        record.error = "response is not a JSON object"
+        return record
+    if body.get("success") is False:
+        code = body.get("code")
+        record.error = f"code {code}: {body.get('message', '')}".strip(": ")
+        record.status = "none" if code in _NOT_FOUND_CODES else "error"
+        return record
+    result = body.get("result")
+    if result in (None, {}, [], ""):
+        record.status = "none"
+        return record
+    if not isinstance(result, dict):
+        record.error = "result is not an object"
+        return record
+    record.title = str(result.get("display_title") or result.get("title") or "")
+    data_str = result.get("dataStr")
+    if not isinstance(data_str, str) or not data_str.lstrip().startswith("["):
+        record.error = "symbol is not in the Pro text form"
+        return record
+    record.shapes = pro_shape_lines(data_str)
+    doctype = pro_doctype(record.shapes)
+    if doctype and doctype != DOCTYPE_SYMBOL:
+        record.error = f"uuid names a {doctype.lower()}, not a symbol"
+        return record
+    record.pins, record.skipped_pins = parse_pro_pins(record.shapes)
+    if not record.pins:
+        record.error = "no readable pins in the symbol"
         return record
     record.status = "ok"
     return record
