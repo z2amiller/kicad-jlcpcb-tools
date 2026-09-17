@@ -1,6 +1,5 @@
-"""Tests for the EasyEDA client with the network faked: fallback, backoff, failure kinds."""
+"""Tests for the EasyEDA Pro client with the network faked: the batch lookup, documents, backoff."""
 
-import copy
 import json
 from pathlib import Path
 
@@ -8,14 +7,21 @@ import pytest
 
 from jlcfootprint.easyeda_client import (
     BACKOFF_S,
-    COMPONENT_URL,
-    FOOTPRINT_URLS,
+    BATCH_SIZE,
+    DEVICES_URL,
+    DOCUMENT_URL,
+    FOOTPRINT,
+    LCSC_COMPANY_PATH,
+    SYMBOL,
     EasyEdaClient,
     retry_after_seconds,
 )
 
+from .jlcfootprint_support import recorded_devices, recorded_document
+
 FIXTURES = Path(__file__).parent / "fixtures" / "jlcfootprint"
-UUID = "b3b82869fa924bae820e3a6cfb44d689"
+CLASSIC_UUID = "b3b82869fa924bae820e3a6cfb44d689"  # C2132's classic footprint uuid
+SYMBOL_UUID = "c7fc7a92fb9f4171a873988b8332913e"  # C2132's symbol
 
 
 class Response:
@@ -34,23 +40,31 @@ class Response:
 
 
 class Network:
-    """Serve queued responses and record every URL, wait and token taken."""
+    """Serve queued responses and record every request, wait and token taken."""
 
     def __init__(self, *responses):
         self.queue = list(responses)
-        self.urls = []
+        self.calls = []
         self.waits = []
         self.tokens = 0
         self.stop_on_wait = False
         self.allow_tokens = True
 
-    def get(self, url, headers=None, timeout=None):
-        """Pop the next queued response, raising when it is an exception."""
-        self.urls.append(url)
+    def _next(self):
         item = self.queue.pop(0)
         if isinstance(item, Exception):
             raise item
         return item
+
+    def get(self, url, headers=None, timeout=None):
+        """Pop the next queued response for a GET."""
+        self.calls.append(("GET", url, None))
+        return self._next()
+
+    def post(self, url, headers=None, json_body=None, timeout=None):
+        """Pop the next queued response for a POST, keeping its body."""
+        self.calls.append(("POST", url, json_body))
+        return self._next()
 
     def wait(self, seconds):
         """Record the pause; a stop request interrupts it."""
@@ -64,79 +78,99 @@ class Network:
 
     def client(self):
         """Build a client bound to this fake network."""
-        return EasyEdaClient(get=self.get, wait=self.wait, acquire=self.acquire)
+        return EasyEdaClient(
+            get=self.get, post=self.post, wait=self.wait, acquire=self.acquire
+        )
 
 
-def component_body(lcsc="C2132"):
-    """Return a real recorded per-LCSC body."""
-    return json.loads((FIXTURES / "easyeda" / f"{lcsc}.json").read_text())
-
-
-def uuid_body():
-    """Return the real recorded classic-host per-uuid body for C2132's footprint."""
-    return json.loads((FIXTURES / "easyeda_uuid" / f"uuid_{UUID}.json").read_text())
-
-
-def without_package(body):
-    """Return the body as EasyEDA sends it for the rare part with no footprint block."""
-    stripped = copy.deepcopy(body)
-    del stripped["result"]["packageDetail"]
-    return stripped
-
-
-def test_component_with_footprint_needs_one_request():
-    """A complete response is parsed and costs one token."""
-    network = Network(Response(body=component_body()))
-    fetched = network.client().fetch_component("C2132")
-    assert fetched.record.status == "ok"
-    assert fetched.record.puuid == UUID
-    assert len(fetched.record.pads) == 3
-    assert fetched.record.footprint_source == "component"
-    assert not fetched.transient
-    assert fetched.requests == 1
-    assert network.tokens == 1
-    assert network.urls == [COMPONENT_URL.format(lcsc="C2132")]
-
-
-def test_missing_footprint_falls_back_to_the_classic_uuid_endpoint():
-    """No packageDetail: the classic host answers for the classic uuid; the Pro host is not asked."""
-    network = Network(
-        Response(body=without_package(component_body())), Response(body=uuid_body())
+def classic_footprint_body():
+    """Return the recorded classic-host per-uuid body: the dict form the Pro host also uses."""
+    return json.loads(
+        (FIXTURES / "easyeda_uuid" / f"uuid_{CLASSIC_UUID}.json").read_text()
     )
-    fetched = network.client().fetch_component("C2132")
-    record = fetched.record
-    assert record.status == "ok"
-    assert record.footprint_source == "puuid-endpoint"
-    assert record.package_name == "SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR"
-    assert [p["number"] for p in record.pads] == ["1", "2", "3"]
-    assert record.error == ""
-    assert fetched.requests == 2
-    assert network.urls[1] == FOOTPRINT_URLS[0].format(puuid=UUID)
 
 
-def test_fallback_tries_the_pro_host_after_the_classic_host_says_not_found():
-    """A uuid the classic host lacks is asked from the Pro host; both failing leaves a note."""
+def test_search_by_codes_posts_one_chunk_and_classifies_every_code():
+    """The codes and the library path go in the body; hits carry both uuids; the rest are misses."""
+    codes, body = recorded_devices("misses")
+    network = Network(Response(body=body))
+    lookup = network.client().search_by_codes(codes)
+    assert not lookup.failed and not lookup.transient
+    assert lookup.requests == 1 and network.tokens == 1
+    method, url, sent = network.calls[0]
+    assert (method, url) == ("POST", DEVICES_URL)
+    assert sent == {"codes": codes, "path": LCSC_COMPANY_PATH}
+    assert len(lookup.devices.hits) == 25
+    assert len(lookup.devices.missing) == len(codes) - 25
+    hit = lookup.devices.hits["C2896143"]
+    assert (hit.symbol_uuid, hit.puuid, hit.package_name) == (
+        "2c7c51ed5bd845c7bc3cba2523aa337b",
+        "6eefb1bcf6f14943ae6b87b3b923252b",
+        "CAP-TH_L4.2-W3.8-P5.08-D0.6",
+    )
+    assert "C1369890" in lookup.devices.missing
+    with pytest.raises(ValueError, match="at most 200"):
+        network.client().search_by_codes([f"C{i}" for i in range(BATCH_SIZE + 1)])
+
+
+def test_lookup_failures_are_transient_as_a_unit():
+    """A refused, unreadable or unsuccessful answer classifies nothing and asks for a retry."""
+    network = Network(Response(403), Response(429), Response(503), Response(403))
+    lookup = network.client().search_by_codes(["C1", "C2"])
+    assert lookup.failed and lookup.transient
+    assert "after retries" in lookup.error
+    assert network.waits == list(BACKOFF_S)
+    assert lookup.devices.hits == {} and lookup.devices.missing == []
+
+    network = Network(
+        Response(body={"success": False, "code": 401, "message": "denied"})
+    )
+    lookup = network.client().search_by_codes(["C1"])
+    assert lookup.failed and lookup.transient
+    assert "401" in lookup.error
+
+    network = Network(Response(body=None))
+    lookup = network.client().search_by_codes(["C1"])
+    assert lookup.failed and lookup.transient and "invalid JSON" in lookup.error
+
+
+def test_fetch_footprint_and_symbol_parse_their_documents():
+    """A footprint answer yields pads; a symbol answer yields numbered pins; one token each."""
+    network = Network(Response(body=classic_footprint_body()))
+    document = network.client().fetch_footprint(CLASSIC_UUID)
+    assert (document.kind, document.uuid) == (FOOTPRINT, CLASSIC_UUID)
+    assert document.record.status == "ok"
+    assert [p["number"] for p in document.record.pads] == ["1", "2", "3"]
+    assert document.record.package_name == "SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR"
+    assert not document.transient and document.requests == 1
+    assert network.calls == [("GET", DOCUMENT_URL.format(uuid=CLASSIC_UUID), None)]
+
+    network = Network(Response(body=recorded_document("symbol", SYMBOL_UUID)))
+    document = network.client().fetch_symbol(SYMBOL_UUID)
+    assert (document.kind, document.uuid) == (SYMBOL, SYMBOL_UUID)
+    assert document.record.status == "ok"
+    assert sorted((p.number, p.label) for p in document.record.pins) == [
+        ("1", "B"),
+        ("2", "E"),
+        ("3", "C"),
+    ]
+
+
+def test_http_404_is_none_and_other_statuses_are_errors():
+    """A missing document is final and empty; a 5xx is transient; an odd status is a final error."""
+    document = Network(Response(404)).client().fetch_footprint("nope")
+    assert (document.record.status, document.transient) == ("none", False)
+    document = Network(Response(404)).client().fetch_symbol("nope")
+    assert (document.record.status, document.transient) == ("none", False)
+    network = Network(Response(500), Response(502), Response(504), Response(500))
+    document = network.client().fetch_symbol("x")
+    assert (document.record.status, document.transient) == ("error", True)
+    document = Network(Response(418)).client().fetch_footprint("x")
+    assert (document.record.status, document.transient) == ("error", False)
+    assert "HTTP 418" in document.record.error
     not_found = {"success": False, "code": 404, "message": "Component not found"}
-    network = Network(
-        Response(body=without_package(component_body())),
-        Response(body=not_found),
-        Response(body=uuid_body()),
-    )
-    fetched = network.client().fetch_component("C2132")
-    assert fetched.record.status == "ok"
-    assert len(fetched.record.pads) == 3
-    assert network.urls[1:] == [url.format(puuid=UUID) for url in FOOTPRINT_URLS]
-
-    network = Network(
-        Response(body=without_package(component_body())),
-        Response(body=not_found),
-        Response(body=not_found),
-    )
-    fetched = network.client().fetch_component("C2132")
-    assert fetched.record.status == "ok"
-    assert fetched.record.pads == []
-    assert "per-uuid endpoint gave none" in fetched.record.error
-    assert not fetched.transient
+    document = Network(Response(body=not_found)).client().fetch_footprint("x")
+    assert (document.record.status, document.transient) == ("none", False)
 
 
 def test_rate_limit_backs_off_with_retry_after_then_the_ladder():
@@ -144,19 +178,12 @@ def test_rate_limit_backs_off_with_retry_after_then_the_ladder():
     network = Network(
         Response(403, headers={"Retry-After": "30"}),
         Response(403),
-        Response(body=component_body()),
+        Response(body=recorded_document("symbol", SYMBOL_UUID)),
     )
-    fetched = network.client().fetch_component("C2132")
-    assert fetched.record.status == "ok"
+    document = network.client().fetch_symbol(SYMBOL_UUID)
+    assert document.record.status == "ok"
     assert network.waits == [30.0, BACKOFF_S[1]]
-    assert fetched.requests == 3
-
-    network = Network(Response(403), Response(429), Response(503), Response(403))
-    fetched = network.client().fetch_component("C2132")
-    assert fetched.record.status == "error"
-    assert fetched.transient
-    assert "after retries" in fetched.record.error
-    assert network.waits == list(BACKOFF_S)
+    assert document.requests == 3 and network.tokens == 3
 
 
 def test_retry_after_parsing():
@@ -174,30 +201,29 @@ def test_retry_after_parsing():
     [
         (ConnectionError("reset"), True, "network error"),
         (Response(200, body=None), True, "invalid JSON"),
-        (Response(404), False, "HTTP 404"),
         (Response(418), False, "HTTP 418"),
     ],
 )
 def test_failure_kinds(item, transient, fragment):
     """Network and body problems retry next session; other HTTP statuses are final."""
-    fetched = Network(item).client().fetch_component("C2132")
-    assert fetched.record.status == "error"
-    assert fetched.transient is transient
-    assert fragment in fetched.record.error
+    document = Network(item).client().fetch_footprint("x")
+    assert document.record.status == "error"
+    assert document.transient is transient
+    assert fragment in document.record.error
 
 
 def test_stopping_interrupts_a_backoff_and_a_token_wait():
     """Both interruption paths return a transient error without touching the network again."""
-    network = Network(Response(403), Response(body=component_body()))
+    network = Network(Response(403), Response(body=classic_footprint_body()))
     network.stop_on_wait = True
-    fetched = network.client().fetch_component("C2132")
-    assert fetched.record.status == "error"
-    assert fetched.transient
-    assert "stopped" in fetched.record.error
-    assert len(network.urls) == 1
+    document = network.client().fetch_footprint("x")
+    assert document.record.status == "error"
+    assert document.transient
+    assert "stopped" in document.record.error
+    assert len(network.calls) == 1
 
-    network = Network(Response(body=component_body()))
+    network = Network(Response(body=classic_footprint_body()))
     network.allow_tokens = False
-    fetched = network.client().fetch_component("C2132")
-    assert "stopped before the request" in fetched.record.error
-    assert network.urls == []
+    lookup = network.client().search_by_codes(["C1"])
+    assert "stopped before the request" in lookup.error and lookup.transient
+    assert network.calls == []

@@ -85,10 +85,10 @@ def test_create_footprint_check_uses_the_library_directory_and_the_project_db(
         ("Q1", "C2132", 3),
         ("R1", "C77", 2),
     ]
-    assert check.worker.bucket is module.shared_bucket()
+    assert check.worker.buckets is module.shared_buckets()
     assert (
-        module.create_footprint_check(window, pcbnew).worker.bucket
-        is check.worker.bucket
+        module.create_footprint_check(window, pcbnew).worker.buckets
+        is check.worker.buckets
     )
     check.post("C2132", 7)
     target, event = wx.PostEvent.call_args.args

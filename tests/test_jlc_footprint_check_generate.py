@@ -65,6 +65,7 @@ def _check(pending_sequence, tripped=False):
     sequence = list(pending_sequence)
     check = SimpleNamespace(worker=SimpleNamespace(tripped=tripped))
     check.pending_references = lambda: list(sequence.pop(0)) if sequence else []
+    check.queue_estimate = lambda: (4, 90.0)
     return check
 
 
@@ -87,6 +88,7 @@ def test_wait_polls_until_the_queue_drains(facade):
     assert dialog.maximum == 3
     assert [value for value, _ in dialog.updates] == [0, 2]
     assert "3 of 3 part(s) left (R1, R2, R3)" in dialog.updates[0][1]
+    assert "4 request(s) queued, about 2 min" in dialog.updates[0][1]
     assert "1 of 3 part(s) left (R3)" in dialog.updates[1][1]
     assert dialog.destroyed
     assert wx.MilliSleep.call_count == 2
