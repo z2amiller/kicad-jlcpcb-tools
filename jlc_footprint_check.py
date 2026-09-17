@@ -18,9 +18,11 @@ from .footprint_metadata import count_pad
 from .jlcfootprint.cache import FILENAME, Cache, SeedImportResult
 from .jlcfootprint.controller import FootprintCheck
 from .jlcfootprint.kicad_adapter import board_parts
+from .jlcfootprint.report import CplRotation, format_summary, summarise
 from .jlcfootprint.verdicts import VerdictStore
 
 MESSAGE_TITLE = "JLC footprint check"
+POLL_MS = 200
 
 
 def is_footprint_check_enabled(settings: dict) -> bool:
@@ -64,3 +66,76 @@ def import_seed(window: Any, path: str) -> SeedImportResult:
     if check is not None:
         check.scan_board()
     return result
+
+
+def wait_for_pending_fetches(window: Any, check: FootprintCheck) -> bool:
+    """Wait with a cancellable dialog until no part is pending (spec section 8).
+
+    Returns False when the user cancels or the breaker has tripped; the caller then
+    emits the pending parts with their raw angle.
+    """
+    pending = check.pending_references()
+    if not pending:
+        return True
+    total = len(pending)
+    dialog = wx.ProgressDialog(
+        MESSAGE_TITLE,
+        f"Waiting for EasyEDA data for {total} part(s)...",
+        maximum=total,
+        parent=window,
+        style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_AUTO_HIDE | wx.PD_ELAPSED_TIME,
+    )
+    try:
+        while pending:
+            if check.worker.tripped:
+                return False
+            listed = ", ".join(pending[:6]) + (", ..." if len(pending) > 6 else "")
+            keep_going, _skip = dialog.Update(
+                total - len(pending),
+                f"Waiting for EasyEDA data: {len(pending)} of {total} part(s) left ({listed})",
+            )
+            if not keep_going:
+                return False
+            wx.MilliSleep(POLL_MS)
+            pending = check.pending_references()
+        return True
+    finally:
+        dialog.Destroy()
+
+
+class GenerateSummaryDialog(wx.Dialog):
+    """A scrolled, read-only view of the rotation summary."""
+
+    def __init__(self, parent: Any, text: str) -> None:
+        wx.Dialog.__init__(
+            self,
+            parent,
+            id=wx.ID_ANY,
+            title="JLC footprint check: rotations in the CPL",
+            size=wx.Size(900, 600),
+            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
+        )
+        view = wx.TextCtrl(
+            self,
+            wx.ID_ANY,
+            text,
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP,
+        )
+        view.SetFont(wx.Font(wx.FontInfo(10).Family(wx.FONTFAMILY_TELETYPE)))
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(view, 1, wx.ALL | wx.EXPAND, 5)
+        sizer.Add(self.CreateStdDialogButtonSizer(wx.OK), 0, wx.ALL | wx.EXPAND, 5)
+        self.SetSizer(sizer)
+
+
+def show_generate_summary(
+    window: Any, rows: list[CplRotation], legacy_available: bool
+) -> str:
+    """Show the three-group rotation summary after the CPL is written; return its text."""
+    text = format_summary(summarise(rows, legacy_available))
+    dialog = GenerateSummaryDialog(window, text)
+    try:
+        dialog.ShowModal()
+    finally:
+        dialog.Destroy()
+    return text
