@@ -44,15 +44,21 @@ class FakeResponse:
 
 @pytest.fixture
 def fake_network(monkeypatch):
-    """Serve queued responses, record every request URL and every sleep."""
+    """Serve queued responses, record every request URL, POST body and sleep."""
     recorder = load_script()
-    log = {"urls": [], "sleeps": [], "queue": []}
+    log = {"urls": [], "sleeps": [], "queue": [], "posts": []}
 
     def get(url, headers=None, timeout=None):
         log["urls"].append(url)
         return log["queue"].pop(0)
 
+    def post(url, headers=None, json=None, timeout=None):
+        log["urls"].append(url)
+        log["posts"].append(json)
+        return log["queue"].pop(0)
+
     monkeypatch.setattr(recorder.requests, "get", get)
+    monkeypatch.setattr(recorder.requests, "post", post)
     monkeypatch.setattr(recorder.time, "sleep", log["sleeps"].append)
     return recorder, log
 
@@ -120,3 +126,127 @@ def test_existing_files_and_bad_codes_cost_no_request(tmp_path, fake_network):
     with pytest.raises(SystemExit):
         recorder.main(["c2132", "--out", str(tmp_path)])
     assert log["urls"] == []
+
+
+PRO_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda_pro"
+SYMBOL_UUID = "c7fc7a92fb9f4171a873988b8332913e"
+
+
+def pro_symbol_body():
+    """Return the recorded Pro symbol document for C2132."""
+    return json.loads(
+        (PRO_FIXTURES / f"symbol_{SYMBOL_UUID}.json").read_text(encoding="utf-8")
+    )
+
+
+def devices_fixture():
+    """Return the codes and body of the recorded corner-case batch answer."""
+    return json.loads(
+        (PRO_FIXTURES / "devices_corner_case.json").read_text(encoding="utf-8")
+    )
+
+
+def test_batch_mode_posts_the_codes_and_keeps_them_with_the_answer(
+    tmp_path, fake_network
+):
+    """One POST with the codes and the library path; the file holds both so misses are known."""
+    recorder, log = fake_network
+    devices = devices_fixture()
+    log["queue"] = [FakeResponse(body=devices["body"])]
+    rc = recorder.main(
+        [
+            "--batch",
+            "C2132",
+            "C7950",
+            "--name",
+            "two",
+            "--out",
+            str(tmp_path),
+            "--interval",
+            "1",
+        ]
+    )
+    assert rc == 0
+    assert log["urls"] == [recorder.DEVICES_URL]
+    assert log["posts"] == [
+        {"codes": ["C2132", "C7950"], "path": recorder.LCSC_COMPANY_PATH}
+    ]
+    saved = json.loads((tmp_path / "devices_two.json").read_text())
+    assert saved["codes"] == ["C2132", "C7950"] and saved["body"] == devices["body"]
+    with pytest.raises(SystemExit):
+        recorder.main(["--batch", "C2132", "--out", str(tmp_path)])
+    log["queue"] = [
+        FakeResponse(body={"success": False, "code": 401, "message": "denied"})
+    ]
+    assert (
+        recorder.main(["--batch", "C1", "--name", "bad", "--out", str(tmp_path)]) == 1
+    )
+    assert not (tmp_path / "devices_bad.json").exists()
+
+
+def test_document_modes_record_footprints_and_symbols_from_the_pro_host(
+    tmp_path, fake_network
+):
+    """--footprint and --symbol GET the Pro host; a symbol body without pads is kept as a symbol."""
+    recorder, log = fake_network
+    footprint = json.loads(
+        (
+            ROOT
+            / "tests"
+            / "fixtures"
+            / "jlcfootprint"
+            / "easyeda_uuid"
+            / "uuid_b3b82869fa924bae820e3a6cfb44d689.json"
+        ).read_text()
+    )
+    log["queue"] = [FakeResponse(body=footprint), FakeResponse(body=pro_symbol_body())]
+    rc = recorder.main(
+        [
+            "--footprint",
+            "b3b82869fa924bae820e3a6cfb44d689",
+            "--symbol",
+            SYMBOL_UUID,
+            "--out",
+            str(tmp_path),
+            "--interval",
+            "1",
+        ]
+    )
+    assert rc == 0
+    assert log["urls"] == [
+        recorder.PUUID_URLS["pro"].format(puuid="b3b82869fa924bae820e3a6cfb44d689"),
+        recorder.PUUID_URLS["pro"].format(puuid=SYMBOL_UUID),
+    ]
+    assert log["sleeps"] == [1.0]
+    assert (tmp_path / "footprint_b3b82869fa924bae820e3a6cfb44d689.json").exists()
+    assert (tmp_path / f"symbol_{SYMBOL_UUID}.json").exists()
+    # A footprint asked as a symbol is refused: the parser says it names a footprint.
+    log["queue"] = [FakeResponse(body=footprint)]
+    assert (
+        recorder.main(
+            ["--symbol", "b3b82869fa924bae820e3a6cfb44d689", "--out", str(tmp_path)]
+        )
+        == 1
+    )
+    assert not (tmp_path / "symbol_b3b82869fa924bae820e3a6cfb44d689.json").exists()
+
+
+def test_from_devices_queues_every_document_once(tmp_path, fake_network):
+    """The footprints and symbols a batch answer names are queued, footprints first, no repeats."""
+    recorder, log = fake_network
+    devices = devices_fixture()
+    (tmp_path / "devices_a.json").write_text(json.dumps(devices))
+    footprints, symbols = recorder.uuids_from_devices([tmp_path / "devices_a.json"])
+    assert len(footprints) == len(set(footprints)) and len(symbols) == len(set(symbols))
+    assert 0 < len(footprints) <= len(devices["codes"])
+    assert 0 < len(symbols) <= len(devices["codes"])
+    for uuid in footprints + symbols:
+        (tmp_path / f"footprint_{uuid}.json").write_text("{}")
+        (tmp_path / f"symbol_{uuid}.json").write_text("{}")
+    assert (
+        recorder.main(
+            ["--from-devices", str(tmp_path / "devices_a.json"), "--out", str(tmp_path)]
+        )
+        == 0
+    )
+    assert log["urls"] == [], "every document already exists"
