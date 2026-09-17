@@ -16,25 +16,25 @@ from .events import JlcFootprintResultEvent, MessageEvent
 from .footprint_helpers import get_lcsc_value
 from .footprint_metadata import count_pad
 from .jlcfootprint.cache import FILENAME, Cache, SeedImportResult
-from .jlcfootprint.controller import FootprintCheck
+from .jlcfootprint.controller import FootprintCheck, describe_seconds
 from .jlcfootprint.kicad_adapter import board_parts
 from .jlcfootprint.report import CplRotation, format_summary, summarise
 from .jlcfootprint.verdicts import VerdictStore
-from .jlcfootprint.worker import TokenBucket
+from .jlcfootprint.worker import Buckets
 
 MESSAGE_TITLE = "JLC footprint check"
 POLL_MS = 200
 
 # One request budget per plugin session, however often the check is restarted.
-_shared_bucket: TokenBucket | None = None
+_shared_buckets: Buckets | None = None
 
 
-def shared_bucket() -> TokenBucket:
-    """Return the session's token bucket, created on first use."""
-    global _shared_bucket  # noqa: PLW0603
-    if _shared_bucket is None:
-        _shared_bucket = TokenBucket()
-    return _shared_bucket
+def shared_buckets() -> Buckets:
+    """Return the session's token buckets, created on first use."""
+    global _shared_buckets  # noqa: PLW0603
+    if _shared_buckets is None:
+        _shared_buckets = Buckets.default()
+    return _shared_buckets
 
 
 def is_footprint_check_enabled(settings: dict) -> bool:
@@ -73,7 +73,7 @@ def create_footprint_check(window: Any, pcbnew: Any) -> FootprintCheck:
         )
 
     return FootprintCheck(
-        cache, verdicts, read_board, post, message=message, bucket=shared_bucket()
+        cache, verdicts, read_board, post, message=message, buckets=shared_buckets()
     )
 
 
@@ -111,9 +111,11 @@ def wait_for_pending_fetches(window: Any, check: FootprintCheck) -> bool:
             if check.worker.tripped:
                 return False
             listed = ", ".join(pending[:6]) + (", ..." if len(pending) > 6 else "")
+            requests, seconds = check.queue_estimate()
             keep_going, _skip = dialog.Update(
                 total - len(pending),
-                f"Waiting for EasyEDA data: {len(pending)} of {total} part(s) left ({listed})",
+                f"Waiting for EasyEDA data: {len(pending)} of {total} part(s) left ({listed});"
+                f" {requests} request(s) queued, about {describe_seconds(seconds)}",
             )
             if not keep_going:
                 return False
