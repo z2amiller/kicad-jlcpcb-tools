@@ -56,6 +56,34 @@ def polarized(marks=None, **fields):
     return detail(verdict=verdict, marks=marks, **fields)
 
 
+def turned(**fields):
+    """Return a detail whose JLC drawing is turned 90 degrees from the footprint.
+
+    The raw and the transformed JLC pads then sit in visibly different places, which
+    is what makes a rescale on a checkbox toggle visible.
+    """
+    jlc = [
+        Pad("1", 1.1, 0.95, 1.0, 0.6),
+        Pad("2", 1.1, -0.95, 1.0, 0.6),
+        Pad("3", -1.1, 0.0, 1.0, 0.6),
+    ]
+    verdict = resolve(
+        SOT23_KICAD,
+        "Package_TO_SOT_SMD:SOT-23",
+        "ok",
+        "SOT-23_L2.9-W1.3-P1.90-LS2.4-BR",
+        jlc,
+        [SymbolPin("1", "B"), SymbolPin("2", "E"), SymbolPin("3", "C")],
+    )
+    return detail(
+        kicad_pads=list(SOT23_KICAD),
+        jlc_pads=jlc,
+        kicad_footprint="Package_TO_SOT_SMD:SOT-23",
+        verdict=verdict,
+        **fields,
+    )
+
+
 def test_the_scale_fits_both_pad_sets_with_a_margin_and_centres_them():
     """Spec 16.4: both pad sets plus a 15 % margin, centred on the canvas."""
     drawing = overlay(polarized(), CANVAS)
@@ -235,6 +263,65 @@ def test_the_layers_switch_what_is_drawn():
     assert (
         jlc_only.by_role("kicad_pin1") == [] and len(jlc_only.by_role("jlc_pin1")) == 1
     )
+
+
+def _drawn(drawing, role):
+    """Return one role's rectangles as comparable pixel tuples."""
+    return {
+        (
+            item.number,
+            round(item.x, 6),
+            round(item.y, 6),
+            round(item.width, 6),
+            round(item.height, 6),
+        )
+        for item in drawing.by_role(role)
+    }
+
+
+def test_the_frame_does_not_move_when_a_layer_is_switched():
+    """Spec 16.4 (amended 2026-09-18): the checkboxes change what is drawn, not the scale.
+
+    The frame comes from every pad set the part has, so a pad that is drawn lands on
+    exactly the same pixel whichever other layers are on, and the scale bar and the
+    grid never change with a toggle.
+    """
+    part = turned()
+    full = overlay(part, CANVAS, (KICAD, JLC_PLACED, JLC_RAW))
+    # This part really does place its raw and its transformed JLC pads apart.
+    assert _drawn(full, "jlc_pad") != _drawn(full, "jlc_raw_pad")
+    reference_bar = full.by_role("scale_bar")[0]
+    for layers in (
+        (),
+        (KICAD,),
+        (JLC_PLACED,),
+        (JLC_RAW,),
+        (KICAD, JLC_PLACED),
+        (KICAD, JLC_RAW),
+        (JLC_PLACED, JLC_RAW),
+        (KICAD, JLC_PLACED, JLC_RAW),
+    ):
+        drawing = overlay(part, CANVAS, layers)
+        assert drawing.bounds_mm == full.bounds_mm
+        assert drawing.scale_px_per_mm == full.scale_px_per_mm
+        assert drawing.grid_mm == full.grid_mm
+        bar = drawing.by_role("scale_bar")[0]
+        assert (bar.x, bar.y, bar.x2, bar.y2) == (
+            reference_bar.x,
+            reference_bar.y,
+            reference_bar.x2,
+            reference_bar.y2,
+        )
+        assert drawing.by_role("scale_label")[0].text == f"{full.grid_mm:g} mm"
+        for role, layer in (
+            ("kicad_pad", KICAD),
+            ("jlc_pad", JLC_PLACED),
+            ("jlc_raw_pad", JLC_RAW),
+        ):
+            expected = _drawn(full, role) if layer in layers else set()
+            assert _drawn(drawing, role) == expected, (role, layers)
+    # A real resize still rescales.
+    assert overlay(part, (840, 600)).scale_px_per_mm > full.scale_px_per_mm
 
 
 def test_a_degenerate_or_empty_part_still_produces_a_drawing():
