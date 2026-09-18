@@ -163,7 +163,10 @@ def overlay(
 
     ``layers`` is any of ``kicad``, ``jlc_placed`` and ``jlc_raw``; a layer with
     nothing to draw is skipped silently, and a part with no placement draws its raw
-    JLC pads instead of the transformed ones with a note saying why.
+    JLC pads instead of the transformed ones with a note saying why.  ``layers``
+    chooses only which primitives are emitted: the scale, the centre, the grid pitch
+    and the scale bar come from every pad set the part has, so the drawing does not
+    move when a checkbox is toggled.
     """
     width_px, height_px = (float(size_px[0]), float(size_px[1]))
     placement = detail.placement
@@ -177,13 +180,14 @@ def overlay(
             note = "no placement: the JLC pads are drawn as the drawing has them"
         else:
             note = "no JLC pads cached for this part yet"
-    kicad_boxes = _boxes(detail.kicad_pads, None) if KICAD in wanted else []
+    # The frame is measured from every pad set the part has, shown or not, so that
+    # toggling a checkbox never rescales the drawing (spec 16.4, amended 2026-09-18:
+    # the frame is fixed across the toggles).  Only a real resize rescales.
+    kicad_boxes = _boxes(detail.kicad_pads, None)
     placed_boxes = (
-        _boxes(detail.jlc_pads, inverse(placement))
-        if JLC_PLACED in wanted and placement is not None
-        else []
+        _boxes(detail.jlc_pads, inverse(placement)) if placement is not None else []
     )
-    raw_boxes = _boxes(detail.jlc_pads, None) if JLC_RAW in wanted else []
+    raw_boxes = _boxes(detail.jlc_pads, None)
     x1, y1, x2, y2 = _bounds([kicad_boxes, placed_boxes, raw_boxes])
     span_x = (x2 - x1) * (1.0 + 2 * MARGIN_FRACTION)
     span_y = (y2 - y1) * (1.0 + 2 * MARGIN_FRACTION)
@@ -198,6 +202,12 @@ def overlay(
         )
 
     pitch = grid_mm(scale, width_px)
+    if KICAD not in wanted:
+        kicad_boxes = []
+    if JLC_PLACED not in wanted:
+        placed_boxes = []
+    if JLC_RAW not in wanted:
+        raw_boxes = []
     result = Overlay(
         scale_px_per_mm=scale,
         grid_mm=pitch,
