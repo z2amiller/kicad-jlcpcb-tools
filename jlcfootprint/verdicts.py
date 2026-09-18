@@ -96,11 +96,14 @@ class StoredVerdict:
 
     @property
     def display_text(self) -> str:
-        """Return the Rotation column text (spec section 9)."""
+        """Return the Rotation column text: the angle, "set", "!" or "raw" (spec 16.3).
+
+        A pending row reads "raw", which is what the CPL emits for it; the ellipsis
+        the first design showed while fetching is retired, and the JLC column's clock
+        carries that state instead.
+        """
         if self.override_rotation is not None:
             return f"{self.override_rotation}° set"
-        if self.status == PENDING:
-            return "…"
         if self.source == "derived":
             return (
                 f"{self.rotation}° !"

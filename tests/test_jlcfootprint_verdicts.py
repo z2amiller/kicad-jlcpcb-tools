@@ -173,7 +173,7 @@ def test_mark_pending_creates_a_row(store):
     )
     assert stored.source == "raw"
     assert stored.emitted_rotation is None
-    assert stored.display_text == "…"
+    assert stored.display_text == "raw"  # spec 16.3 retired the pending ellipsis
 
 
 @pytest.mark.parametrize(
