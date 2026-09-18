@@ -19,7 +19,8 @@ from .dataview_highlight import (
     expand_footprint,
     expand_value,
 )
-from .helpers import apply_side_cell_style, loadIconScaled
+from .helpers import apply_jlc_cell_style, apply_side_cell_style, loadIconScaled
+from .jlcfootprint.presentation import glyph as jlc_glyph, sort_rank as jlc_sort_rank
 from .partselector_columns import COLUMN_INDEX, MODEL_COLUMN_TYPES
 from .stock_display import format_stock, stock_sort_key
 
@@ -117,6 +118,7 @@ class PartListDataModel(_StockDataModel):
         "PRICE_COL": 13,
         "TRAILING_SPACER_COL": 14,
         "STANDARD_ONLY_COL": 15,
+        "JLC_COL": 16,
     }
 
     def __init__(self, scale_factor: float, simplify_stock: bool = True) -> None:
@@ -124,6 +126,9 @@ class PartListDataModel(_StockDataModel):
         self.standard_only_refs: set[str] = set()
         self._assembly_metadata: dict[str, _AssemblyMetadata] = {}
         self.stock_concern_refs: set[str] = set()
+        # Reference -> JLC footprint check state (jlcfootprint.presentation), which
+        # the cell renders as a glyph and sorts by; "" for a row the check skips.
+        self._jlc_states: dict[str, str] = {}
 
         self.bom_pos_icons = [
             loadIconScaled(
@@ -241,8 +246,28 @@ class PartListDataModel(_StockDataModel):
             if str(row[self.columns["REF_COL"]] or "") in changed_refs:
                 self.ValueChanged(self.ObjectToItem(row), self.columns["STOCK_COL"])
 
+    def set_jlc_state(self, reference: str, state: str) -> None:
+        """Set one row's JLC footprint-check state, repainting the row when it changes."""
+        if self._jlc_states.get(reference, "") == state:
+            return
+        self._jlc_states[reference] = state
+        if (index := self.find_index(reference)) is None:
+            return
+        # Cocoa reads ValueChanged's index as a displayed column, and this column's
+        # retained model index is past the displayed count (#834), so repaint the row.
+        self.ItemChanged(self.ObjectToItem(self.data[index]))
+
+    def get_jlc_state(self, item: Any) -> str:
+        """Return the JLC state of an item's row ("" when the check said nothing)."""
+        row = self.ItemToObject(item)
+        if not row:
+            return ""
+        return self._jlc_states.get(str(row[self.columns["REF_COL"]] or ""), "")
+
     def GetAttr(self, item: Any, col: int, attr: Any) -> bool:
-        """Style concerned Stock cells and the existing TOP/BOT Side labels."""
+        """Style concerned Stock cells, the JLC glyph and the existing TOP/BOT Side labels."""
+        if col == self.columns["JLC_COL"]:
+            return apply_jlc_cell_style(self.get_jlc_state(item), attr)
         if col == self.columns["STOCK_COL"]:
             row = self.ItemToObject(item)
             if (
@@ -291,13 +316,16 @@ class PartListDataModel(_StockDataModel):
             "string",
             "string",
             "string",
+            "string",
         )
         return columntypes[col]
 
     def HasValue(self, item: Any, col: int) -> bool:
-        """Show assembly state for assigned rows while unassigned cells stay blank."""
+        """Show assembly and JLC state for assigned rows while unassigned cells stay blank."""
         if col == self.columns["STANDARD_ONLY_COL"]:
             return bool(self._assembly_indicator(self.ItemToObject(item)))
+        if col == self.columns["JLC_COL"]:
+            return bool(jlc_glyph(self.get_jlc_state(item)))
         return super().HasValue(item, col)
 
     def GetChildren(self, parent, children):
@@ -328,6 +356,8 @@ class PartListDataModel(_StockDataModel):
         row = self.ItemToObject(item)
         if col == self.columns["STANDARD_ONLY_COL"]:
             return self._assembly_indicator(row)
+        if col == self.columns["JLC_COL"]:
+            return jlc_glyph(self.get_jlc_state(item))
         if col in [
             self.columns["BOM_COL"],
             self.columns["POS_COL"],
@@ -366,6 +396,7 @@ class PartListDataModel(_StockDataModel):
             self.columns["DNP_COL"],
             self.columns["SIDE_COL"],
             self.columns["STANDARD_ONLY_COL"],
+            self.columns["JLC_COL"],
         ]:
             return False
         row[col] = value
@@ -377,6 +408,23 @@ class PartListDataModel(_StockDataModel):
         if column == self.columns["PARAMS_COL"]:
             return self._decode_params_value(value)
         return value
+
+    def _jlc_sort_key(self, item: Any) -> tuple:
+        """Return the JLC cell's sort key: its state's rank, then the reference."""
+        row = self.ItemToObject(item)
+        reference = str((row or [""])[self.columns["REF_COL"]] or "")
+        return (
+            jlc_sort_rank(self._jlc_states.get(reference, "")),
+            self.natural_sort_key(reference),
+        )
+
+    def Compare(self, item1: Any, item2: Any, column: int, ascending: bool) -> int:
+        """Sort the JLC glyphs worst first (spec 16.3), ties by reference; others as before."""
+        if column != self.columns["JLC_COL"]:
+            return super().Compare(item1, item2, column, ascending)
+        key1, key2 = self._jlc_sort_key(item1), self._jlc_sort_key(item2)
+        order = (key1 > key2) - (key1 < key2)
+        return order if ascending else -order
 
     def find_index(self, ref):
         """Get the index of a part within the data list by its reference."""
@@ -430,6 +478,7 @@ class PartListDataModel(_StockDataModel):
         self.standard_only_refs.clear()
         self._assembly_metadata.clear()
         self.stock_concern_refs.clear()
+        self._jlc_states.clear()
         self.Cleared()
 
     def get_all(self):
@@ -481,6 +530,8 @@ class PartListDataModel(_StockDataModel):
         item[self.columns["PRICE_COL"]] = ""
         self.standard_only_refs.discard(ref)
         self._assembly_metadata.pop(ref, None)
+        # A new part number means a new verdict: the old glyph must not outlive it.
+        self._jlc_states.pop(ref, None)
         self.ItemChanged(self.ObjectToItem(item))
 
     def set_catalog_details(
@@ -536,6 +587,7 @@ class PartListDataModel(_StockDataModel):
         obj = self.ItemToObject(item)
         self.standard_only_refs.discard(str(obj[self.columns["REF_COL"]] or ""))
         self._assembly_metadata.pop(str(obj[self.columns["REF_COL"]] or ""), None)
+        self._jlc_states.pop(str(obj[self.columns["REF_COL"]] or ""), None)
         obj[self.columns["LCSC_COL"]] = ""
         obj[self.columns["TYPE_COL"]] = ""
         obj[self.columns["STOCK_COL"]] = ""

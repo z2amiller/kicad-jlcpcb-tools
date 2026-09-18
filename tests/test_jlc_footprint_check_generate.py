@@ -311,7 +311,9 @@ def test_rotation_cells_show_the_decision_or_the_rule(mainwindow):
     """The Rotation column carries the check's text when it runs, else the rule as before."""
     module, _ = mainwindow
     check = SimpleNamespace(
-        display_text=lambda reference: {"R1": "180°", "R2": ""}[reference], generation=3
+        display_text=lambda reference: {"R1": "180°", "R2": ""}[reference],
+        glyph_state=lambda reference: {"R1": "green", "R2": "unknown"}[reference],
+        generation=3,
     )
     window, model = _column_window(module, check)
     assert (
@@ -323,6 +325,10 @@ def test_rotation_cells_show_the_decision_or_the_rule(mainwindow):
     )
     module.JLCPCBTools._refresh_jlc_rotation_cells(window)
     assert model.set_rotation.call_args_list == [(("R1", "180°"),), (("R2", "raw"),)]
+    assert model.set_jlc_state.call_args_list == [
+        (("R1", "green"),),
+        (("R2", "unknown"),),
+    ]
 
     window, model = _column_window(module, check, enabled=False)
     assert (
@@ -335,6 +341,7 @@ def test_rotation_cells_show_the_decision_or_the_rule(mainwindow):
     )
     module.JLCPCBTools._refresh_jlc_rotation_cells(window)
     model.set_rotation.assert_not_called()
+    model.set_jlc_state.assert_not_called()
 
 
 def test_result_event_repaints_the_checked_references(mainwindow):
@@ -342,6 +349,7 @@ def test_result_event_repaints_the_checked_references(mainwindow):
     module, _ = mainwindow
     check = SimpleNamespace(
         display_text=lambda reference: "90° !",
+        glyph_state=lambda reference: "yellow",
         references_for=lambda lcsc: ["R1", "R2"],
         generation=3,
     )
@@ -354,3 +362,7 @@ def test_result_event_repaints_the_checked_references(mainwindow):
         window, SimpleNamespace(lcsc="C1", generation=3)
     )
     assert model.set_rotation.call_args_list == [(("R1", "90° !"),), (("R2", "90° !"),)]
+    assert model.set_jlc_state.call_args_list == [
+        (("R1", "yellow"),),
+        (("R2", "yellow"),),
+    ]

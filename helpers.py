@@ -48,6 +48,37 @@ def HighResWxSize(window, size):
     return size
 
 
+# The JLC column's two RGB stops per state (spec 16.3): the first reads on a dark
+# window background, the second on a light one, like the stock-concern colour.
+JLC_CELL_COLOURS = {
+    "red": ((255, 128, 128), (176, 0, 0)),
+    "yellow": ((255, 211, 102), (128, 52, 0)),
+    "caveat": ((255, 211, 102), (128, 52, 0)),
+    "unknown": ((176, 176, 176), (102, 102, 102)),
+    "paused": ((176, 176, 176), (102, 102, 102)),
+    "pending": ((176, 176, 176), (102, 102, 102)),
+    "green": ((96, 200, 120), (0, 112, 48)),
+    "override": ((124, 176, 255), (0, 82, 204)),
+}
+
+
+def apply_jlc_cell_style(state: str, attr: wx.dataview.DataViewItemAttr) -> bool:
+    """Colour and embolden one JLC glyph cell for its state; False for no state.
+
+    Foreground only, like the Side and stock-concern cells: Cocoa retains a custom
+    cell background after its attributes clear, and native row striping must stay.
+    """
+    stops = JLC_CELL_COLOURS.get(state)
+    if stops is None:
+        return False
+    dark, light = stops
+    background = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+    attr.SetColour(wx.Colour(*(dark if background.GetLuminance() < 0.5 else light)))
+    if hasattr(attr, "SetBold"):
+        attr.SetBold(True)
+    return True
+
+
 def apply_side_cell_style(side: str, attr: wx.dataview.DataViewItemAttr) -> bool:
     """Apply the shared TOP/BOT text color and weight to a Side cell."""
     side_colours = {

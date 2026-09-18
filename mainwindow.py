@@ -105,7 +105,9 @@ from .window_layout import get_column_widths, restore_column_widths
 FOOTPRINT_COLUMN_KEYS = {
     index: key
     for key, index in PartListDataModel.columns.items()
-    if key not in {"TRAILING_SPACER_COL", "STANDARD_ONLY_COL", "ENRICH_COL"}
+    # The two glyph columns keep their fixed 36 DIP and the spacer absorbs the
+    # stretch, so neither is persisted; ENRICH_COL has no view column (#834).
+    if key not in {"TRAILING_SPACER_COL", "STANDARD_ONLY_COL", "ENRICH_COL", "JLC_COL"}
 }
 
 if TYPE_CHECKING:
@@ -551,6 +553,14 @@ class JLCPCBTools(wx.Frame):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
+        self.jlc_column = jlc = self.footprint_list.AppendTextColumn(
+            "JLC",
+            PartListDataModel.columns["JLC_COL"],
+            width=HighResWxSize(self.window, wx.Size(36, -1)).GetWidth(),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+            flags=0,
+        )
         side = self.footprint_list.AppendTextColumn(
             "Side",
             10,
@@ -577,6 +587,7 @@ class JLCPCBTools(wx.Frame):
         pos.SetSortable(False)
         dnp.SetSortable(True)
         correction.SetSortable(True)
+        jlc.SetSortable(True)
         side.SetSortable(True)
         params.SetSortable(True)
         trailing_spacer.SetSortable(False)
@@ -1623,6 +1634,14 @@ class JLCPCBTools(wx.Frame):
             self.partlist_data_model.set_rotation(
                 reference, check.display_text(reference) or "raw"
             )
+            self._apply_jlc_cell(reference)
+
+    def _apply_jlc_cell(self, reference: str) -> None:
+        """Set one row's JLC glyph from the footprint check, or clear it when off."""
+        check = self._active_jlc_footprint_check()
+        self.partlist_data_model.set_jlc_state(
+            reference, "" if check is None else check.glyph_state(reference)
+        )
 
     def _active_jlc_footprint_check(self):
         """Return the running footprint check when the setting is on, else None."""
@@ -1640,7 +1659,7 @@ class JLCPCBTools(wx.Frame):
         return str(self.get_correction(part, corrections))
 
     def _refresh_jlc_rotation_cells(self) -> None:
-        """Repaint every Rotation cell from the footprint check's current decisions."""
+        """Repaint every Rotation and JLC cell from the footprint check's decisions."""
         check = self._active_jlc_footprint_check()
         if check is None:
             return
@@ -1648,6 +1667,7 @@ class JLCPCBTools(wx.Frame):
         for row in model.get_all():
             reference = str(row[model.columns["REF_COL"]] or "")
             model.set_rotation(reference, check.display_text(reference) or "raw")
+            self._apply_jlc_cell(reference)
 
     def read_corrections_for_summary(self):
         """Read the correction rules for the rotation summary's comparison; None when unavailable."""
@@ -1772,6 +1792,7 @@ class JLCPCBTools(wx.Frame):
                 part,
                 pending=enrichment_status == "Pending",
             )
+            self._apply_jlc_cell(part["reference"])
         wx.PostEvent(self, BomDataChangedEvent(source="populate_footprint_list"))
 
     def OnBomHide(self, *_):
