@@ -176,6 +176,40 @@ def test_the_inverse_placement_puts_each_jlc_pad_on_its_kicad_partner():
         assert (x, y) == pytest.approx((partner.x, partner.y), abs=1e-6)
 
 
+def test_a_turned_placement_lands_each_jlc_pad_on_its_kicad_pad_in_the_drawing():
+    """The canvas draws the JLC pads through the placement's inverse, not the placement."""
+    jlc_pads = [
+        Pad("1", 1.1, 0.95, 0.6, 1.0),
+        Pad("2", 1.1, -0.95, 0.6, 1.0),
+        Pad("3", -1.1, 0.0, 0.6, 1.0),
+    ]
+    verdict = resolve(
+        SOT23_KICAD,
+        "Package_TO_SOT_SMD:SOT-23",
+        "ok",
+        "SOT-23_L2.9-W1.3-P0.95-LS2.4-BR",
+        jlc_pads,
+        [SymbolPin("1", "B"), SymbolPin("2", "E"), SymbolPin("3", "C")],
+    )
+    assert verdict.placement.rotation_deg in (90, 270)  # a real turn, not the identity
+    drawing = overlay(
+        detail(kicad_pads=SOT23_KICAD, jlc_pads=jlc_pads, verdict=verdict),
+        CANVAS,
+        (KICAD, JLC_PLACED),
+    )
+
+    def centres(role):
+        return {
+            item.number: (
+                round(item.x + item.width / 2.0, 3),
+                round(item.y + item.height / 2.0, 3),
+            )
+            for item in drawing.by_role(role)
+        }
+
+    assert centres("jlc_pad") == centres("kicad_pad")
+
+
 def test_pin_one_is_a_dot_on_kicad_s_pad_and_a_ring_on_jlc_s():
     """Both marks are drawn at a fixed size in DIP, whatever the scale."""
     drawing = overlay(polarized(), CANVAS)
