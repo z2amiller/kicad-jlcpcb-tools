@@ -346,7 +346,8 @@ def parse_pro_pads(lines: list[str]) -> tuple[list[dict], int]:
     the size (a merged connector pad, for instance) with no rotation of its own.
     The result is in classic canvas units with Y down, the form
     :func:`jlcfootprint.geometry.easyeda_pads_to_mm` converts; the hole is kept as
-    a radius like the classic ``PAD~`` field.
+    a radius like the classic ``PAD~`` field, and the pad number has its leading
+    zeros stripped like a classic one's.
     """
     pads: list[dict] = []
     skipped = 0
@@ -355,7 +356,7 @@ def parse_pro_pads(lines: list[str]) -> tuple[list[dict], int]:
             continue
         try:
             parts = json.loads(line)
-            number = str(parts[5]).strip()
+            number = _normal_number(str(parts[5]).strip())
             x = float(parts[6]) / PRO_MILS_PER_CANVAS_UNIT
             y = -float(parts[7]) / PRO_MILS_PER_CANVAS_UNIT
             rotation = float(parts[8] or 0.0)
@@ -556,7 +557,10 @@ def pro_pin_records(lines: list[Any]) -> list[tuple[str, str, float, float]]:
     A pin is a ``["PIN", id, ?, ?, x, y, ...]`` record.  Its displayed name and
     number are the attribute records ``["ATTR", attrId, pinId, "NAME", text, ...]``
     and ``["ATTR", attrId, pinId, "NUMBER", text, ...]``; the number is what matches
-    the footprint's pad numbers.  A pin without a number is returned with ``""``.
+    the footprint's pad numbers, leading zeros stripped by :func:`_normal_number` so a
+    Pro ``01`` and a classic ``1`` are one pad.  A pin without a number is returned
+    with ``""``; :func:`parse_pro_pins` and :func:`jlcfootprint.drawing.symbol_pins`
+    drop those, since a pin with no number names no pad.
     """
     order: list[str] = []
     positions: dict[str, tuple[float, float]] = {}
@@ -583,7 +587,11 @@ def pro_pin_records(lines: list[Any]) -> list[tuple[str, str, float, float]]:
                 positions[pin_id] = (0.0, 0.0)
         elif parts[0] == "ATTR" and len(parts) >= 5 and parts[3] in ("NAME", "NUMBER"):
             value = "" if parts[4] is None else str(parts[4]).strip()
-            (names if parts[3] == "NAME" else numbers)[str(parts[2])] = value
+            if parts[3] == "NUMBER":
+                names_or_numbers, value = numbers, _normal_number(value)
+            else:
+                names_or_numbers = names
+            names_or_numbers[str(parts[2])] = value
     return [
         (numbers.get(pin_id, ""), names.get(pin_id, ""), *positions[pin_id])
         for pin_id in order
@@ -593,7 +601,9 @@ def pro_pin_records(lines: list[Any]) -> list[tuple[str, str, float, float]]:
 def parse_pro_pins(lines: list[str]) -> tuple[list[SymbolPin], int]:
     """Return the pins of Pro symbol text, plus the count of pins without a number.
 
-    Pins come out in record order; see :func:`pro_pin_records` for the records.
+    Pins come out in record order; see :func:`pro_pin_records` for the records.  A
+    pin the symbol leaves unnumbered is skipped on purpose and counted instead: it
+    cannot be matched to a pad, and the numbered pins of the symbol are unaffected.
     """
     pins: list[SymbolPin] = []
     skipped = 0

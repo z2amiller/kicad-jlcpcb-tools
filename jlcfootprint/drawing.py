@@ -543,7 +543,12 @@ def footprint_positive_pad(shapes: list[Any]) -> str | None:
 
 
 def symbol_pins(shapes: list[Any]) -> list[tuple[str, float, float]]:
-    """Return ``(number, x, y)`` per pin in the symbol's own units."""
+    """Return ``(number, x, y)`` per pin in the symbol's own units, both formats.
+
+    A pin the symbol leaves unnumbered is skipped on purpose: the marks are matched
+    to pads through the pin number, so a pin with no number names no terminal and
+    must not be offered as one.  The numbered pins of the same symbol are kept.
+    """
     if is_pro(shapes):
         records = pro_pin_records(shapes)
     else:
