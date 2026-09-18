@@ -693,3 +693,137 @@ def test_the_package_name_is_read_from_the_cache_once_per_part(setup):
     # A part with no footprint yet is asked again, so the name appears when it lands.
     assert check.package_name("C0000") == ""
     assert "C0000" not in check._package_names
+
+
+# ---------------------------------------------------------------------------
+# The detail view, the override and the re-fetch (spec 16.4, 16.5)
+# ---------------------------------------------------------------------------
+
+
+def test_the_detail_of_a_resolved_part_carries_both_pad_sets_and_a_fresh_placement(
+    setup,
+):
+    """Spec 16.4: the dialog's inputs are the resolver's own, re-run, not the stored row."""
+    check, board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    detail = check.detail("Q1")
+    assert (detail.reference, detail.lcsc) == ("Q1", "C2132")
+    assert detail.kicad_footprint == "Package_TO_SOT_SMD:SOT-23"
+    assert len(detail.kicad_pads) == 3 and len(detail.jlc_pads) == 3
+    assert detail.package_name == recorded("C2132").package_name
+    assert detail.puuid == recorded("C2132").puuid
+    assert detail.source == "live" and detail.fetched_at > 0
+    assert detail.pin_functions == {"1": "B", "2": "E", "3": "C"}
+    assert detail.kicad_pitch == pytest.approx(
+        1.9, abs=0.05
+    )  # the SOT-23's nearest pads
+    assert detail.jlc_pitch is not None
+    assert detail.kicad_pin1 is not None and detail.jlc_pin1 is not None
+    # The verdict is re-resolved here and carries the placement the canvas needs.
+    assert detail.verdict is not None and detail.placement is not None
+    assert (detail.verdict.status, detail.verdict.rotation) == ("green", 180)
+    assert detail.stored is not None and detail.stored.rotation == 180
+    assert detail.emitted_rotation == 180
+    assert detail.fetch.state == "idle"
+    assert detail.decision is not None and detail.decision.status == "green"
+    assert check.detail("nope") is None
+
+
+def test_the_detail_of_a_part_with_no_data_still_describes_the_footprint(setup):
+    """A pending part, and a part with no LCSC, draw their KiCad pads and nothing else."""
+    check, board, _events, _messages, _client = setup
+    check.scan_board()
+    pending = check.detail("Q1")
+    assert pending.jlc_pads == [] and pending.verdict is None
+    assert pending.package_name == "" and pending.source == ""
+    assert len(pending.kicad_pads) == 3
+    assert pending.fetch.state == "queued"
+    assert pending.stored is not None and pending.stored.status == PENDING
+    bare = check.detail("R1")
+    assert (bare.lcsc, bare.jlc_pads, bare.stored) == ("", [], None)
+    assert bare.kicad_pads == []
+
+
+def test_the_detail_rereads_the_board_when_asked(setup):
+    """The dialog opens on what the board says now, not on the last scan."""
+    check, board, _events, _messages, _client = setup
+    check.scan_board()
+    board["parts"] = [*board["parts"], sot23("Q2")]
+    assert check.detail("Q2") is None
+    assert check.detail("Q2", reread=True) is not None
+
+
+def test_an_override_is_written_kept_and_cleared(setup):
+    """Spec 16.5: the override lives on the verdict row, survives a re-resolve, and clears."""
+    check, board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    part = board["parts"][0]
+    stored = check.set_override("Q1", 270, "JLC's preview needed it")
+    assert (stored.override_rotation, stored.override_note) == (
+        270,
+        "JLC's preview needed it",
+    )
+    assert check.display_text("Q1") == "270° set"
+    assert check.decision(part).source == "override"
+    assert check.glyph_state("Q1") == "override"
+    assert "Override 270° set by you." in check.cell_help("Q1")
+    # A re-resolve and a re-scan keep it (save and mark_pending both do).
+    check.verdicts.mark_pending("C2132", part.footprint_hash, part.footprint_name, 9)
+    assert check.verdicts.get("C2132", part.footprint_hash).override_rotation == 270
+    check.scan_board()
+    check.worker.run_pending()
+    assert check.verdicts.get("C2132", part.footprint_hash).override_rotation == 270
+    cleared = check.set_override("Q1", None)
+    assert (cleared.override_rotation, cleared.override_note) == (None, None)
+    assert check.display_text("Q1") == "180°"
+    assert check.set_override("R1", 90) is None  # no LCSC, no row
+    assert check.set_override("nope", 90) is None
+
+
+def test_an_override_on_a_part_with_no_verdict_row_yet_creates_one(setup):
+    """A part whose data never arrived can still be overridden (the row is minted pending)."""
+    check, board, _events, _messages, _client = setup
+    check.scan_board()
+    part = board["parts"][0]
+    check.verdicts.delete("C2132", part.footprint_hash)
+    stored = check.set_override("Q1", 90, "by hand")
+    assert (stored.status, stored.override_rotation) == (PENDING, 90)
+    assert check.display_text("Q1") == "90° set"
+
+
+def test_two_placements_of_one_part_share_the_verdict_and_the_repaint(setup):
+    """An override set on one reference repaints every reference on that row (spec 5.3)."""
+    check, board, _events, _messages, _client = setup
+    board["parts"] = [*board["parts"], sot23("Q2"), sot23("Q3", lcsc="C2286")]
+    check.scan_board()
+    assert check.references_sharing_verdict("Q1") == ["Q1", "Q2"]
+    assert check.references_sharing_verdict("Q3") == ["Q3"]
+    assert check.references_sharing_verdict("R1") == ["R1"]
+    assert check.references_sharing_verdict("nope") == []
+
+
+def test_refetching_forgets_the_cached_rows_and_queues_the_parts_again(setup, caplog):
+    """Spec 16.5: the cache row goes, the verdict is pending again, the override stays."""
+    check, board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    part = board["parts"][0]
+    check.set_override("Q1", 270, "keep me")
+    assert check.cache.status("C2132") == "ok"
+    with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
+        summary = check.refetch(["Q1"])
+    assert "re-fetching 1 part(s): C2132" in caplog.text
+    assert check.cache.status("C2132") is None
+    assert summary.enqueued == 1
+    stored = check.verdicts.get("C2132", part.footprint_hash)
+    assert (stored.status, stored.override_rotation) == (PENDING, 270)
+    assert check.glyph_state("Q1") == "pending"
+    assert check.package_name("C2132") == ""
+    # The queued request answers and the part resolves again, override intact.
+    check.worker.run_pending()
+    assert check.cache.status("C2132") == "ok"
+    assert check.verdicts.get("C2132", part.footprint_hash).override_rotation == 270
+    assert check.package_name("C2132") == recorded("C2132").package_name
+    assert check.refetch(["nope"]).scanned == 0

@@ -132,6 +132,25 @@ def centroid(pads: list[Pad]) -> tuple[float, float]:
     return (sum(p.x for p in pads) / count, sum(p.y for p in pads) / count)
 
 
+def pad_pitch(pads: list[Pad]) -> float | None:
+    """Return the smallest centre-to-centre distance between differently numbered pads.
+
+    What the detail dialog calls the pitch: the nearest two terminals of the
+    footprint or of the JLC drawing, in millimetres.  None when fewer than two
+    distinct numbers carry a position, so a one-pad drawing reports nothing rather
+    than zero.  Pads sharing a number (a DPAK's tab and its stub) are one terminal
+    and never set the pitch.
+    """
+    named = named_pads(pads)
+    distances = [
+        math.hypot(one.x - other.x, one.y - other.y)
+        for index, one in enumerate(named)
+        for other in named[index + 1 :]
+        if one.number != other.number
+    ]
+    return min(distances) if distances else None
+
+
 def pad_geom(pad: Pad) -> tuple[float, float, float, float]:
     """Return ``(x, y, w, h)`` for the quality checker: the pad's axis-aligned box after its own rotation.
 
