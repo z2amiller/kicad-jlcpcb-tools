@@ -827,3 +827,66 @@ def test_refetching_forgets_the_cached_rows_and_queues_the_parts_again(setup, ca
     assert check.verdicts.get("C2132", part.footprint_hash).override_rotation == 270
     assert check.package_name("C2132") == recorded("C2132").package_name
     assert check.refetch(["nope"]).scanned == 0
+
+
+def test_the_board_estimate_counts_distinct_parts_and_their_documents(setup):
+    """The confirmation's numbers: one lookup per 200 codes and two documents each."""
+    check, board, _events, _messages, _client = setup
+    parts, seconds = check.board_estimate()
+    assert parts == 2  # C2132 and C2286; R1 has no LCSC
+    assert seconds > 0
+    board["parts"] = [*board["parts"], sot23("Q2")]  # the same part number again
+    assert check.board_estimate()[0] == 2
+    board["parts"] = [BoardPart("R1", "", "R", False, 0.0, [], "")]
+    assert check.board_estimate() == (0, 0.0)
+
+
+def test_rechecking_the_board_resolves_from_the_cache_without_any_request(
+    setup, caplog
+):
+    """Spec 16.5: the resolver runs again on cached data, no lookup, no document."""
+    check, board, _events, _messages, client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    calls = (len(client.lookups), len(client.documents))
+    check.verdicts.delete("C2132", board["parts"][0].footprint_hash)
+    with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
+        assert check.recheck_board() == 2
+    assert "re-checked 2 part(s)" in caplog.text
+    assert (len(client.lookups), len(client.documents)) == calls
+    assert check.verdicts.get("C2132", board["parts"][0].footprint_hash) is not None
+    # A part the cache does not know is skipped rather than fetched.
+    check.cache.forget("C2132")
+    assert check.recheck_board() == 1
+    assert (len(client.lookups), len(client.documents)) == calls
+
+
+def test_refreshing_the_board_forgets_every_row_and_rescans(setup, caplog):
+    """Spec 16.5: every LCSC on the board is fetched again, overrides kept."""
+    check, board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    check.set_override("Q1", 90, "keep me")
+    with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
+        summary = check.refresh_board()
+    assert "refreshing 2 part(s) from EasyEDA" in caplog.text
+    assert summary.enqueued == 2
+    assert check.cache.status("C2132") is None and check.cache.status("C2286") is None
+    row = check.verdicts.get("C2132", board["parts"][0].footprint_hash)
+    assert (row.status, row.override_rotation) == (PENDING, 90)
+
+
+def test_clearing_the_cache_empties_it_but_keeps_the_schema(setup, caplog):
+    """Spec 16.5: every cache row goes, the board is rescanned, a seed can refill it."""
+    check, _board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    assert check.cache.counts()["parts"] >= 2
+    with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
+        summary = check.clear_cache()
+    assert "cleared the cache" in caplog.text
+    assert check.cache.counts() == {"parts": 0, "packages": 0}
+    assert summary.enqueued == 2
+    assert check.package_name("C2132") == ""
+    check.cache.store_lookup_miss("C99", now=1)
+    assert check.cache.status("C99") == "none"

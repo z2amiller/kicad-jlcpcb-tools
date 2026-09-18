@@ -84,6 +84,12 @@ from .helpers import (
 )
 from .jlc_footprint_detail import JlcFootprintDetailDialog
 from .jlc_footprint_check import (
+    clear_cache as clear_jlc_footprint_cache,
+    recheck_board as recheck_jlc_footprint_board,
+    refetch_references as refetch_jlc_footprint_references,
+    refresh_board_data as refresh_jlc_footprint_board_data,
+)
+from .jlc_footprint_check import (
     create_footprint_check,
     is_footprint_check_enabled,
     show_generate_summary,
@@ -141,6 +147,10 @@ ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 ID_CONTEXT_MENU_APPLY_PART_PREFERENCES = wx.NewIdRef()
 ID_CONTEXT_MENU_SAVE_PART_PREFERENCES = wx.NewIdRef()
 ID_CONTEXT_MENU_JLC_DETAILS = wx.NewIdRef()
+ID_CONTEXT_MENU_JLC_REFETCH = wx.NewIdRef()
+ID_CONTEXT_MENU_JLC_RECHECK = wx.NewIdRef()
+ID_CONTEXT_MENU_JLC_REFRESH = wx.NewIdRef()
+ID_CONTEXT_MENU_JLC_CLEAR_CACHE = wx.NewIdRef()
 
 
 class KicadProvider:
@@ -2883,21 +2893,102 @@ class JLCPCBTools(wx.Frame):
     def _append_jlc_footprint_menu(self, parent_menu: Any) -> Any:
         """Append the "JLC footprint" submenu to the context menu (spec 16.3).
 
-        Its entries are disabled when the check is off or its store is unavailable,
-        which is also what a board with no project storage looks like.
+        Every entry is disabled when the check is off or its store is unavailable,
+        which is also what a board with no project storage looks like; the two
+        per-part entries also need a selected part with an LCSC number.
         """
         submenu = wx.Menu()
-        details = wx.MenuItem(submenu, ID_CONTEXT_MENU_JLC_DETAILS, "Details...")
-        submenu.Append(details)
-        submenu.Bind(wx.EVT_MENU, self.on_jlc_footprint_details, details)
         available = self._active_jlc_footprint_check() is not None
-        details.Enable(available and self._first_selected_jlc_reference() is not None)
+        selected = available and self._first_selected_jlc_reference() is not None
+        for identifier, label, handler, enabled, separator in (
+            (
+                ID_CONTEXT_MENU_JLC_DETAILS,
+                "Details...",
+                self.on_jlc_footprint_details,
+                selected,
+                False,
+            ),
+            (
+                ID_CONTEXT_MENU_JLC_REFETCH,
+                "Re-fetch data",
+                self.on_jlc_footprint_refetch,
+                selected,
+                True,
+            ),
+            (
+                ID_CONTEXT_MENU_JLC_RECHECK,
+                "Re-check board",
+                self.on_jlc_footprint_recheck,
+                available,
+                False,
+            ),
+            (
+                ID_CONTEXT_MENU_JLC_REFRESH,
+                "Refresh board data",
+                self.on_jlc_footprint_refresh,
+                available,
+                False,
+            ),
+            (
+                ID_CONTEXT_MENU_JLC_CLEAR_CACHE,
+                "Clear cache",
+                self.on_jlc_footprint_clear_cache,
+                available,
+                False,
+            ),
+        ):
+            item = wx.MenuItem(submenu, identifier, label)
+            submenu.Append(item)
+            submenu.Bind(wx.EVT_MENU, handler, item)
+            item.Enable(bool(enabled))
+            if separator:
+                submenu.AppendSeparator()
         parent_menu.AppendSubMenu(submenu, "JLC footprint")
         return submenu
 
     def on_jlc_footprint_details(self, *_: object) -> None:
         """Open the detail dialog for the first selected part with an LCSC."""
         self.show_jlc_footprint_detail()
+
+    def _selected_jlc_references(self) -> list[str]:
+        """Return every selected reference that carries an LCSC number."""
+        model = self.partlist_data_model
+        references = []
+        for item in self.footprint_list.GetSelections():
+            reference = str(model.get_reference(item) or "")
+            if reference and str(model.get_lcsc(item) or "").strip():
+                references.append(reference)
+        return references
+
+    def on_jlc_footprint_refetch(self, *_: object) -> None:
+        """Re-fetch the EasyEDA data of the selected parts (spec 16.5)."""
+        check = self._active_jlc_footprint_check()
+        references = self._selected_jlc_references()
+        if check is None or not references:
+            return
+        refetch_jlc_footprint_references(self, references, check)
+        self._repaint_jlc_references(references)
+
+    def on_jlc_footprint_recheck(self, *_: object) -> None:
+        """Re-resolve every cached part on the board, with no network (spec 16.5)."""
+        if self._active_jlc_footprint_check() is None:
+            return
+        recheck_jlc_footprint_board(self)
+        self._refresh_jlc_rotation_cells()
+
+    def on_jlc_footprint_refresh(self, *_: object) -> None:
+        """Forget and re-fetch every part on the board, after a confirmation (spec 16.5)."""
+        if self._active_jlc_footprint_check() is None:
+            return
+        if refresh_jlc_footprint_board_data(self):
+            self._refresh_jlc_rotation_cells()
+
+    def on_jlc_footprint_clear_cache(self, *_: object) -> None:
+        """Delete the whole EasyEDA cache, after a confirmation (spec 16.5)."""
+        if self._active_jlc_footprint_check() is None:
+            return
+        clear_jlc_footprint_cache(self)
+        self._refresh_jlc_rotation_cells()
 
     def init_logger(self):
         """Initialize logger to log into textbox."""

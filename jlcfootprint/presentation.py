@@ -446,3 +446,8 @@ def banner(detail: PartDetail) -> tuple:
         jlc_package=detail.package_name,
     )
     return (state, text, cpl_sentence(detail))
+
+
+def describe_board_estimate(parts: int, seconds: float) -> str:
+    """Render a board-wide fetch as the confirmation quotes it: "66 parts, about 90 s"."""
+    return f"{parts} part(s), about {describe_seconds(seconds)}"

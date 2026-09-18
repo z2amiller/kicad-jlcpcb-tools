@@ -296,9 +296,13 @@ def mainwindow_stubs(
         },
         "jlc_footprint_detail": {"JlcFootprintDetailDialog": object},
         "jlc_footprint_check": {
+            "clear_cache": lambda *_args, **_kwargs: 0,
             "create_footprint_check": lambda *_args, **_kwargs: None,
             "import_seed": lambda *_args, **_kwargs: None,
             "is_footprint_check_enabled": lambda _settings: False,
+            "recheck_board": lambda *_args, **_kwargs: 0,
+            "refetch_references": lambda *_args, **_kwargs: 0,
+            "refresh_board_data": lambda *_args, **_kwargs: 0,
             "show_generate_summary": lambda *_args, **_kwargs: "",
             "wait_for_pending_fetches": lambda *_args, **_kwargs: True,
         },

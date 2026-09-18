@@ -884,6 +884,7 @@ def test_the_context_menu_carries_the_jlc_submenu(monkeypatch):
             self.items = []
             self.submenus = []
             self.bindings = []
+            self.separators = 0
 
         def Append(self, item):
             """Keep the item."""
@@ -892,6 +893,10 @@ def test_the_context_menu_carries_the_jlc_submenu(monkeypatch):
         def Bind(self, _event, handler, item):
             """Keep the binding."""
             self.bindings.append((handler, item))
+
+        def AppendSeparator(self):
+            """Count the separators."""
+            self.separators += 1
 
         def AppendSubMenu(self, submenu, label):
             """Keep the submenu and its label."""
@@ -915,14 +920,28 @@ def test_the_context_menu_carries_the_jlc_submenu(monkeypatch):
     parent_menu = FakeMenu()
     submenu = main.JLCPCBTools._append_jlc_footprint_menu(window, parent_menu)
     assert appended == ["JLC footprint"]
-    ((details,)) = submenu.items
-    assert details.label == "Details..."
-    assert details.enabled is True
-    assert submenu.bindings[0][0] == window.on_jlc_footprint_details
-    # With the check off, or with no selected part number, the entry is disabled.
+    assert [item.label for item in submenu.items] == [
+        "Details...",
+        "Re-fetch data",
+        "Re-check board",
+        "Refresh board data",
+        "Clear cache",
+    ]
+    # Spec 16.3: a separator between the per-part entries and the board-wide ones.
+    assert submenu.separators == 1
+    assert [item.enabled for item in submenu.items] == [True] * 5
+    assert [handler for handler, _item in submenu.bindings] == [
+        window.on_jlc_footprint_details,
+        window.on_jlc_footprint_refetch,
+        window.on_jlc_footprint_recheck,
+        window.on_jlc_footprint_refresh,
+        window.on_jlc_footprint_clear_cache,
+    ]
+    # With the check off every entry is disabled.
     window.settings = {"jlcfootprint": {"enabled": False}}
     off = main.JLCPCBTools._append_jlc_footprint_menu(window, FakeMenu())
-    assert off.items[0].enabled is False
+    assert [item.enabled for item in off.items] == [False] * 5
+    # With no selected part number only the two per-part entries are disabled.
     window, _model, _control = _window(main, MagicMock(), ("R9",), ("",))
     bare = main.JLCPCBTools._append_jlc_footprint_menu(window, FakeMenu())
-    assert bare.items[0].enabled is False
+    assert [item.enabled for item in bare.items] == [False, False, True, True, True]
