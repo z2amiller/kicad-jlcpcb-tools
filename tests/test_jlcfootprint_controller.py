@@ -7,7 +7,7 @@ import threading
 import pytest
 
 from jlcfootprint.cache import Cache
-from jlcfootprint.controller import Decision, FootprintCheck
+from jlcfootprint.controller import Decision, FetchState, FootprintCheck
 from jlcfootprint.easyeda_client import Document, Lookup
 from jlcfootprint.easyeda_parse import (
     DeviceHit,
@@ -229,7 +229,8 @@ def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup, caplog):
     assert (
         check.verdicts.get("C2132", board["parts"][0].footprint_hash).status == PENDING
     )
-    assert check.display_text("Q1") == "…"
+    # Spec 16.3: a pending part's Rotation cell says what the CPL emits, not "…".
+    assert check.display_text("Q1") == "raw"
     with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
         assert check.worker.run_pending() == 5
     assert "lookup answered: 2 of 2 part(s) known to EasyEDA" in caplog.text
@@ -526,7 +527,7 @@ def test_decisions_follow_the_cpl_precedence(setup):
         decisions["Q9"].pending,
         decisions["Q9"].rotation,
         decisions["Q9"].display,
-    ) == (True, None, "…")
+    ) == (True, None, "raw")
     assert check.display_text("nope") == ""
 
 
@@ -615,3 +616,80 @@ def _cached(check, lcsc):
     """Store the recorded part in the cache and return it as the controller reads it."""
     check.cache.store(recorded(lcsc), now=1)
     return check.cache.part(lcsc)
+
+
+# ---------------------------------------------------------------------------
+# The column, the hover and the queue's state (spec 16.3)
+# ---------------------------------------------------------------------------
+
+
+def test_the_queue_state_of_one_part_while_it_is_scanned_fetched_and_resolved(setup):
+    """A part reads queued, then fetching its own document, then idle once resolved."""
+    check, board, _events, _messages, _client = setup
+    assert check.fetch_state("C2132") == FetchState()
+    assert check.glyph_state("Q1") == ""
+    check.scan_board()
+    queued = check.fetch_state("C2132")
+    assert (queued.state, queued.ahead, queued.queued_parts) == ("queued", 2, 2)
+    assert check.glyph_state("Q1") == "pending"
+    assert "Queued for EasyEDA, 2 request(s) ahead" in check.cell_help("Q1")
+    # The lookup in flight is this part's, so the cell says what is being fetched.
+    check.worker.in_flight = ("lookup", ["C2132", "C2286"])
+    assert check.fetch_state("C2132").state == "fetching"
+    assert check.cell_help("Q1") == "Looking up the part at EasyEDA…"
+    check.worker.in_flight = None
+    check.worker.run_pending()
+    assert check.fetch_state("C2132") == FetchState(queued_parts=0)
+    assert check.glyph_state("Q1") == "green"
+    assert check.cell_help("Q1") == (
+        "Fits; rotation 180° derived from pad geometry (high). "
+        f"JLC {recorded('C2132').package_name} on Package_TO_SOT_SMD:SOT-23."
+    )
+    assert check.glyph_state("D1") == "yellow"
+    assert "pin-1 marker will sit on the other terminal" in check.cell_help("D1")
+    assert check.glyph_state("R1") == ""
+    assert (
+        check.cell_help("R1") == "No LCSC number assigned. The CPL emits the raw angle."
+    )
+    assert check.cell_help("nope") == ""
+
+
+def test_a_document_in_flight_and_a_backoff_and_the_breaker(setup):
+    """Fetching a document this part waits on, a backoff and the breaker each have their own state."""
+    check, _board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    # The state after a lookup has landed: the part waits on its footprint document.
+    puuid = recorded("C2132").puuid
+    check.waiting[(FOOTPRINT, puuid)] = {"C2132"}
+    check.worker.in_flight = (FOOTPRINT, puuid)
+    fetching = check.fetch_state("C2132")
+    assert (fetching.state, fetching.kind) == ("fetching", FOOTPRINT)
+    assert check.cell_help("Q1") == "Fetching the footprint…"
+    check.worker.backoff_until = check.worker.clock() + 45.0
+    paused = check.fetch_state("C2132")
+    assert (paused.state, round(paused.seconds)) == ("paused", 45)
+    assert check.glyph_state("Q1") == "paused"
+    assert check.cell_help("Q1") == "EasyEDA asked us to wait 45 s; 1 part(s) queued."
+    check.worker.backoff_until = None
+    check.worker.tripped = True
+    assert check.fetch_state("C2132").state == "tripped"
+    assert check.glyph_state("Q1") == "paused"
+    assert check.cell_help("Q1") == (
+        "Paused after three failed requests; reopen the plugin to retry."
+    )
+
+
+def test_the_package_name_is_read_from_the_cache_once_per_part(setup):
+    """The hover names the JLC package, which the verdict row does not carry."""
+    check, _board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    assert check.package_name("") == ""
+    assert check.package_name("C2132") == recorded("C2132").package_name
+    check.cache.forget("C2132")
+    # Memoised: a forgotten row does not change the name the hover already shows.
+    assert check.package_name("C2132") == recorded("C2132").package_name
+    # A part with no footprint yet is asked again, so the name appears when it lands.
+    assert check.package_name("C0000") == ""
+    assert "C0000" not in check._package_names

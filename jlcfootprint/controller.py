@@ -29,6 +29,7 @@ from .easyeda_client import EasyEdaClient
 from .easyeda_parse import ComponentRecord
 from .geometry import easyeda_pads_to_mm
 from .kicad_adapter import BoardPart
+from .presentation import describe_seconds, jlc_state, verdict_text
 from .resolver import Verdict, resolve
 from .verdicts import PENDING, StoredVerdict, VerdictStore
 from .worker import FOOTPRINT, LOOKUP, SYMBOL, Buckets, FetchWorker
@@ -65,11 +66,22 @@ class ScanSummary:
         return text
 
 
-def describe_seconds(seconds: float) -> str:
-    """Render an estimate as seconds under a minute, else minutes."""
-    if seconds < 60:
-        return f"{int(round(seconds))} s"
-    return f"{int(round(seconds / 60.0))} min"
+@dataclass
+class FetchState:
+    """Where one part stands in the fetch queue (spec 16.3's ◷ and ‖ rows).
+
+    ``state`` is ``idle`` (nothing outstanding), ``queued``, ``fetching`` (this
+    part's own request is in flight, ``kind`` says which document), ``paused`` (a
+    backoff is running, ``seconds`` is what is left of it) or ``tripped`` (the
+    session's breaker).  ``ahead`` counts the requests queued before this part's and
+    ``seconds`` how long they take; ``queued_parts`` is how many parts wait in all.
+    """
+
+    state: str = "idle"
+    kind: str = ""
+    ahead: int = 0
+    seconds: float = 0.0
+    queued_parts: int = 0
 
 
 @dataclass
@@ -90,9 +102,11 @@ class Decision:
 
     @property
     def display(self) -> str:
-        """Return the Rotation column text."""
-        if self.pending:
-            return "…"
+        """Return the Rotation column text: what the CPL emits, never the queue's state.
+
+        Spec 16.3 retired the pending ellipsis: a part still being fetched emits its
+        raw angle, so the cell says "raw" and the JLC column's clock says why.
+        """
         if self.verdict is not None:
             return self.verdict.display_text
         return "raw"
@@ -121,6 +135,8 @@ class FootprintCheck:
         self.now = now
         self.generation = 0
         self.parts: dict[str, BoardPart] = {}
+        # LCSC -> EasyEDA package name, read from the cache on demand (see package_name).
+        self._package_names: dict[str, str] = {}
         # Which parts wait on which request: ('lookup', lcsc) or (kind, uuid) -> LCSCs.
         # Read and written under the lock by the scan (main thread) and the handlers.
         self.waiting: dict[tuple[str, str], set[str]] = {}
@@ -473,3 +489,77 @@ class FootprintCheck:
         if part is None:
             return ""
         return self.decision(part).display
+
+    def fetch_state(self, lcsc: str) -> FetchState:
+        """Return where this part's EasyEDA data stands in the queue (spec 16.3).
+
+        The breaker is the session's, so it answers for every part; a backoff stalls
+        the whole queue behind the request that is sleeping, so a part waiting on
+        anything reads as paused while it runs.
+        """
+        if not lcsc:
+            return FetchState()
+        with self.lock:
+            keys = [key for key, lcscs in self.waiting.items() if lcsc in lcscs]
+        queued_parts = len(self.pending_lcscs())
+        if self.worker.tripped:
+            return FetchState("tripped", queued_parts=queued_parts)
+        if not keys:
+            return FetchState(queued_parts=queued_parts)
+        requests, seconds = self.queue_estimate()
+        in_flight = self.worker.in_flight
+        _active, backoff = self.worker.active()
+        if backoff > 0:
+            return FetchState(
+                "paused", seconds=backoff, queued_parts=queued_parts, ahead=requests
+            )
+        if in_flight is not None:
+            kind, payload = in_flight
+            mine = lcsc in payload if kind == LOOKUP else (kind, str(payload)) in keys
+            if mine:
+                return FetchState(
+                    "fetching", kind=kind, queued_parts=queued_parts, ahead=requests
+                )
+        return FetchState(
+            "queued", ahead=requests, seconds=seconds, queued_parts=queued_parts
+        )
+
+    def package_name(self, lcsc: str) -> str:
+        """Return the EasyEDA package name for one part, read from the cache once.
+
+        The hover and the dialog name the JLC package, which the verdict row does not
+        carry; a board's worth of names is a handful of rows, so they are memoised for
+        the session rather than read per repaint.
+        """
+        if not lcsc:
+            return ""
+        name = self._package_names.get(lcsc, "")
+        if not name:
+            cached = self.cache.part(lcsc)
+            record = None if cached is None else cached.record
+            name = "" if record is None else record.package_name
+            if name:
+                # A part whose footprint has not landed yet has no name to remember:
+                # asking again after it lands is what fills the hover and the dialog.
+                self._package_names[lcsc] = name
+        return name
+
+    def glyph_state(self, reference: str) -> str:
+        """Return the JLC column's state for one reference ("" when it has no part)."""
+        part = self.parts.get(reference)
+        if part is None:
+            return ""
+        return jlc_state(self.decision(part), self.fetch_state(part.lcsc))
+
+    def cell_help(self, reference: str) -> str:
+        """Return the JLC cell's hover text for one reference (spec 16.3)."""
+        part = self.parts.get(reference)
+        if part is None:
+            return ""
+        decision = self.decision(part)
+        return verdict_text(
+            decision,
+            self.fetch_state(part.lcsc),
+            kicad_footprint=part.footprint_name,
+            jlc_package=self.package_name(part.lcsc),
+        )
