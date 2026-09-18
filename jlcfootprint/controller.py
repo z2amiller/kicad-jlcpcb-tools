@@ -786,11 +786,13 @@ class FootprintCheck:
     def board_estimate(self) -> tuple[int, float]:
         """Return how many parts a board-wide re-fetch would ask for, and roughly how long.
 
-        The confirmation quotes this before anything is forgotten: one lookup per 200
-        codes and up to two documents each, the same arithmetic the queue uses.
+        The confirmation quotes this before anything is forgotten, and it is the number
+        the queue itself would quote for those codes once they are queued:
+        :func:`estimate_seconds` already counts one lookup per 200 codes *plus* the two
+        documents each code may need, so no document count is added here.
         """
         count = len({part.lcsc for part in self.read_board() if part.lcsc})
-        return count, estimate_seconds(count, 2 * count)
+        return count, estimate_seconds(count, 0)
 
     def references_sharing_verdict(self, reference: str) -> list[str]:
         """Return every reference whose verdict row is the one this reference uses.
