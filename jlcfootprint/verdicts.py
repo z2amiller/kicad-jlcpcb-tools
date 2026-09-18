@@ -115,6 +115,29 @@ _COLUMNS = tuple(field.name for field in fields(StoredVerdict))
 _ADDED_COLUMNS = (("body_excess_mm", "REAL"),)
 
 
+def _table_columns(con: sqlite3.Connection) -> set:
+    """Return the column names ``footprint_verdict`` currently has."""
+    return {row["name"] for row in con.execute("PRAGMA table_info(footprint_verdict)")}
+
+
+def add_missing_columns(con: sqlite3.Connection, present: set) -> None:
+    """Add the columns an older ``footprint_verdict`` lacks, tolerating a racing writer.
+
+    Two KiCad processes can open one project's database at the same moment, both
+    read the same old column list and both try the same ``ALTER TABLE``; the loser
+    must not fail the plugin on "duplicate column name".  A failure that leaves the
+    column missing is a real one and is re-raised.
+    """
+    for column, kind in _ADDED_COLUMNS:
+        if column in present:
+            continue
+        try:
+            con.execute(f"ALTER TABLE footprint_verdict ADD COLUMN {column} {kind}")
+        except sqlite3.OperationalError:
+            if column not in _table_columns(con):
+                raise
+
+
 class VerdictStore:
     """The ``footprint_verdict`` table in one project's ``project.db``."""
 
@@ -122,15 +145,7 @@ class VerdictStore:
         self.db_path = str(db_path)
         with closing(self.connect()) as con, con:
             con.executescript(SCHEMA)
-            present = {
-                row["name"]
-                for row in con.execute("PRAGMA table_info(footprint_verdict)")
-            }
-            for column, kind in _ADDED_COLUMNS:
-                if column not in present:
-                    con.execute(
-                        f"ALTER TABLE footprint_verdict ADD COLUMN {column} {kind}"
-                    )
+            add_missing_columns(con, _table_columns(con))
 
     def connect(self) -> sqlite3.Connection:
         """Open a connection with row access by name."""

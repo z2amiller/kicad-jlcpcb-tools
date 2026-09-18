@@ -39,6 +39,7 @@ from .polarity import (
     pin1_meaning,
     side_of,
     terminal_of,
+    token_is_weak,
     token_reference_side,
 )
 
@@ -139,14 +140,19 @@ def _mismatch_note(verdict: Verdict, fit: str) -> str:
 
 
 def _finish_multi_pin(
-    verdict: Verdict, kicad: dict[str, Pad], placement: Placement
+    verdict: Verdict, kicad: dict[str, Pad], placement: Placement, by_name: bool = True
 ) -> Verdict:
-    """Set the rotation and status of a multi-pin part whose pads fit."""
+    """Set the rotation and status of a multi-pin part whose pads fit.
+
+    ``by_name`` says how the pads were paired: on their numbers (spec 7.2) or by
+    pin function (spec 16.6 item 1b).  Only a by-name alignment can rest on
+    "shared pad names", so the notes that say so are its own.
+    """
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "geometry"
     if verdict.confidence == "none":
         verdict.confidence = "high"
-    if len(kicad) == 2:
+    if by_name and len(kicad) == 2:
         verdict.confidence = "medium"
         verdict.notes.append(
             "aligned on two shared pad names; remaining pads matched by position"
@@ -157,9 +163,10 @@ def _finish_multi_pin(
             f"KiCad footprint drawn non-standard; name says {verdict.name_rotation}°"
         )
     if verdict.pad_count_kicad != verdict.pad_count_jlc:
+        paired = "shared names" if by_name else "paired pads"
         verdict.notes.append(
             f"pad counts differ ({verdict.pad_count_kicad} vs {verdict.pad_count_jlc}) "
-            f"but the {len(kicad)} shared names align"
+            f"but the {len(kicad)} {paired} align"
         )
     verdict.status = (
         "yellow"
@@ -212,7 +219,7 @@ def _resolve_by_function(
         jlc_number, kicad_number = pairing.eliminated
         note += f"; JLC pin {jlc_number} and pad {kicad_number} paired by elimination"
     verdict.notes.append(note)
-    return _finish_multi_pin(verdict, pairing.kicad, placement)
+    return _finish_multi_pin(verdict, pairing.kicad, placement, by_name=False)
 
 
 def _resolve_multi_pin(
@@ -425,8 +432,13 @@ def _resolve_polarized(
         return verdict
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "polarity"
+    # A token nothing checked, on the one family whose token the crawl found weak,
+    # is resolved at medium confidence (spec 16.9; the note text is unchanged).
+    weak_token = source == "token" and len(votes) == 1 and token_is_weak(package_name)
     verdict.confidence = (
-        "medium" if assumed or outvoted or source in ("seed", "drawing") else "high"
+        "medium"
+        if assumed or outvoted or weak_token or source in ("seed", "drawing")
+        else "high"
     )
     if (
         source == "token"
@@ -507,8 +519,14 @@ def _body_caveat(
 
     The status and the rotation stand: the pads fit, the part is only bigger than
     the footprint's author allowed for, which the preview shows.
+
+    A courtyard with a zero-length side measures nothing (a footprint whose
+    courtyard is a single line, or a box read from one degenerate graphic), so it
+    raises no caveat instead of flagging the whole body as overhang.
     """
     if verdict.placement is None:
+        return
+    if courtyard[2] - courtyard[0] <= 0 or courtyard[3] - courtyard[1] <= 0:
         return
     excess = courtyard_excess(courtyard, body, verdict.placement)
     if excess <= body_threshold_mm(courtyard):

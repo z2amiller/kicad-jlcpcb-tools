@@ -6,7 +6,13 @@ import sqlite3
 import pytest
 
 from jlcfootprint.resolver import Verdict
-from jlcfootprint.verdicts import PENDING, SCHEMA, StoredVerdict, VerdictStore
+from jlcfootprint.verdicts import (
+    PENDING,
+    SCHEMA,
+    StoredVerdict,
+    VerdictStore,
+    add_missing_columns,
+)
 
 SPEC_COLUMNS = [
     "lcsc",
@@ -191,3 +197,22 @@ def test_emitted_rotation_precedence_and_display(
     assert stored.source == source
     assert stored.emitted_rotation == emitted
     assert stored.display_text == text
+
+
+def test_a_second_process_adding_the_same_column_is_not_an_error(store):
+    """Two KiCad processes migrate one project.db at once; the loser must not raise (review nit)."""
+    with closing(store.connect()) as con, con:
+        # The column is already there: this is the state the loser of the race sees
+        # after the winner's ALTER, holding the column list it read beforehand.
+        add_missing_columns(con, set())
+        assert "body_excess_mm" in {
+            row["name"] for row in con.execute("PRAGMA table_info(footprint_verdict)")
+        }
+
+
+def test_a_migration_failure_that_leaves_the_column_missing_still_raises(tmp_path):
+    """Only "duplicate column" is tolerated: a real failure is not silently swallowed."""
+    with closing(sqlite3.connect(str(tmp_path / "other.db"))) as con:
+        con.row_factory = sqlite3.Row
+        with pytest.raises(sqlite3.OperationalError):
+            add_missing_columns(con, set())

@@ -132,3 +132,14 @@ def test_puuid_response_statuses():
     assert empty.status == "error"
     assert "no readable pads" in empty.error
     assert empty.package_name == "T"
+
+
+def test_pro_pad_numbers_lose_their_leading_zeros_like_classic_ones():
+    """A Pro drawing that writes "01" names the same pad as a classic "1" (review nit)."""
+    padded = PRO_SOT23[0].replace('"",1,"1"', '"",1,"01"')
+    pads, skipped = parse_pro_pads([padded])
+    assert (skipped, [pad["number"] for pad in pads]) == (0, ["1"])
+    zero, _ = parse_pro_pads([PRO_SOT23[0].replace('"",1,"1"', '"",1,"00"')])
+    assert [pad["number"] for pad in zero] == ["0"]
+    lettered, _ = parse_pro_pads([PRO_SOT23[0].replace('"",1,"1"', '"",1,"0A1"')])
+    assert [pad["number"] for pad in lettered] == ["0A1"]
