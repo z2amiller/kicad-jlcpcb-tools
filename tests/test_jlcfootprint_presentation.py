@@ -6,9 +6,15 @@ from jlcfootprint.controller import Decision, FetchState
 from jlcfootprint.presentation import (
     GLYPHS,
     SORT_ORDER,
+    banner,
     describe_seconds,
+    dialog_title,
+    fit_numbers,
     glyph,
+    jlc_facts,
     jlc_state,
+    kicad_facts,
+    parse_override,
     sort_rank,
     verdict_text,
 )
@@ -283,4 +289,186 @@ def test_describe_seconds_is_the_controllers_wording():
         "0 s",
         "59 s",
         "2 min",
+    )
+
+
+# ---------------------------------------------------------------------------
+# The detail dialog's text (spec 16.4)
+# ---------------------------------------------------------------------------
+
+
+def part_detail(**fields):
+    """Return a part detail with an 0805 footprint and a resolved verdict."""
+    from jlcfootprint.controller import PartDetail
+    from jlcfootprint.drawing import DrawingMarks
+    from jlcfootprint.easyeda_parse import SymbolPin
+    from jlcfootprint.geometry import Pad
+    from jlcfootprint.resolver import resolve
+
+    kicad = [
+        Pad("1", -1.0, 0.0, 1.2, 1.4, 0.0, "+"),
+        Pad("2", 1.0, 0.0, 1.2, 1.4, 0.0, "-"),
+    ]
+    jlc = [Pad("1", -1.0, 0.0, 1.3, 1.5), Pad("2", 1.0, 0.0, 1.3, 1.5)]
+    marks = DrawingMarks(
+        positive_pin="1", positive_pad="1", body_box=(-1, -0.7, 1, 0.7)
+    )
+    fields.setdefault(
+        "verdict",
+        resolve(
+            kicad,
+            "Capacitor_SMD:C_0805_2012Metric",
+            "ok",
+            "CAP-SMD_L2.0-W1.3-FD",
+            jlc,
+            [SymbolPin("1", "1"), SymbolPin("2", "2")],
+            marks=marks,
+        ),
+    )
+    fields.setdefault("kicad_pads", kicad)
+    fields.setdefault("jlc_pads", jlc)
+    fields.setdefault("marks", marks)
+    fields.setdefault("symbol_pins", [SymbolPin("1", "1"), SymbolPin("2", "2")])
+    fields.setdefault("kicad_footprint", "Capacitor_SMD:C_0805_2012Metric")
+    fields.setdefault("package_name", "CAP-SMD_L2.0-W1.3-FD")
+    fields.setdefault("puuid", "b3b82869fa924bae820e3a6cfb44d689")
+    fields.setdefault("source", "live")
+    fields.setdefault("fetched_at", 1_757_000_000)
+    fields.setdefault("courtyard", (-1.7, -0.95, 1.7, 0.95))
+    return PartDetail("C1", fields.pop("lcsc", "C7192"), **fields)
+
+
+def test_the_dialog_title_is_the_reference_and_the_lcsc():
+    """Spec 16.4's title, and just the reference for a part with no LCSC."""
+    assert dialog_title(part_detail()) == "C1 · C7192"
+    assert dialog_title(part_detail(lcsc="")) == "C1"
+
+
+@pytest.mark.parametrize(
+    ("text", "value"),
+    [
+        ("180", 180),
+        (" 180° ", 180),
+        ("+90", 90),
+        ("-90", 270),
+        ("360", 0),
+        ("450", 90),
+        ("", None),
+        ("ninety", None),
+        ("90.5", None),
+    ],
+)
+def test_an_override_field_takes_whole_degrees_only(text, value):
+    """Any integer is accepted modulo 360; anything else is refused, not guessed."""
+    assert parse_override(text) == value
+
+
+def test_the_kicad_column_describes_the_footprint_as_the_board_has_it():
+    """Spec 16.4's left column, including the pin functions and the courtyard."""
+    facts = dict(kicad_facts(part_detail(placed_rotation=90.0, is_bottom=True)))
+    assert facts["Footprint"] == "Capacitor_SMD:C_0805_2012Metric"
+    assert facts["Pads"] == "2 terminal(s), 2 pad(s)"
+    assert facts["Pitch"] == "2.00 mm"
+    assert facts["Pin 1"] == "-1.00, +0.00 mm in the footprint frame"
+    assert facts["Pin functions"] == "1 = +, 2 = -"
+    assert facts["Raw angle"] == "90°"
+    assert facts["Side"] == "bottom"
+    assert facts["Courtyard"] == "3.40 x 1.90 mm"
+    bare = dict(kicad_facts(part_detail(kicad_pads=[], courtyard=None)))
+    assert (bare["Pads"], bare["Pitch"], bare["Pin 1"], bare["Courtyard"]) == (
+        "none",
+        "unknown",
+        "no pad 1",
+        "none",
+    )
+    assert bare["Pin functions"] == "none in the schematic"
+
+
+def test_the_jlc_column_describes_the_drawing_and_the_symbol():
+    """Spec 16.4's right column: package, puuid, pads, pitch, token, polarity, marks, when."""
+    detail = part_detail()
+    detail.stored = StoredVerdict(
+        "C7192",
+        "hash",
+        status="green",
+        rotation=0,
+        method="polarity",
+        confidence="high",
+        name_rotation=0,
+    )
+    facts = dict(jlc_facts(detail))
+    assert facts["Package"] == "CAP-SMD_L2.0-W1.3-FD"
+    assert facts["puuid"] == "b3b82869fa924bae820e3a6cfb44d689"
+    assert facts["Pads"] == "2 terminal(s), 2 pad(s)"
+    assert facts["Pitch"] == "2.00 mm"
+    assert facts["Name rotation"] == "0°"
+    assert facts["Confidence"] == "high (polarity)"
+    assert facts["Polarity"] == "token"
+    assert facts["Marks"] == "symbol + on pin 1, footprint + on pad 1, body box"
+    assert facts["Symbol pins"] == "1 = 1, 2 = 2"
+    assert facts["Fetched"].endswith("(live)")
+    empty = dict(
+        jlc_facts(
+            part_detail(
+                package_name="",
+                puuid="",
+                jlc_pads=[],
+                marks=None,
+                symbol_pins=[],
+                source="",
+                fetched_at=0,
+                verdict=None,
+            )
+        )
+    )
+    assert empty["Package"] == "not fetched yet"
+    assert empty["Fetched"] == "not fetched yet"
+    assert empty["Marks"] == "none"
+    assert empty["Name rotation"] == "no orientation token"
+
+
+def test_the_fit_numbers_under_the_canvas():
+    """Spec 16.4: pads, overlap min and mean, residual, angular rms, and the caveat."""
+    numbers = dict(fit_numbers(part_detail()))
+    assert numbers["Pads KiCad/JLC"] == "2 / 2"
+    assert numbers["Overlap min"].endswith("%")
+    assert numbers["Residual"].endswith("mm")
+    assert numbers["Angular rms"].endswith("°")
+    assert numbers["Body excess"] == "none"
+    caveated = part_detail()
+    caveated.verdict.body_excess_mm = 0.9
+    assert dict(fit_numbers(caveated))["Body excess"] == "0.90 mm"
+    nothing = dict(fit_numbers(part_detail(verdict=None)))
+    assert nothing["Pads KiCad/JLC"] == "unknown"
+
+
+def test_the_banner_says_the_state_the_verdict_and_what_the_cpl_emits():
+    """Spec 16.4's banner: the tint's state, the hover's text and the CPL sentence."""
+    detail = part_detail(placed_rotation=90.0)
+    detail.stored = StoredVerdict(
+        "C7192",
+        "hash",
+        status="green",
+        rotation=180,
+        method="polarity",
+        confidence="high",
+    )
+    detail.decision = Decision(
+        "C1",
+        "C7192",
+        rotation=180,
+        source="derived",
+        status="green",
+        fit="fits",
+        verdict=detail.stored,
+    )
+    state, text, cpl = banner(detail)
+    assert state == "green"
+    assert text.startswith("Fits; rotation 180° derived from terminal polarity (high).")
+    assert cpl == "The CPL emits 270°: the raw 90° with +180° applied (derived)."
+    raw = part_detail(placed_rotation=90.0)
+    raw.decision = Decision("C1", "C7192", status="unknown", note="polarity unknown")
+    assert banner(raw)[2] == "The CPL emits the raw angle, 90°."
+    assert banner(part_detail(lcsc="", placed_rotation=0.0))[2] == (
+        "The CPL emits the raw angle, 0°."
     )

@@ -10,10 +10,11 @@ no wx anywhere near them.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only; no runtime import cycle
-    from .controller import Decision, FetchState
+    from .controller import Decision, FetchState, PartDetail
 
 # The column's states, worst first: this is also the ascending sort order of
 # spec 16.3 (a misfit, a warning, no data, paused, queued, a derived green, an
@@ -233,3 +234,215 @@ def verdict_text(
         sentences.append(_packages_sentence(jlc_package, kicad_footprint))
         sentences.append(RAW_SENTENCE)
     return " ".join(sentence for sentence in sentences if sentence)
+
+
+# ---------------------------------------------------------------------------
+# The detail dialog's text (spec 16.4)
+# ---------------------------------------------------------------------------
+
+OVERRIDE_ANGLES = (0, 90, 180, 270)
+
+
+def dialog_title(detail: PartDetail) -> str:
+    """Return the dialog's title: the reference and the LCSC, or just the reference."""
+    return f"{detail.reference} · {detail.lcsc}" if detail.lcsc else detail.reference
+
+
+def parse_override(text: str) -> int | None:
+    """Return the angle an override field holds, or None when it is not one.
+
+    Any integer is accepted and taken modulo 360, because a footprint may need a
+    value the four buttons do not offer; anything else is rejected rather than
+    guessed at.
+    """
+    cleaned = text.strip().rstrip("°").strip()
+    if cleaned.startswith("+"):
+        cleaned = cleaned[1:]
+    try:
+        return int(cleaned) % 360
+    except ValueError:
+        return None
+
+
+def _millimetres(value: float | None, digits: int = 2) -> str:
+    """Render a millimetre value, or "unknown" when there is none."""
+    return "unknown" if value is None else f"{value:.{digits}f} mm"
+
+
+def _percent(value: float | None) -> str:
+    """Render an overlap fraction as a percentage."""
+    return "unknown" if value is None else f"{value:.0%}"
+
+
+def _degrees_2dp(value: float | None) -> str:
+    """Render an angle to two decimals, or "unknown" when a row carries none."""
+    return "unknown" if value is None else f"{value:.2f}°"
+
+
+def _when(stamp: int) -> str:
+    """Render a cache timestamp in local time, or "unknown" for nothing."""
+    if not stamp:
+        return "unknown"
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(stamp))
+
+
+def _courtyard_size(courtyard: tuple | None) -> str:
+    """Render a courtyard box as its width by its height, or say it has none."""
+    if courtyard is None:
+        return "none"
+    width = courtyard[2] - courtyard[0]
+    height = courtyard[3] - courtyard[1]
+    return f"{width:.2f} x {height:.2f} mm"
+
+
+def kicad_facts(detail: PartDetail) -> list:
+    """Return the dialog's left column: what the board says about this footprint."""
+    pads = [pad for pad in detail.kicad_pads if pad.number]
+    numbers = sorted({pad.number for pad in pads})
+    pin1 = detail.kicad_pin1
+    functions = detail.pin_functions
+    facts = [
+        ("Footprint", detail.kicad_footprint or "unknown"),
+        (
+            "Pads",
+            f"{len(numbers)} terminal(s), {len(pads)} pad(s)" if pads else "none",
+        ),
+        ("Pitch", _millimetres(detail.kicad_pitch)),
+        (
+            "Pin 1",
+            "no pad 1"
+            if pin1 is None
+            else f"{pin1.x:+.2f}, {pin1.y:+.2f} mm in the footprint frame",
+        ),
+        (
+            "Pin functions",
+            ", ".join(f"{number} = {functions[number]}" for number in sorted(functions))
+            or "none in the schematic",
+        ),
+        ("Raw angle", f"{detail.placed_rotation:g}°"),
+        ("Side", "bottom" if detail.is_bottom else "top"),
+        ("Courtyard", _courtyard_size(detail.courtyard)),
+    ]
+    return facts
+
+
+def jlc_facts(detail: PartDetail) -> list:
+    """Return the dialog's right column: what EasyEDA's drawing and symbol say."""
+    pads = [pad for pad in detail.jlc_pads if pad.number]
+    numbers = sorted({pad.number for pad in pads})
+    stored = detail.stored
+    verdict = detail.verdict
+    polarity_source = "" if verdict is None else verdict.polarity_source
+    marks = detail.marks
+    name_rotation = None if stored is None else stored.name_rotation
+    facts = [
+        ("Package", detail.package_name or "not fetched yet"),
+        ("puuid", detail.puuid or "unknown"),
+        (
+            "Pads",
+            f"{len(numbers)} terminal(s), {len(pads)} pad(s)" if pads else "none",
+        ),
+        ("Pitch", _millimetres(detail.jlc_pitch)),
+        (
+            "Name rotation",
+            "no orientation token" if name_rotation is None else f"{name_rotation}°",
+        ),
+        (
+            "Confidence",
+            "unknown"
+            if stored is None or not stored.confidence
+            else f"{stored.confidence} ({stored.method or 'no method'})",
+        ),
+        (
+            "Polarity",
+            "non-polar"
+            if verdict is not None and verdict.non_polar
+            else (polarity_source or "unknown"),
+        ),
+        (
+            "Marks",
+            "none"
+            if marks is None
+            else ", ".join(
+                part
+                for part in (
+                    f"symbol + on pin {marks.positive_pin}"
+                    if marks.positive_pin
+                    else "",
+                    f"footprint + on pad {marks.positive_pad}"
+                    if marks.positive_pad
+                    else "",
+                    "body box" if marks.body_box is not None else "",
+                )
+                if part
+            )
+            or "none",
+        ),
+        (
+            "Symbol pins",
+            ", ".join(
+                f"{pin.number} = {pin.label or '?'}" for pin in detail.symbol_pins
+            )
+            or "none",
+        ),
+        (
+            "Fetched",
+            f"{_when(detail.fetched_at)} ({detail.source})"
+            if detail.source
+            else "not fetched yet",
+        ),
+    ]
+    return facts
+
+
+def fit_numbers(detail: PartDetail) -> list:
+    """Return the numbers printed under the canvas (spec 16.4)."""
+    stored = detail.stored
+    verdict = detail.verdict
+    source = verdict if verdict is not None else stored
+    kicad_count = getattr(source, "pad_count_kicad", None)
+    jlc_count = getattr(source, "pad_count_jlc", None)
+    return [
+        (
+            "Pads KiCad/JLC",
+            "unknown" if kicad_count is None else f"{kicad_count} / {jlc_count}",
+        ),
+        ("Overlap min", _percent(getattr(source, "overlap_min", None))),
+        ("Overlap mean", _percent(getattr(source, "overlap_mean", None))),
+        ("Residual", _millimetres(getattr(source, "residual_mm", None), 3)),
+        ("Angular rms", _degrees_2dp(getattr(source, "angular_rms", None))),
+        (
+            "Body excess",
+            "none"
+            if getattr(source, "body_excess_mm", None) is None
+            else _millimetres(source.body_excess_mm),
+        ),
+    ]
+
+
+def cpl_sentence(detail: PartDetail) -> str:
+    """Return what the CPL will emit for this part, in one sentence (spec 8)."""
+    decision = detail.decision
+    if decision is None or not detail.lcsc:
+        return f"The CPL emits the raw angle, {detail.placed_rotation:g}°."
+    rotation = decision.rotation
+    if rotation is None:
+        return f"The CPL emits the raw angle, {detail.placed_rotation:g}°."
+    emitted = (detail.placed_rotation + rotation) % 360
+    return (
+        f"The CPL emits {emitted:g}°: the raw {detail.placed_rotation:g}° "
+        f"with {rotation:+d}° applied ({decision.source})."
+    )
+
+
+def banner(detail: PartDetail) -> tuple:
+    """Return the dialog's banner: the state, the verdict text and the CPL sentence."""
+    decision = detail.decision
+    state = jlc_state(decision, detail.fetch)
+    text = verdict_text(
+        decision,
+        detail.fetch,
+        kicad_footprint=detail.kicad_footprint,
+        jlc_package=detail.package_name,
+    )
+    return (state, text, cpl_sentence(detail))
