@@ -872,3 +872,58 @@ def test_real_controller_constructs_shows_dismisses_and_reopens_real_fee_table(
             hover.poll(1.0)
             hover.control.emit(hover.wx.EVT_TIMER, source=controller._timer)
             assert hover.control.children == []
+
+
+def test_a_column_with_its_own_help_replaces_the_row_help(
+    hover: SimpleNamespace,
+) -> None:
+    """The JLC column's cell explains that row's verdict; other columns keep the row help."""
+    hover.controller.stop()
+    asked: list[Any] = []
+
+    def jlc_help(item: Any) -> str:
+        asked.append(item)
+        return "Fits; rotation 180° derived from pad geometry (high)."
+
+    def row_help(text: str) -> None:
+        hover.state.help_shown = text
+
+    hover.state.help_text = "Assembly classification: Basic"
+    controller = hover.helper.TypeCellTooltip(
+        hover.control,
+        7,
+        lambda item: getattr(item, "help_text", hover.state.help_text),
+        row_help,
+        {2: jlc_help},
+    )
+    try:
+        # Over the column that carries its own help.
+        hover.state.point = hover.control.ClientToScreen(_Point(100, 40))
+        controller.refresh()
+        assert hover.state.help_shown == (
+            "Fits; rotation 180° derived from pad geometry (high)."
+        )
+        assert asked == [hover.control.row]
+        assert hover.visible() == []
+        # Over the Type column the fee popup keeps precedence and clears row help.
+        hover.state.point = hover.control.ClientToScreen(_Point(20, 40))
+        controller.refresh()
+        assert hover.state.help_shown == ""
+        # Off any cell, the help is dismissed.
+        hover.state.point = hover.control.ClientToScreen(_Point(200, 40))
+        controller.refresh()
+        assert hover.state.help_shown == ""
+        assert len(asked) == 1
+    finally:
+        controller.stop()
+
+
+def test_without_a_map_every_column_keeps_the_assembly_row_help(
+    hover: SimpleNamespace,
+) -> None:
+    """The default is upstream's behaviour: one row help for every non-Type column."""
+    hover.state.help_text = "Assembly classification: Basic"
+    hover.state.point = hover.control.ClientToScreen(_Point(100, 40))
+    hover.controller.refresh()
+    assert hover.state.help_shown == "Assembly classification: Basic"
+    assert hover.controller.column_help == {}
