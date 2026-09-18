@@ -24,10 +24,10 @@ import time
 from typing import Any
 
 from .cache import Cache, CachedPart
-from .drawing import drawing_marks
+from .drawing import DrawingMarks, drawing_marks
 from .easyeda_client import EasyEdaClient
 from .easyeda_parse import ComponentRecord
-from .geometry import easyeda_pads_to_mm
+from .geometry import Pad, easyeda_pads_to_mm, named_pads, pad_pitch
 from .kicad_adapter import BoardPart
 from .presentation import describe_seconds, jlc_state, verdict_text
 from .resolver import Verdict, resolve
@@ -110,6 +110,81 @@ class Decision:
         if self.verdict is not None:
             return self.verdict.display_text
         return "raw"
+
+
+@dataclass
+class PartDetail:
+    """Everything the detail dialog shows for one part (spec 16.4).
+
+    The two pad sets and the placement are the resolver's own inputs and output,
+    re-run here rather than read back from the verdict row, so the canvas draws what
+    the check decided and not a rounded copy of it.  ``verdict`` is None when the
+    cache has nothing to resolve against (a part still being fetched, a part EasyEDA
+    does not know), and then only the KiCad pads and whatever raw JLC pads the cache
+    holds can be drawn.
+    """
+
+    reference: str
+    lcsc: str
+    kicad_footprint: str = ""
+    kicad_pads: list[Pad] = field(default_factory=list)
+    courtyard: tuple | None = None
+    is_bottom: bool = False
+    placed_rotation: float = 0.0
+    package_name: str = ""
+    puuid: str = ""
+    jlc_pads: list[Pad] = field(default_factory=list)
+    symbol_pins: list = field(default_factory=list)
+    marks: DrawingMarks | None = None
+    source: str = ""  # 'live' | 'seed' | '' when nothing is cached
+    fetched_at: int = 0
+    verdict: Verdict | None = None  # re-resolved, carries the placement
+    stored: StoredVerdict | None = None
+    decision: Decision | None = None
+    fetch: FetchState = field(default_factory=FetchState)
+
+    @property
+    def pin_functions(self) -> dict:
+        """Return the pin function per KiCad pad number, where the schematic gave one."""
+        return {
+            pad.number: pad.pin_function
+            for pad in named_pads(self.kicad_pads)
+            if pad.pin_function
+        }
+
+    @property
+    def kicad_pitch(self) -> float | None:
+        """Return the KiCad footprint's nearest-terminal pitch in millimetres."""
+        return pad_pitch(self.kicad_pads)
+
+    @property
+    def jlc_pitch(self) -> float | None:
+        """Return the JLC drawing's nearest-terminal pitch in millimetres."""
+        return pad_pitch(self.jlc_pads)
+
+    @property
+    def kicad_pin1(self) -> Pad | None:
+        """Return the KiCad pad numbered 1, if the footprint has one."""
+        return next(
+            (pad for pad in named_pads(self.kicad_pads) if pad.number == "1"), None
+        )
+
+    @property
+    def jlc_pin1(self) -> Pad | None:
+        """Return the JLC pad numbered 1, if the drawing has one."""
+        return next(
+            (pad for pad in named_pads(self.jlc_pads) if pad.number == "1"), None
+        )
+
+    @property
+    def placement(self):
+        """Return the placement the resolver solved, or None when there is none."""
+        return None if self.verdict is None else self.verdict.placement
+
+    @property
+    def emitted_rotation(self) -> int | None:
+        """Return the correction the CPL applies for this part, None for the raw angle."""
+        return None if self.stored is None else self.stored.emitted_rotation
 
 
 class FootprintCheck:
@@ -550,6 +625,125 @@ class FootprintCheck:
         if part is None:
             return ""
         return jlc_state(self.decision(part), self.fetch_state(part.lcsc))
+
+    def detail(self, reference: str, reread: bool = False) -> PartDetail | None:
+        """Return everything the detail dialog shows for one reference (spec 16.4).
+
+        ``reread`` re-reads the board first, which the dialog does on open so an edit
+        made since the last scan is what is drawn.  None when the reference is not on
+        the board at all.
+        """
+        if reread:
+            for part in self.read_board():
+                self.parts[part.reference] = part
+        part = self.parts.get(reference)
+        if part is None:
+            return None
+        decision = self.decision(part)
+        detail = PartDetail(
+            reference=part.reference,
+            lcsc=part.lcsc,
+            kicad_footprint=part.footprint_name,
+            kicad_pads=list(part.pads),
+            courtyard=part.courtyard,
+            is_bottom=part.is_bottom,
+            placed_rotation=part.placed_rotation,
+            stored=decision.verdict,
+            decision=decision,
+            fetch=self.fetch_state(part.lcsc),
+        )
+        if not part.lcsc:
+            return detail
+        cached = self.cache.part(part.lcsc)
+        if cached is None:
+            return detail
+        record = cached.record
+        detail.package_name = record.package_name
+        detail.puuid = record.puuid
+        detail.jlc_pads = easyeda_pads_to_mm(record.pads)
+        detail.symbol_pins = list(record.symbol_pins)
+        detail.marks = drawing_marks(
+            record.symbol_shapes, record.footprint_shapes, record.footprint_origin
+        )
+        detail.source = cached.source
+        detail.fetched_at = cached.fetched_at
+        if record.status == "ok" and record.pads:
+            # The placement the canvas draws is solved here, not read from the row.
+            detail.verdict = self.resolve_part(part, cached)
+        return detail
+
+    def set_override(
+        self, reference: str, rotation: int | None, note: str = ""
+    ) -> StoredVerdict | None:
+        """Set or clear the user's rotation for one reference and return the stored row.
+
+        The override lives on the verdict row of (LCSC, pad hash) (spec 16.5), so it
+        survives every re-resolve and every ``mark_pending`` and disappears only with
+        this method or with a footprint edit, which changes the key.
+        """
+        part = self.parts.get(reference)
+        if part is None or not part.lcsc:
+            return None
+        stored = self.verdicts.get(part.lcsc, part.footprint_hash)
+        if stored is None:
+            # A part with no row yet (never fetched) can still carry a decision.
+            self.verdicts.mark_pending(
+                part.lcsc, part.footprint_hash, part.footprint_name, self.now()
+            )
+        self.verdicts.set_override(
+            part.lcsc,
+            part.footprint_hash,
+            rotation,
+            note if rotation is not None else "",
+        )
+        updated = self.verdicts.get(part.lcsc, part.footprint_hash)
+        logger.info(
+            "jlcfootprint: %s %s override %s%s",
+            reference,
+            part.lcsc,
+            "cleared" if rotation is None else f"set to {rotation}°",
+            f" ({note})" if rotation is not None and note else "",
+        )
+        return updated
+
+    def refetch(self, references: Iterable[str]) -> ScanSummary:
+        """Forget these parts' cached EasyEDA data and queue them again (spec 16.5).
+
+        The cache row goes, the verdict is marked pending by the rescan (which keeps
+        the override, spec 5.3) and the rows show the clock until the answers land.
+        """
+        wanted = [reference for reference in references if reference in self.parts]
+        lcscs = sorted(
+            {
+                self.parts[reference].lcsc
+                for reference in wanted
+                if self.parts[reference].lcsc
+            }
+        )
+        for lcsc in lcscs:
+            self.cache.forget(lcsc)
+            self._package_names.pop(lcsc, None)
+        logger.info(
+            "jlcfootprint: re-fetching %d part(s): %s",
+            len(lcscs),
+            ", ".join(lcscs) or "none",
+        )
+        return self.scan_board(wanted)
+
+    def references_sharing_verdict(self, reference: str) -> list[str]:
+        """Return every reference whose verdict row is the one this reference uses.
+
+        Two placements of one part on one footprint share a row, so an override set on
+        either repaints both (spec 5.3 keys a verdict on the LCSC and the pad hash).
+        """
+        part = self.parts.get(reference)
+        if part is None or not part.lcsc:
+            return [] if part is None else [reference]
+        return sorted(
+            other.reference
+            for other in self.parts.values()
+            if other.lcsc == part.lcsc and other.footprint_hash == part.footprint_hash
+        )
 
     def cell_help(self, reference: str) -> str:
         """Return the JLC cell's hover text for one reference (spec 16.3)."""
