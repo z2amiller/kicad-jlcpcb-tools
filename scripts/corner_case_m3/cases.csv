@@ -11,7 +11,7 @@ C4,Capacitor_Tantalum_SMD,CP_EIA-6032-20_AVX-F,C140418,CA45-C-16V-47uF-K (CASE-C
 C5,Capacitor_Tantalum_SMD,CP_EIA-3528-15_AVX-H,C7192,TAJB105K035RNJ (-R-RD: the token is wrong; the + marks decide),0,F,,rotation
 C6,Capacitor_Tantalum_SMD,CP_EIA-3528-21_Kemet-B,C110035,293D106X9025B2TE3 (-R-RD),0,F,,rotation
 C7,Capacitor_Tantalum_SMD,CP_EIA-6032-15_Kemet-U,C122911,CA45-C010K107T (-R-RD),0,F,,rotation
-C8,Capacitor_Tantalum_SMD,CP_EIA-2012-15_AVX-P,C308913,TPCR106K016R1800 (-FD: token and + marks disagree; preview decides),0,F,,preview
+C8,Capacitor_Tantalum_SMD,CP_EIA-2012-15_AVX-P,C1969735,TMCP1A106MTRF (-FD; stand-in for C308913 which was out of stock at upload: the token and both + marks say 0 where the retired band rule said 180; preview 0),0,F,,rotation
 C9,Capacitor_SMD,CP_Elec_4x5.8,C88744,35TZV100M6.3X8 on a 4 mm footprint: fits with the body caveat,0,F,,rotation
 C10,Capacitor_SMD,CP_Elec_6.3x5.9,C88744,35TZV100M6.3X8 on a 6.3 mm footprint: plain fit,0,F,,rotation
 C11,Capacitor_Tantalum_SMD,CP_EIA-3216-18_Kemet-A,C7175,TAJA105K025RNJ on the bottom at 90,90,B,,rotation
