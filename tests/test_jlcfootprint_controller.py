@@ -841,6 +841,16 @@ def test_the_board_estimate_counts_distinct_parts_and_their_documents(setup):
     assert check.board_estimate() == (0, 0.0)
 
 
+def test_the_board_estimate_is_the_number_the_queue_itself_quotes(setup):
+    """The confirmation and the generate-time wait dialog quote one estimate, not two."""
+    check, _board, _events, _messages, _client = setup
+    parts, seconds = check.board_estimate()
+    summary = check.refresh_board()
+    # The same codes, now really queued: the number the question promised is the
+    # number the queue reports, rather than twice its documents.
+    assert (parts, seconds) == (summary.enqueued, summary.estimate_s)
+
+
 def test_rechecking_the_board_resolves_from_the_cache_without_any_request(
     setup, caplog
 ):
