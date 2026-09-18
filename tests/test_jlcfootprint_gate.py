@@ -69,7 +69,7 @@ def test_m3_board_matches_jlc_from_the_pro_fixtures():
     validator = load_validator()
     rows = validator.evaluate(BOARD_M3, FIXTURES, pro_fixtures=PRO_FIXTURES)
     truth = validator.load_truth(TRUTH_M3)
-    assert len(truth) == 15  # C8 (C308913) waits for JLC's preview
+    assert len(truth) == 16  # C8 (C1969735) settled by JLC's preview on 2026-09-17
     assert validator.compare(rows, truth) == []
     by_reference = {row["reference"]: row["verdict"] for row in rows}
     assert all(verdict is not None for verdict in by_reference.values())
