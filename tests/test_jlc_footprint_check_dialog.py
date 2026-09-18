@@ -91,6 +91,7 @@ class _Window:
         self.destroyed = False
         self.maximized = False
         self.iconized = False
+        self.wrapped_at = None
 
     # -- labels and values
     def SetLabel(self, text: str) -> None:
@@ -131,6 +132,10 @@ class _Window:
     def SetForegroundColour(self, colour: Any) -> None:
         """Keep the colour the banner was tinted with."""
         self.colour = colour
+
+    def Wrap(self, width: int) -> None:
+        """Record the width the label was wrapped to, as wx.StaticText.Wrap does."""
+        self.wrapped_at = width
 
     # -- geometry and events
     def Bind(self, event: Any, handler: Any, **_kwargs: Any) -> None:
@@ -623,6 +628,32 @@ def test_the_override_prompt_accepts_whole_degrees_only(dialog_module):
 # ---------------------------------------------------------------------------
 
 
+def test_a_long_banner_is_wrapped_to_the_dialog_s_width(dialog_module):
+    """Spec 16.4: the whole verdict text is readable, so the banner wraps rather than clips.
+
+    A refusal's banner carries the verdict, the CPL sentence and the reason there is
+    no transform; a one-line control would cut the tail off.
+    """
+    module = dialog_module.module
+    dialog = build(dialog_module, make_detail(status="red", fit="numbering"))
+    assert dialog.banner.wrapped_at is not None  # wrapped on creation
+    margin = 2 * module.BANNER_MARGIN_PX + module.BANNER_SLACK_PX
+    assert dialog.banner.wrapped_at == dialog.GetClientSize().GetWidth() - margin
+    # The text handed to the control is the whole banner, not a truncation.
+    assert dialog.banner.GetLabel() == dialog._banner_text
+    assert dialog.banner.GetLabel().endswith(".")
+    # A resize re-wraps to the new width.
+    dialog.client_size = _Size(700, 500)
+    dialog.fire(module.wx.EVT_SIZE)
+    assert dialog.banner.wrapped_at == 700 - margin
+    # The same width twice does no further work, and a new detail re-wraps.
+    dialog.banner.wrapped_at = "untouched"
+    dialog.fire(module.wx.EVT_SIZE)
+    assert dialog.banner.wrapped_at == "untouched"
+    dialog.update(make_detail())
+    assert dialog.banner.wrapped_at == 700 - margin
+
+
 def test_the_size_is_remembered_in_the_layout_settings(dialog_module):
     """Spec 16.4: the size is stored, and never restored below the minimum."""
     settings: dict = {}
@@ -746,6 +777,9 @@ def test_the_dialog_opens_on_the_first_selected_part_with_an_lcsc(monkeypatch):
             """Return at once."""
             return 0
 
+        def remember_size(self):
+            """Stand in for the real dialog's size bookkeeping."""
+
         def Destroy(self):
             """Mark the dialog destroyed."""
             self.destroyed = True
@@ -769,6 +803,44 @@ def test_the_dialog_opens_on_the_first_selected_part_with_an_lcsc(monkeypatch):
     window.settings = {"jlcfootprint": {"enabled": False}}
     main.JLCPCBTools.show_jlc_footprint_detail(window)
     assert len(shown) == 1
+
+
+def test_the_window_remembers_the_size_on_every_way_out(monkeypatch):
+    """Spec 16.4: the size is stored however the dialog was dismissed.
+
+    The Close button and Esc end a modal loop without an ``EVT_CLOSE``, so the
+    window asks for the size itself once ``ShowModal`` returns.
+    """
+    main = layout.mainwindow
+    monkeypatch.setattr(main, "is_footprint_check_enabled", _enabled)
+    order: list = []
+
+    class FakeDialog:
+        """A dialog that is dismissed without ever sending EVT_CLOSE."""
+
+        def __init__(self, parent, detail, **_kwargs):
+            self.parent = parent
+
+        def ShowModal(self):
+            """Return as the Close button would, with no EVT_CLOSE."""
+            order.append("shown")
+            return 0
+
+        def remember_size(self):
+            """Record that the size was asked for."""
+            order.append("remembered")
+
+        def Destroy(self):
+            """Record the destroy, which must come after the size."""
+            order.append("destroyed")
+
+    monkeypatch.setattr(main, "JlcFootprintDetailDialog", FakeDialog)
+    check = MagicMock()
+    check.detail.return_value = "the detail"
+    window, _model, _control = _window(main, check)
+    main.JLCPCBTools.show_jlc_footprint_detail(window)
+    assert order == ["shown", "remembered", "destroyed"]
+    window.save_settings.assert_called_once_with()
 
 
 def test_the_override_and_refetch_callbacks_repaint_every_shared_row(monkeypatch):

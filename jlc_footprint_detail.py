@@ -35,6 +35,12 @@ CANVAS_MIN = (420, 300)
 # beside its label without wrapping, which is what the dialog's minimum is for; the
 # height is the sizer's business, so it stays unconstrained.
 FACTS_MIN = (470, -1)
+# The banner's own left and right sizer border, which its wrap width allows for,
+# and a few pixels of slack: wx's wrap measurement and its final text layout can
+# disagree by a pixel, and a line one pixel over the control soft-wraps in the
+# native control and loses its tail off the bottom (measured under KiCad's wx).
+BANNER_MARGIN_PX = 8
+BANNER_SLACK_PX = 6
 LAYER_LABELS = (
     (KICAD, "KiCad pads"),
     (JLC_PLACED, "JLC pads transformed"),
@@ -251,6 +257,8 @@ class JlcFootprintDetailDialog(wx.Dialog):
         )
         self.SetMinSize(HighResWxSize(parent, wx.Size(*MIN_SIZE)))
         self.banner = wx.StaticText(self, label="")
+        self._banner_text = ""
+        self._wrapped_at = 0
         self.cpl = wx.StaticText(self, label="")
         self.canvas = OverlayCanvas(self, detail)
         self.kicad_panel = self._facts_panel("KiCad")
@@ -299,6 +307,7 @@ class JlcFootprintDetailDialog(wx.Dialog):
         self.clear_button.Bind(wx.EVT_BUTTON, self.on_clear_override)
         self.refetch_button.Bind(wx.EVT_BUTTON, self.on_refetch)
         self.Bind(wx.EVT_CLOSE, self.on_close)
+        self.Bind(wx.EVT_SIZE, self.on_resize)
         self.update(detail)
         self._restore_size()
 
@@ -340,7 +349,9 @@ class JlcFootprintDetailDialog(wx.Dialog):
         note = self.canvas.build_overlay().note
         if note:
             text = f"{text} {note[0].upper()}{note[1:]}."
-        self.banner.SetLabel(text)
+        self._banner_text = text
+        self._wrapped_at = 0
+        self._wrap_banner()
         stops = BANNER_COLOURS.get(state)
         if stops is not None:
             dark, light = stops
@@ -441,6 +452,28 @@ class JlcFootprintDetailDialog(wx.Dialog):
             int(logical.GetWidth()),
             int(logical.GetHeight()),
         ]
+
+    def _wrap_banner(self) -> None:
+        """Re-flow the banner over as many lines as the dialog's width needs.
+
+        A plain ``wx.StaticText`` clips a long verdict sentence rather than
+        wrapping it, and spec 16.4 wants the whole banner readable -- including the
+        sentence saying why there is no transform, which is the tail that a refusal
+        loses.  Wrapping keeps the tint, which ``SetForegroundColour`` sets on the
+        same control.
+        """
+        width = self.GetClientSize().GetWidth() - 2 * BANNER_MARGIN_PX - BANNER_SLACK_PX
+        if width <= 0 or width == self._wrapped_at:
+            return
+        self._wrapped_at = width
+        self.banner.SetLabel(self._banner_text)
+        self.banner.Wrap(width)
+
+    def on_resize(self, event: Any) -> None:
+        """Re-wrap the banner for the new width and lay the dialog out again."""
+        self._wrap_banner()
+        self.Layout()
+        event.Skip()
 
     def on_close(self, event: Any) -> None:
         """Remember the size, then let the dialog close."""

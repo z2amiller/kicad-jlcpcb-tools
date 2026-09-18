@@ -1705,6 +1705,10 @@ class JLCPCBTools(wx.Frame):
         try:
             dialog.ShowModal()
         finally:
+            # A modal dialog dismissed with its Close button or Esc ends the modal
+            # loop directly and never sends EVT_CLOSE, so the size is remembered
+            # here rather than only from the window's own close box.
+            dialog.remember_size()
             dialog.Destroy()
         self.save_settings()
 
