@@ -98,6 +98,32 @@ def test_without_pin_functions_the_numbering_difference_stays_red():
         assert "the package itself aligns at 270°" in verdict.note_text
 
 
+def test_a_function_pairing_is_never_described_as_shared_pad_names():
+    """A two-pair function pairing carries neither the by-name note nor its counts wording (review nit)."""
+    kicad = [
+        Pad("3", -1.0, 0.0, 1.0, 1.0, 0.0, "IN"),
+        Pad("4", 1.0, 0.0, 1.0, 1.0, 0.0, "OUT"),
+        Pad("5", 0.0, 2.0, 1.0, 1.0),
+    ]
+    jlc = [Pad("1", -1.0, 0.0, 1.0, 1.0), Pad("2", 1.0, 0.0, 1.0, 1.0)]
+    verdict = resolve(
+        kicad,
+        "Custom:Two_Signals_And_A_Mount",
+        "ok",
+        "TEST-2PAD_L2.0-W1.0",
+        jlc,
+        [SymbolPin("1", "IN"), SymbolPin("2", "OUT")],
+    )
+    assert (verdict.status, verdict.rotation, verdict.confidence) == (
+        "green",
+        0,
+        "medium",
+    )
+    assert "paired by pin function" in verdict.note_text
+    assert "shared pad names" not in verdict.note_text
+    assert "pad counts differ (3 vs 2) but the 2 paired pads align" in verdict.notes
+
+
 # --- item 2: the drawings' + marks ---------------------------------------
 
 
@@ -132,6 +158,33 @@ def test_reversed_numbering_tantalum_token_and_marks_agree():
         "Capacitor_Tantalum_SMD", "CP_EIA-3528-15_AVX-H", "C7192", {"1": "+", "2": "-"}
     )
     assert (wired.rotation, wired.confidence) == (180, "high")
+
+
+def test_an_unchecked_token_on_a_molded_chip_tantalum_is_only_medium():
+    """The family whose token the crawl found weak resolves at medium with nothing to check it (review nit)."""
+    kicad = [
+        Pad("1", -1.6, 0.0, 1.2, 1.4, 0.0, "+"),
+        Pad("2", 1.6, 0.0, 1.2, 1.4, 0.0, "-"),
+    ]
+    jlc = [Pad("1", -1.6, 0.0, 1.2, 1.4), Pad("2", 1.6, 0.0, 1.2, 1.4)]
+    chip = resolve(
+        kicad, "Custom:CP", "ok", "CAP-SMD_L3.2-W1.6-FD", jlc, NUMBERED, marks=None
+    )
+    assert (chip.rotation, chip.polarity_source) == (0, "token")
+    assert chip.confidence == "medium"
+    assert "names the other pad" not in chip.note_text
+    can = resolve(kicad, "Custom:CP", "ok", "CAP-SMD_BD3.2-L3.2-W3.2-FD", jlc, NUMBERED)
+    assert (can.rotation, can.polarity_source, can.confidence) == (0, "token", "high")
+    checked = resolve(
+        kicad,
+        "Custom:CP",
+        "ok",
+        "CAP-SMD_L3.2-W1.6-FD",
+        jlc,
+        NUMBERED,
+        marks=DrawingMarks(positive_pad="1"),
+    )
+    assert (checked.rotation, checked.confidence) == (0, "high")
 
 
 def test_a_single_mark_against_the_token_is_a_tie_and_therefore_inconsistent():
@@ -449,6 +502,33 @@ def test_the_caveat_needs_a_courtyard_and_a_body_and_a_fit():
         kicad_courtyard=courtyard,
     )
     assert red.status == "red" and red.body_excess_mm is None
+
+
+def test_a_courtyard_with_a_zero_length_side_raises_no_caveat():
+    """A degenerate courtyard measures nothing, so the body is not reported as overhanging it (review nit)."""
+    record = pro_record("C88744")
+    pads, courtyard = library_footprint("Capacitor_SMD", "CP_Elec_4x5.8")
+    jlc = easyeda_pads_to_mm(record.pads)
+    body = DrawingMarks(
+        positive_pin="1", positive_pad="1", body_box=(-3.3, -3.3, 3.3, 3.3)
+    )
+
+    def excess(box):
+        return resolve(
+            pads,
+            "Capacitor_SMD:CP_Elec_4x5.8",
+            "ok",
+            record.package_name,
+            jlc,
+            record.symbol_pins,
+            marks=body,
+            kicad_courtyard=box,
+        ).body_excess_mm
+
+    assert excess(courtyard) == pytest.approx(0.9, abs=0.01)
+    flat = (courtyard[0], 0.0, courtyard[2], 0.0)
+    assert excess(flat) is None
+    assert excess((0.0, courtyard[1], 0.0, courtyard[3])) is None
 
 
 def test_body_threshold_is_relative_with_clamps():

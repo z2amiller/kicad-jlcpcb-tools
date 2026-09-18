@@ -9,6 +9,8 @@ same idea here, as are cathode and negative terminal: an LED whose symbol says
 
 from __future__ import annotations
 
+import re
+
 from .drawing import DrawingMarks
 from .easyeda_parse import PIN1_ANODE_LABELS, PIN1_CATHODE_LABELS, SymbolPin
 from .geometry import Pad
@@ -31,6 +33,10 @@ _DIODE_LABELS = (PIN1_CATHODE_LABELS | PIN1_ANODE_LABELS) - _CAP_LABELS
 # Pin functions that say "no connection" rather than naming a signal: they carry no
 # terminal and do not disqualify the other pads' functions (kicad-x2ib).
 _NO_FUNCTION_TEXTS = frozenset({"NC", "N/C", "N.C.", "~", "DNC", "NP", "NU"})
+# The molded-chip tantalum drawings (``CAP-SMD_L3.2-W1.6-RD``), as against the cans
+# (``CAP-SMD_BD5.0-L5.3``): the family whose FD/RD token the crawl found least
+# reliable (spec 16.9), read by :func:`token_is_weak`.
+_MOLDED_CHIP_NAME = re.compile(r"CAP-SMD_L[\d.]", re.IGNORECASE)
 
 # The two terminal names, unified: the reference terminal of a diode is its cathode,
 # of a capacitor its positive terminal, and each name's opposite.
@@ -216,6 +222,20 @@ def token_reference_side(package_name: str, reference: str) -> str | None:
     if reference in SAME_MEANING["negative"]:
         return band_side
     return "left" if band_side == "right" else "right"
+
+
+def token_is_weak(package_name: str) -> bool:
+    """Return True where an unchallenged FD/RD token deserves only medium confidence.
+
+    The molded-chip tantalum family (``CAP-SMD_L…``, as against the ``CAP-SMD_BD…``
+    cans) is the one family whose token disagreed with its drawings' ``+`` marks on a
+    measurable share of the crawl: 39 of 45 agreed, against 201 of 203 cans and
+    effectively every diode (spec 16.9).  A part of that family whose drawings carry
+    no mark to check the token against -- a seeded row, which stores no drawings, or a
+    live drawing without a ``+`` -- is therefore resolved, but not with high
+    confidence.  Cans and diodes keep theirs.
+    """
+    return bool(_MOLDED_CHIP_NAME.match(package_name.strip()))
 
 
 def label_reference_pad(

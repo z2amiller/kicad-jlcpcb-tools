@@ -307,3 +307,20 @@ def test_segment_helpers_and_symbol_bars():
     rect = ["R~10~20~0~0~0.2~4~#880000~1~0~none~r1~0"]
     (segment,) = symbol_bars(rect)
     assert segment == Segment(10.1, 20.0, 10.1, 24.0, "symbol")
+
+
+def test_symbol_pins_skip_unnumbered_pins_in_both_formats():
+    """A pin with no number names no pad and is dropped; its numbered siblings survive (review nit)."""
+    classic = [
+        "P~show~0~1~-10~0~0~~gge1~0^^0~-10~0^^1~-7~0~0~K~start~~~#880000^^1~-3~0~0~1~end~~~#880000",
+        "P~show~0~~10~0~180~~gge2~0^^0~10~0^^1~7~0~180~A~end~~~#880000^^1~3~0~180~~end~~~#880000",
+    ]
+    assert symbol_pins(classic) == [("1", -10.0, 0.0)]
+    pro = [
+        '["DOCTYPE","SYMBOL","1.1"]',
+        '["PIN","e3",1,null,10,20,10,270,null,0,0,1]',
+        '["ATTR","e5","e3","NUMBER","2",false,false,9,14,90,"st3",0]',
+        '["PIN","e7",1,null,-10,0,10,0,null,0,0,1]',
+        '["ATTR","e8","e7","NAME","K",false,false,-6,0,0,"st4",0]',
+    ]
+    assert symbol_pins(pro) == [("2", 10.0, 20.0)]

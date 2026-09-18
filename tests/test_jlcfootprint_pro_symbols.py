@@ -10,6 +10,7 @@ from jlcfootprint.easyeda_parse import (
     parse_puuid_response,
     parse_symbol_response,
     pro_doctype,
+    pro_pin_records,
     pro_shape_lines,
 )
 
@@ -204,3 +205,18 @@ def test_polygon_pads_take_their_bounding_box():
         0.0,
     )
     assert merged["shape"] == "POLY"
+
+
+def test_pro_pin_numbers_lose_their_leading_zeros_like_classic_ones():
+    """A Pro symbol that numbers a pin "01" matches the footprint's pad 1 (review nit)."""
+    lines = [
+        '["DOCTYPE","SYMBOL","1.1"]',
+        '["PIN","e3",1,null,10,20,10,270,null,0,0,1]',
+        '["ATTR","e4","e3","NAME","K",false,false,13,5,90,"st4",0]',
+        '["ATTR","e5","e3","NUMBER","01",false,false,9,14,90,"st3",0]',
+        '["PIN","e7",1,null,-10,0,10,0,null,0,0,1]',
+        '["ATTR","e9","e7","NUMBER","A02",false,false,-6,0,0,"st4",0]',
+    ]
+    pins, skipped = parse_pro_pins(lines)
+    assert (skipped, [pin.number for pin in pins]) == (0, ["1", "A02"])
+    assert pro_pin_records(lines)[0] == ("1", "K", 10.0, 20.0)
