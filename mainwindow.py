@@ -82,6 +82,7 @@ from .helpers import (
     getVersion,
     loadBitmapScaled,
 )
+from .jlc_footprint_detail import JlcFootprintDetailDialog
 from .jlc_footprint_check import (
     create_footprint_check,
     is_footprint_check_enabled,
@@ -139,6 +140,7 @@ ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 ID_CONTEXT_MENU_APPLY_PART_PREFERENCES = wx.NewIdRef()
 ID_CONTEXT_MENU_SAVE_PART_PREFERENCES = wx.NewIdRef()
+ID_CONTEXT_MENU_JLC_DETAILS = wx.NewIdRef()
 
 
 class KicadProvider:
@@ -598,7 +600,9 @@ class JLCPCBTools(wx.Frame):
             dv.EVT_DATAVIEW_SELECTION_CHANGED, self.OnFootprintSelected
         )
 
-        self.footprint_list.Bind(dv.EVT_DATAVIEW_ITEM_ACTIVATED, self.select_part)
+        self.footprint_list.Bind(
+            dv.EVT_DATAVIEW_ITEM_ACTIVATED, self.on_footprint_activated
+        )
 
         self.footprint_list.Bind(dv.EVT_DATAVIEW_ITEM_CONTEXT_MENU, self.OnRightDown)
 
@@ -1631,6 +1635,107 @@ class JLCPCBTools(wx.Frame):
             e.lcsc,
             ", ".join(references) or "no reference",
         )
+        for reference in references:
+            self.partlist_data_model.set_rotation(
+                reference, check.display_text(reference) or "raw"
+            )
+            self._apply_jlc_cell(reference)
+
+    def _activated_model_column(self, event: Any) -> Optional[int]:  # noqa: UP045
+        """Return the model column an activation event names, or None when it names none.
+
+        wxGTK fills both the column object and its index; macOS fills the index only
+        (measured 2026-09-17 on wx 4.2.2a1 osx-cocoa), so the index is mapped back
+        through the control's own column positions.  A port that reports neither gets
+        the old behaviour and the context menu is the way in.
+        """
+        column = event.GetDataViewColumn()
+        if column is None:
+            index = event.GetColumn()
+            if index is None or index < 0:
+                return None
+            control = self.footprint_list
+            column = next(
+                (
+                    candidate
+                    for candidate in control.GetColumns()
+                    if control.GetColumnPosition(candidate) == index
+                ),
+                None,
+            )
+        return None if column is None else column.GetModelColumn()
+
+    def on_footprint_activated(self, event: Any) -> None:
+        """Double-clicking a JLC cell opens the detail dialog; any other cell assigns a part."""
+        if self._activated_model_column(event) == PartListDataModel.columns["JLC_COL"]:
+            self.show_jlc_footprint_detail()
+            return
+        self.select_part(event)
+
+    def _first_selected_jlc_reference(self) -> Optional[str]:  # noqa: UP045
+        """Return the first selected reference that carries an LCSC number."""
+        model = self.partlist_data_model
+        for item in self.footprint_list.GetSelections():
+            reference = str(model.get_reference(item) or "")
+            if reference and str(model.get_lcsc(item) or "").strip():
+                return reference
+        return None
+
+    def show_jlc_footprint_detail(self, reference: Optional[str] = None) -> None:  # noqa: UP045
+        """Open the JLC footprint detail dialog for one part (spec 16.4)."""
+        check = self._active_jlc_footprint_check()
+        if check is None:
+            return
+        if reference is None:
+            reference = self._first_selected_jlc_reference()
+        if reference is None:
+            return
+        detail = check.detail(reference, reread=True)
+        if detail is None:
+            return
+        dialog = JlcFootprintDetailDialog(
+            self,
+            detail,
+            set_override=lambda rotation, note: self._set_jlc_override(
+                reference, rotation, note
+            ),
+            refetch=lambda: self._refetch_jlc_references([reference]),
+            settings=self.settings,
+        )
+        try:
+            dialog.ShowModal()
+        finally:
+            dialog.Destroy()
+        self.save_settings()
+
+    def _set_jlc_override(
+        self,
+        reference: str,
+        rotation: Optional[int],
+        note: str,  # noqa: UP045
+    ) -> Any:
+        """Write an override (or clear it), repaint the rows that share the verdict, return the detail."""
+        check = self._active_jlc_footprint_check()
+        if check is None or check.set_override(reference, rotation, note) is None:
+            return None
+        self._repaint_jlc_references(check.references_sharing_verdict(reference))
+        return check.detail(reference)
+
+    def _refetch_jlc_references(self, references: Iterable[str]) -> Any:
+        """Re-fetch these parts' EasyEDA data and return the first one's fresh detail."""
+        check = self._active_jlc_footprint_check()
+        if check is None:
+            return None
+        wanted = list(references)
+        check.refetch(wanted)
+        self._repaint_jlc_references(wanted)
+        return check.detail(wanted[0]) if wanted else None
+
+    def _repaint_jlc_references(self, references: Iterable[str]) -> None:
+        """Repaint the Rotation text and the JLC glyph of the given references."""
+        check = self._active_jlc_footprint_check()
+        if check is None:
+            return
         for reference in references:
             self.partlist_data_model.set_rotation(
                 reference, check.display_text(reference) or "raw"
@@ -2746,6 +2851,8 @@ class JLCPCBTools(wx.Frame):
         right_click_menu.Append(correction_by_name)
         right_click_menu.Bind(wx.EVT_MENU, self.add_correction, correction_by_name)
 
+        self._append_jlc_footprint_menu(right_click_menu)
+
         apply_part_preferences = wx.MenuItem(
             right_click_menu,
             ID_CONTEXT_MENU_APPLY_PART_PREFERENCES,
@@ -2768,6 +2875,25 @@ class JLCPCBTools(wx.Frame):
 
         self.footprint_list.PopupMenu(right_click_menu)
         right_click_menu.Destroy()  # destroy to avoid memory leak
+
+    def _append_jlc_footprint_menu(self, parent_menu: Any) -> Any:
+        """Append the "JLC footprint" submenu to the context menu (spec 16.3).
+
+        Its entries are disabled when the check is off or its store is unavailable,
+        which is also what a board with no project storage looks like.
+        """
+        submenu = wx.Menu()
+        details = wx.MenuItem(submenu, ID_CONTEXT_MENU_JLC_DETAILS, "Details...")
+        submenu.Append(details)
+        submenu.Bind(wx.EVT_MENU, self.on_jlc_footprint_details, details)
+        available = self._active_jlc_footprint_check() is not None
+        details.Enable(available and self._first_selected_jlc_reference() is not None)
+        parent_menu.AppendSubMenu(submenu, "JLC footprint")
+        return submenu
+
+    def on_jlc_footprint_details(self, *_: object) -> None:
+        """Open the detail dialog for the first selected part with an LCSC."""
+        self.show_jlc_footprint_detail()
 
     def init_logger(self):
         """Initialize logger to log into textbox."""
