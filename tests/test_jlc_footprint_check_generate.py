@@ -155,10 +155,14 @@ def test_summary_dialog_shows_the_formatted_text(facade, monkeypatch):
 def mainwindow():
     """Load mainwindow with the facade's generate-time functions faked."""
     facade = {
+        "clear_cache": MagicMock(return_value=0),
         "create_footprint_check": MagicMock(),
         "is_footprint_check_enabled": lambda settings: settings.get(
             "jlcfootprint", {}
         ).get("enabled", True),
+        "recheck_board": MagicMock(return_value=0),
+        "refetch_references": MagicMock(return_value=0),
+        "refresh_board_data": MagicMock(return_value=0),
         "wait_for_pending_fetches": MagicMock(return_value=True),
         "show_generate_summary": MagicMock(return_value="summary"),
     }

@@ -472,3 +472,11 @@ def test_the_banner_says_the_state_the_verdict_and_what_the_cpl_emits():
     assert banner(part_detail(lcsc="", placed_rotation=0.0))[2] == (
         "The CPL emits the raw angle, 0°."
     )
+
+
+def test_a_board_estimate_reads_as_parts_and_a_rough_time():
+    """Spec 16.5's confirmation text: "66 part(s), about 2 min"."""
+    from jlcfootprint.presentation import describe_board_estimate
+
+    assert describe_board_estimate(66, 95.0) == "66 part(s), about 2 min"
+    assert describe_board_estimate(1, 3.0) == "1 part(s), about 3 s"

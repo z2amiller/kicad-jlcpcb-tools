@@ -32,7 +32,7 @@ from .kicad_adapter import BoardPart
 from .presentation import describe_seconds, jlc_state, verdict_text
 from .resolver import Verdict, resolve
 from .verdicts import PENDING, StoredVerdict, VerdictStore
-from .worker import FOOTPRINT, LOOKUP, SYMBOL, Buckets, FetchWorker
+from .worker import FOOTPRINT, LOOKUP, SYMBOL, Buckets, FetchWorker, estimate_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -729,6 +729,68 @@ class FootprintCheck:
             ", ".join(lcscs) or "none",
         )
         return self.scan_board(wanted)
+
+    def recheck_board(self) -> int:
+        """Re-resolve every part whose EasyEDA data the cache already holds (spec 16.5).
+
+        No network at all: a part the cache does not know keeps its row and the next
+        scan fetches it.  This is the action for after a footprint edit (whose new pad
+        hash orphans the old verdict) or a plugin update that changes the resolver.
+        """
+        checked = 0
+        for part in self.read_board():
+            self.parts[part.reference] = part
+            if not part.lcsc:
+                continue
+            with self.lock:
+                if self.cache.needs(part.lcsc, self.now()):
+                    continue
+                cached = self.cache.part(part.lcsc)
+                if cached is None:
+                    continue
+                self._resolve_and_store(part, cached)
+            checked += 1
+        logger.info("jlcfootprint: re-checked %d part(s)", checked)
+        return checked
+
+    def refresh_board(self) -> ScanSummary:
+        """Forget the cached rows of every LCSC on the board and fetch them again (spec 16.5).
+
+        The rescan marks every verdict pending and keeps every override, exactly as
+        one part's re-fetch does.
+        """
+        lcscs = sorted({part.lcsc for part in self.read_board() if part.lcsc})
+        for lcsc in lcscs:
+            self.cache.forget(lcsc)
+            self._package_names.pop(lcsc, None)
+        logger.info("jlcfootprint: refreshing %d part(s) from EasyEDA", len(lcscs))
+        return self.scan_board()
+
+    def clear_cache(self) -> ScanSummary:
+        """Delete every cached part and footprint, then rescan the board (spec 16.5).
+
+        The schema stays, so a seed import or the next scan refills it; the verdicts
+        and their overrides are the project's and are not touched here beyond the
+        rescan's pending marks.
+        """
+        counts = self.cache.counts()
+        self.cache.clear()
+        self._package_names.clear()
+        logger.info(
+            "jlcfootprint: cleared the cache (%d part(s), %d footprint(s))",
+            counts["parts"],
+            counts["packages"],
+        )
+        return self.scan_board()
+
+    def board_estimate(self) -> tuple[int, float]:
+        """Return how many parts a board-wide re-fetch would ask for, and roughly how long.
+
+        The confirmation quotes this before anything is forgotten: one lookup per 200
+        codes and up to two documents each, the same arithmetic the queue uses.
+        """
+        count = len({part.lcsc for part in self.read_board() if part.lcsc})
+        return count, estimate_seconds(count, 2 * count)
 
     def references_sharing_verdict(self, reference: str) -> list[str]:
         """Return every reference whose verdict row is the one this reference uses.
