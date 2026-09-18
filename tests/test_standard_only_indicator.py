@@ -102,7 +102,7 @@ def test_indicator_is_read_only_unstyled_and_reports_available_classification(
         pending=pending,
     )
 
-    assert (model.GetColumnCount(), model.GetColumnType(column)) == (16, "string")
+    assert (model.GetColumnCount(), model.GetColumnType(column)) == (17, "string")
     assert all(len(row) == 15 for row in model.data)
     assert model.HasValue(item, column) is bool(lcsc)
     assert model.GetValue(item, column) == glyph
