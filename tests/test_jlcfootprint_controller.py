@@ -861,6 +861,17 @@ def test_rechecking_the_board_resolves_from_the_cache_without_any_request(
     assert (len(client.lookups), len(client.documents)) == calls
 
 
+def test_rechecking_skips_a_part_whose_cache_row_is_incomplete(setup):
+    """A row with uuids but no documents is not "no data": it waits, it is not judged."""
+    check, board, _events, _messages, _client = setup
+    part = board["parts"][0]
+    check.cache.store_lookup("C2132", "sym-C2132", "puuid-not-fetched", 1)
+    check.verdicts.mark_pending("C2132", part.footprint_hash, part.footprint_name, 1)
+    assert check.cache.needs("C2132", 2) == {"footprint", "symbol"}
+    assert check.recheck_board() == 0
+    assert check.verdicts.get("C2132", part.footprint_hash).status == PENDING
+
+
 def test_refreshing_the_board_forgets_every_row_and_rescans(setup, caplog):
     """Spec 16.5: every LCSC on the board is fetched again, overrides kept."""
     check, board, _events, _messages, _client = setup
