@@ -747,6 +747,7 @@ class JLCPCBTools(wx.Frame):
             PartListDataModel.columns["TYPE_COL"],
             self.partlist_data_model.get_assembly_tooltip,
             self._set_assembly_tooltip,
+            {PartListDataModel.columns["JLC_COL"]: self._jlc_cell_help},
         )
         self.bom_estimator_controller = BomEstimatorController(
             read_parts=lambda: (
@@ -1635,6 +1636,13 @@ class JLCPCBTools(wx.Frame):
                 reference, check.display_text(reference) or "raw"
             )
             self._apply_jlc_cell(reference)
+
+    def _jlc_cell_help(self, item: Any) -> str:
+        """Return the hover help for a JLC cell: that part's verdict text (spec 16.3)."""
+        check = self._active_jlc_footprint_check()
+        if check is None:
+            return ""
+        return check.cell_help(self.partlist_data_model.get_reference(item))
 
     def _apply_jlc_cell(self, reference: str) -> None:
         """Set one row's JLC glyph from the footprint check, or clear it when off."""

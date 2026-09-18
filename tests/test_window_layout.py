@@ -540,9 +540,11 @@ def test_main_type_hover_uses_existing_column_and_live_assembly_metadata(
     window = _open_main(monkeypatch, {})
 
     install.assert_called_once()
-    control, column, get_row_help, set_row_help = install.call_args.args
+    control, column, get_row_help, set_row_help, column_help = install.call_args.args
     assert control is window.footprint_list
     assert column == _column_by_title(control, "Type").GetModelColumn()
+    # The JLC column brings its own help for the hovered row (spec 16.3).
+    assert list(column_help) == [datamodel.PartListDataModel.columns["JLC_COL"]]
     assert _column_by_title(control, "Type").sortable
     assert len(control.GetColumns()) == len(datamodel.PartListDataModel.columns) - 1
     assert "Enrichment" not in [column.GetTitle() for column in control.GetColumns()]
@@ -621,6 +623,7 @@ def test_main_empty_refresh_clears_type_help_before_resetting_rows(
             _type_column: int,
             _get_row_help: Callable[[Any], str],
             set_row_help: Callable[[str], None],
+            _column_help: Any = None,
         ) -> None:
             self.pending = False
             self.visible = False

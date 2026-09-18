@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import logging
 import time
 
@@ -13,7 +13,12 @@ from .part_type_tooltip import create_type_fee_popup
 
 
 class TypeCellTooltip:
-    """Coordinate delayed Type help with assembly information for each row."""
+    """Coordinate delayed Type help with per-column and assembly information for each row.
+
+    ``column_help`` maps a model column to its own help for the hovered row (spec
+    16.3: the JLC column's cell explains that part's verdict); every other column
+    falls back to ``get_row_help``, and the Type column keeps its fee popup.
+    """
 
     def __init__(
         self,
@@ -21,11 +26,13 @@ class TypeCellTooltip:
         type_column: int,
         get_row_help: Callable[[dv.DataViewItem], str],
         set_row_help: Callable[[str], None],
+        column_help: Mapping[int, Callable[[dv.DataViewItem], str]] | None = None,
     ) -> None:
         self.control = control
         self.type_column = type_column
         self.get_row_help = get_row_help
         self.set_row_help = set_row_help
+        self.column_help = dict(column_help or {})
         self._popup = None
         self._pointer = None
         self._hover_started = None
@@ -104,7 +111,12 @@ class TypeCellTooltip:
             return
         if column is None or column.GetModelColumn() != self.type_column:
             self._clear_type_help()
-            self.set_row_help(self.get_row_help(item))
+            help_text = self.column_help.get(
+                None if column is None else column.GetModelColumn()
+            )
+            self.set_row_help(
+                self.get_row_help(item) if help_text is None else help_text(item)
+            )
             return
 
         # Library type and assembly eligibility describe separate things.
