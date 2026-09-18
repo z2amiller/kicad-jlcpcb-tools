@@ -190,8 +190,8 @@ def test_a_new_lcsc_or_a_cleared_list_forgets_the_glyph(models):
 # ---------------------------------------------------------------------------
 
 
-def test_the_view_column_sits_right_of_rotation_with_std_s_width(monkeypatch):
-    """Header "JLC", Std's 36 DIP, read-only, sortable, and not a persisted width."""
+def test_the_view_column_sits_between_type_and_std_with_std_s_width(monkeypatch):
+    """Header "JLC" between Type and Std, Std's 36 DIP, read-only, sortable, not a persisted width."""
     main = layout.mainwindow
     monkeypatch.setattr(main, "TypeCellTooltip", MagicMock())
     monkeypatch.setattr(main.wx, "ToolTip", str, raising=False)
@@ -199,8 +199,8 @@ def test_the_view_column_sits_right_of_rotation_with_std_s_width(monkeypatch):
     window = layout._open_main(monkeypatch, {})
     control = window.footprint_list
     titles = [column.GetTitle() for column in control.GetColumns()]
-    assert titles[titles.index("Rotation") + 1] == "JLC"
-    assert titles[titles.index("JLC") + 1] == "Side"
+    assert titles[titles.index("Type") + 1] == "JLC"
+    assert titles[titles.index("JLC") + 1] == "Std"
     jlc = layout._column_by_title(control, "JLC")
     standard = layout._column_by_title(control, "Std")
     assert jlc.GetModelColumn() == main.PartListDataModel.columns["JLC_COL"]

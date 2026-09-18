@@ -519,6 +519,14 @@ class JLCPCBTools(wx.Frame):
         type = self.footprint_list.AppendTextColumn(
             "Type", 4, width=100, mode=dv.DATAVIEW_CELL_INERT, align=wx.ALIGN_CENTER
         )
+        self.jlc_column = jlc = self.footprint_list.AppendTextColumn(
+            "JLC",
+            PartListDataModel.columns["JLC_COL"],
+            width=HighResWxSize(self.window, wx.Size(36, -1)).GetWidth(),
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+            flags=0,
+        )
         self.footprint_list.AppendTextColumn(
             "Std",
             PartListDataModel.columns["STANDARD_ONLY_COL"],
@@ -552,14 +560,6 @@ class JLCPCBTools(wx.Frame):
             width=120,
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
-        )
-        self.jlc_column = jlc = self.footprint_list.AppendTextColumn(
-            "JLC",
-            PartListDataModel.columns["JLC_COL"],
-            width=HighResWxSize(self.window, wx.Size(36, -1)).GetWidth(),
-            mode=dv.DATAVIEW_CELL_INERT,
-            align=wx.ALIGN_CENTER,
-            flags=0,
         )
         side = self.footprint_list.AppendTextColumn(
             "Side",
