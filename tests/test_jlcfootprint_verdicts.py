@@ -33,6 +33,8 @@ SPEC_COLUMNS = [
     "angular_rms",
     "residual_mm",
     "body_excess_mm",
+    "origin_dx_mm",
+    "origin_dy_mm",
     "override_rotation",
     "override_note",
     "notes",

@@ -98,6 +98,9 @@ class Decision:
     note: str = ""
     pending: bool = False
     body_excess: float | None = None  # the body-size caveat in mm (spec 16.6 item 4)
+    # JLC's package origin in the KiCad footprint frame (spec 17.2), None without one;
+    # the CPL places the part there only while ``jlcfootprint.exact_origin`` is on.
+    origin: tuple | None = None
     verdict: StoredVerdict | None = field(default=None, repr=False)
 
     @property
@@ -185,6 +188,15 @@ class PartDetail:
     def emitted_rotation(self) -> int | None:
         """Return the correction the CPL applies for this part, None for the raw angle."""
         return None if self.stored is None else self.stored.emitted_rotation
+
+    @property
+    def origin(self) -> tuple | None:
+        """Return JLC's package origin from the placement solved here (spec 17.2).
+
+        Re-resolved like everything else the dialog draws, so it is the origin the
+        next save would store rather than a rounded copy from the row.
+        """
+        return None if self.verdict is None else self.verdict.origin
 
 
 class FootprintCheck:
@@ -546,6 +558,7 @@ class FootprintCheck:
             note=stored.override_note or stored.notes or "",
             pending=pending or stored.status == PENDING,
             body_excess=stored.body_excess_mm,
+            origin=stored.origin,
             verdict=stored,
         )
 

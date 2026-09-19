@@ -233,6 +233,25 @@ def align(kicad: dict[str, Pad], jlc: dict[str, Pad]) -> Placement:
     )
 
 
+def package_origin(placement: Placement) -> tuple[float, float]:
+    """Return JLC's package origin in the KiCad footprint frame (spec 17.2).
+
+    The placement maps KiCad pads onto the JLC drawing in the solver's frame,
+    ``jlc = R(theta) * kicad + offset``; JLC's package origin is the drawing's
+    (0, 0), so its position in the footprint frame is the inverse placement
+    applied to the origin, ``-R(-theta) * offset``.  That point is where JLC's
+    Mid X/Y must be for JLC's pads to land on the footprint's pads, which is
+    what the placement preview checks.  The frame is the one the pad hash uses:
+    millimetres, KiCad's Y down, bottom-side parts already un-mirrored by the
+    adapter, so the caller mirrors it back for a bottom part exactly as
+    ``Fabrication.reposition`` mirrors a rule's offset.
+    """
+    theta = math.radians(-placement.rotation_deg)
+    cos, sin = math.cos(theta), math.sin(theta)
+    x, y = -placement.offset_x, -placement.offset_y
+    return (x * cos - y * sin, x * sin + y * cos)
+
+
 def transformed(pad: Pad, placement: Placement) -> tuple[float, float, float, float]:
     """Return a KiCad pad's ``(x, y, w, h)`` after the placement (solver's math frame)."""
     theta = math.radians(placement.rotation_deg)

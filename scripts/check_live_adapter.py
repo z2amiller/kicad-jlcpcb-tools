@@ -8,15 +8,17 @@ Needs KiCad's bundled Python (it imports pcbnew):
 For every footprint the adapter's pads (footprint frame, bottom parts un-mirrored,
 pad rotation modulo 180) and its courtyard box must equal the validator's file pads
 and box and give the same verdict key; where a recorded EasyEDA response exists the
-resolver must return the same status, fit and rotation from both.  Exits 1 on any
-difference.  This is how the adapter's frame was confirmed on 2026-09-16 (47 of 47
+resolver must return the same status, fit, rotation and package origin from both,
+the last to 1 nanometre (spec 17.6: the origin is read out of the same frame the
+pads are).  ``--pro-fixtures`` reads the parts from the Pro recordings instead, which
+is how the boards whose parts have no classic fixture reach the resolver.  Exits 1 on
+any difference.  This is how the adapter's frame was confirmed on 2026-09-16 (47 of 47
 parts) and its courtyard reader on 2026-09-17.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 import sys
 
@@ -25,7 +27,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from jlcfootprint.boardfile import footprint_pads, parse_kicad_pcb  # noqa: E402
-from jlcfootprint.easyeda_parse import parse_component_response  # noqa: E402
 from jlcfootprint.geometry import (  # noqa: E402
     Pad,
     easyeda_pads_to_mm,
@@ -33,7 +34,14 @@ from jlcfootprint.geometry import (  # noqa: E402
     mirror_y,
 )
 from jlcfootprint.kicad_adapter import board_parts, verdict_key  # noqa: E402
-from jlcfootprint.resolver import resolve  # noqa: E402
+from jlcfootprint.resolver import Verdict, resolve  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from validate_board import load_pro_index, load_pro_record, load_record  # noqa: E402
+
+# The origin comes out of the same pads, so the two readings must agree exactly;
+# a nanometre allows for float noise and nothing else.
+ORIGIN_EPSILON_MM = 1e-6
 
 DEFAULT_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
 
@@ -54,11 +62,26 @@ def pad_key(pads: list[Pad]) -> list[tuple]:
     )
 
 
+def origin_differs(from_file: Verdict, from_live: Verdict) -> bool:
+    """Return whether the two readings put JLC's package origin in different places."""
+    one, other = from_file.origin, from_live.origin
+    if (one is None) != (other is None):
+        return True
+    return one is not None and any(
+        abs(a - b) > ORIGIN_EPSILON_MM for a, b in zip(one, other)
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Compare the live adapter with the file parser on every footprint of the board."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("board", type=Path)
     parser.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES)
+    parser.add_argument(
+        "--pro-fixtures",
+        type=Path,
+        help="read the parts from Pro-host recordings instead of the classic fixtures",
+    )
     args = parser.parse_args(argv)
     import pcbnew  # noqa: PLC0415
 
@@ -67,7 +90,9 @@ def main(argv: list[str] | None = None) -> int:
         part.reference: part
         for part in board_parts(pcbnew.LoadBoard(str(args.board)), pcbnew=pcbnew)
     }
+    index = load_pro_index(args.pro_fixtures) if args.pro_fixtures else None
     mismatches = verdict_differences = 0
+    resolved = 0
     for reference, fp in sorted(file_parts.items()):
         part = live.get(reference)
         if part is None:
@@ -97,12 +122,15 @@ def main(argv: list[str] | None = None) -> int:
                 f"COURTYARD {reference} {fp.footprint_name} bottom={fp.is_bottom}:"
                 f" file {courtyard} live {part.courtyard}"
             )
-        fixture = args.fixtures / f"{fp.lcsc}.json"
-        if not fp.lcsc or not fixture.exists():
+        if not fp.lcsc:
             continue
-        record = parse_component_response(
-            json.loads(fixture.read_text(encoding="utf-8")), fp.lcsc
-        )
+        if index is not None:
+            record = load_pro_record(args.pro_fixtures, index, fp.lcsc)
+        else:
+            record = load_record(args.fixtures, fp.lcsc)
+        if record is None or record.status != "ok":
+            continue
+        resolved += 1
         jlc = easyeda_pads_to_mm(record.pads)
         from_file = resolve(
             pads,
@@ -130,9 +158,14 @@ def main(argv: list[str] | None = None) -> int:
                 f"VERDICT {reference}: file {(from_file.status, from_file.rotation, from_file.fit)}"
                 f" live {(from_live.status, from_live.rotation, from_live.fit)}"
             )
+        if origin_differs(from_file, from_live):
+            verdict_differences += 1
+            print(
+                f"ORIGIN {reference}: file {from_file.origin} live {from_live.origin}"
+            )
     print(
-        f"checked {len(file_parts)} footprints: {mismatches} pad-set mismatches, "
-        f"{verdict_differences} verdict differences"
+        f"checked {len(file_parts)} footprints ({resolved} resolved): "
+        f"{mismatches} pad-set mismatches, {verdict_differences} verdict differences"
     )
     return 1 if mismatches or verdict_differences else 0
 

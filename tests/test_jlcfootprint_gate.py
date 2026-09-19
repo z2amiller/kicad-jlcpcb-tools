@@ -31,8 +31,10 @@ def test_corner_case_board_matches_jlc():
     validator = load_validator()
     rows = validator.evaluate(BOARD, FIXTURES)
     truth = validator.load_truth(TRUTH)
+    origins = validator.load_truth_origins(TRUTH)
     assert len(truth) >= 40
-    assert validator.compare(rows, truth) == []
+    assert sum(value is not None for value in origins.values()) == 45
+    assert validator.compare(rows, truth, origins) == []
     by_reference = {row["reference"]: row["verdict"] for row in rows}
     assert by_reference["U7"].fit == "count"
     assert by_reference["R4"].fit == "fits_tight"
@@ -46,7 +48,7 @@ def test_corner_case_board_matches_jlc_from_the_pro_fixtures():
     validator = load_validator()
     rows = validator.evaluate(BOARD, FIXTURES, pro_fixtures=PRO_FIXTURES)
     truth = validator.load_truth(TRUTH)
-    assert validator.compare(rows, truth) == []
+    assert validator.compare(rows, truth, validator.load_truth_origins(TRUTH)) == []
     by_reference = {row["reference"]: row["verdict"] for row in rows}
     assert all(row["verdict"] is not None for row in rows), "every part is recorded"
     assert by_reference["U7"].fit == "count"
@@ -70,7 +72,7 @@ def test_m3_board_matches_jlc_from_the_pro_fixtures():
     rows = validator.evaluate(BOARD_M3, FIXTURES, pro_fixtures=PRO_FIXTURES)
     truth = validator.load_truth(TRUTH_M3)
     assert len(truth) == 16  # C8 (C1969735) settled by JLC's preview on 2026-09-17
-    assert validator.compare(rows, truth) == []
+    assert validator.compare(rows, truth, validator.load_truth_origins(TRUTH_M3)) == []
     by_reference = {row["reference"]: row["verdict"] for row in rows}
     assert all(verdict is not None for verdict in by_reference.values())
     assert (

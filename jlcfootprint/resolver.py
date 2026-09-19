@@ -22,6 +22,7 @@ from .fit import (
     align,
     assess_fit,
     courtyard_excess,
+    package_origin,
     pair_by_function,
     pair_by_name,
     shape_alignment,
@@ -74,6 +75,11 @@ BODY_EXCESS_FRACTION = 0.10
 BODY_EXCESS_MIN_MM = 0.15
 BODY_EXCESS_MAX_MM = 1.5
 
+# The statuses whose row carries a derived rotation and a placement, so the CPL may
+# use both (spec section 8 for the rotation, 17.3 for the origin).  ``verdicts.py``
+# re-exports this name, which is where it lived before M4.
+APPLIED_STATUSES = ("green", "yellow")
+
 
 @dataclass
 class Verdict:
@@ -113,6 +119,18 @@ class Verdict:
         self.method = "none"
         self.notes.append(note)
         return self
+
+    @property
+    def origin(self) -> tuple[float, float] | None:
+        """Return JLC's package origin in the footprint frame, or None (spec 17.2).
+
+        Only a verdict the resolver settled as green or yellow carries one: a red,
+        unknown or unfinished verdict has no placement the CPL may trust, and the
+        stored row keeps NULL for it.
+        """
+        if self.placement is None or self.status not in APPLIED_STATUSES:
+            return None
+        return package_origin(self.placement)
 
     def take_placement(self, placement: Placement) -> None:
         """Copy the placement's metrics and keep the placement for the drawing."""

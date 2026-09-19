@@ -132,6 +132,25 @@ def centroid(pads: list[Pad]) -> tuple[float, float]:
     return (sum(p.x for p in pads) / count, sum(p.y for p in pads) / count)
 
 
+def pad_box_centre(pads: list[Pad]) -> tuple[float, float] | None:
+    """Return the centre of the named pads' bounding box, or None without any.
+
+    The box is the union of the pads' effective boxes (:func:`pad_geom`), which is
+    what upstream's ``Fabrication.get_position`` merges in board coordinates, so
+    this is the position the CPL emits today expressed in the footprint frame.
+    Unnamed pads (NPTH holes, paste-only copper) are left out, which is where the
+    two can differ (bead kicad-b4be).
+    """
+    boxes = [pad_geom(pad) for pad in named_pads(pads)]
+    if not boxes:
+        return None
+    left = min(x - width / 2.0 for x, _y, width, _h in boxes)
+    right = max(x + width / 2.0 for x, _y, width, _h in boxes)
+    top = min(y - height / 2.0 for _x, y, _w, height in boxes)
+    bottom = max(y + height / 2.0 for _x, y, _w, height in boxes)
+    return ((left + right) / 2.0, (top + bottom) / 2.0)
+
+
 def pad_pitch(pads: list[Pad]) -> float | None:
     """Return the smallest centre-to-centre distance between differently numbered pads.
 
