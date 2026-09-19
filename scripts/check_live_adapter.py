@@ -27,10 +27,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from jlcfootprint.boardfile import footprint_pads, parse_kicad_pcb  # noqa: E402
-from jlcfootprint.easyeda_parse import resolve_record  # noqa: E402
 from jlcfootprint.geometry import Pad, mirror_box, mirror_y  # noqa: E402
 from jlcfootprint.kicad_adapter import board_parts, verdict_key  # noqa: E402
 from jlcfootprint.resolver import Verdict  # noqa: E402
+from jlcfootprint.resolving import resolve_record  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_board import load_pro_index, load_pro_record, load_record  # noqa: E402

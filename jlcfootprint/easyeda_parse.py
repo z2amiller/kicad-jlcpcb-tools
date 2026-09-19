@@ -16,9 +16,7 @@ from dataclasses import dataclass, field
 import json
 from typing import Any
 
-from .geometry import Pad, easyeda_pads_to_mm
 from .records import SymbolPin
-from .resolver import Verdict, resolve
 
 # SymbolPin lives in .records, shared with the resolver core; re-exported here so
 # this module's own name is unchanged.  The pin-1 label sets and pin1_polarity,
@@ -47,42 +45,6 @@ class ComponentRecord:
     # The classic drawing's head x/y, subtracted from its pads; (0, 0) for Pro text,
     # whose coordinates are already about the footprint origin.
     footprint_origin: tuple[float, float] = (0.0, 0.0)
-
-
-def resolve_record(
-    kicad_pads: list[Pad],
-    kicad_footprint_name: str,
-    record: ComponentRecord,
-    polarity_source: str = "symbol",
-    kicad_courtyard: tuple[float, float, float, float] | None = None,
-) -> Verdict:
-    """Resolve one footprint against a cached record (spec section 7).
-
-    Builds the two arguments every caller assembled from a ``ComponentRecord`` by
-    hand: the raw pads converted to millimetres and the drawings' polarity marks
-    and body box, then calls :func:`jlcfootprint.resolver.resolve` with all nine.
-
-    ``drawing_marks`` is imported inside this function rather than at module
-    level: ``drawing.py`` already imports this module (for
-    ``classic_pin_records``, ``pro_pin_records`` and ``PRO_MILS_PER_CANVAS_UNIT``),
-    so a top-level import back here would be a real cycle, not just a layering
-    preference.
-    """
-    from .drawing import drawing_marks  # noqa: PLC0415
-
-    return resolve(
-        kicad_pads,
-        kicad_footprint_name,
-        record.status,
-        record.package_name,
-        easyeda_pads_to_mm(record.pads),
-        record.symbol_pins,
-        polarity_source,
-        drawing_marks(
-            record.symbol_shapes, record.footprint_shapes, record.footprint_origin
-        ),
-        kicad_courtyard,
-    )
 
 
 def classic_pin_records(shapes: list[Any]) -> list[tuple[str, str, float, float]]:

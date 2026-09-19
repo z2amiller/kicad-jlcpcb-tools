@@ -25,11 +25,12 @@ from typing import Any
 
 from .cache import Cache, CachedPart
 from .easyeda_client import EasyEdaClient
-from .easyeda_parse import ComponentRecord, resolve_record
+from .easyeda_parse import ComponentRecord
 from .kicad_adapter import BoardPart
 from .model import Decision, FetchState, PartDetail
 from .presentation import describe_seconds
 from .resolver import Verdict
+from .resolving import resolve_record
 from .verdicts import PENDING, StoredVerdict, VerdictStore
 from .worker import FOOTPRINT, LOOKUP, SYMBOL, Buckets, FetchWorker, estimate_seconds
 
