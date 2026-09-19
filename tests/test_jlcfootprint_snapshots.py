@@ -5,7 +5,7 @@ import json
 import pytest
 
 from jlcfootprint.geometry import Pad
-from tests.jlcfootprint_support import (
+from scripts.kicad_library import (
     KICAD_FOOTPRINTS,
     KICAD_SNAPSHOTS,
     installed_library_pads,

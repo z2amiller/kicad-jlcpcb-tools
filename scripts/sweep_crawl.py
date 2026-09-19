@@ -6,7 +6,8 @@ For each of the most-shared EasyEDA footprints (puuids) that has an obvious KiCa
 standard-library twin, run the resolver (KiCad library pads vs the crawled EasyEDA
 footprint, symbol pin-1 polarity from the crawl) and compare its rotation with the
 crawl's packages.rotation_correction.  Read-only; dev-time only; needs the KiCad
-footprint libraries installed.
+footprint libraries installed **and Andy's private crawl database**, which is not in
+this repository, so this script stays in the fork and goes to nobody upstream.
 
 What it proves: the alignment logic against 174k parts' worth of footprints.  What
 it does not: the crawl's blobs are almost all EasyEDA Pro text, parsed here by
@@ -34,10 +35,7 @@ if str(ROOT) not in sys.path:
 from jlcfootprint.easyeda_parse import SymbolPin, parse_footprint_pads  # noqa: E402
 from jlcfootprint.geometry import Pad, crawl_to_cpl, easyeda_pads_to_mm  # noqa: E402
 from jlcfootprint.resolver import resolve  # noqa: E402
-
-# ``tests`` must resolve to this repository's package (ROOT is first on sys.path and
-# upstream ships tests/__init__.py); an editable install elsewhere can also own that name.
-from tests.jlcfootprint_support import (  # noqa: E402
+from scripts.kicad_library import (  # noqa: E402
     KICAD_FOOTPRINTS,
     library_pads,
     with_functions,

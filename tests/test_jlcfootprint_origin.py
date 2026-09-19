@@ -14,9 +14,10 @@ from jlcfootprint.kicad_adapter import BoardPart, verdict_key
 from jlcfootprint.overlay import inverse
 from jlcfootprint.resolver import Verdict, resolve
 from jlcfootprint.verdicts import SCHEMA, VerdictStore
+from scripts.kicad_library import footprints_available, library_pads
 
 from .jlc_footprint_wx_support import load_script
-from .jlcfootprint_support import footprints_available, library_pads, recorded
+from .jlcfootprint_support import recorded
 from .test_jlcfootprint_validate import board_file, footprint_text
 
 TRUTH_HEADER = "reference,observed_rotation,origin_dx_mm,origin_dy_mm\n"
