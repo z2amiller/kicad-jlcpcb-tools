@@ -156,6 +156,9 @@ def test_devices_response_failures_classify_nothing():
     for body in (
         "nope",
         {"success": False, "code": 401, "message": "denied"},
+        # A code that is not a scalar: the batch lookup has no not-found status to
+        # reach, so it reports the detail rather than testing an unhashable value.
+        {"success": False, "code": ["401"], "message": "denied"},
         {"success": True, "result": {"lists": 5}},
     ):
         result = parse_devices_response(body, ["C1"])
