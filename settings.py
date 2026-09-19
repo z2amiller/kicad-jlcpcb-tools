@@ -974,7 +974,7 @@ class SettingsDialog(wx.Dialog):
 
     def seed_footprint_cache(self, *_) -> None:
         """Ask for a seed file and merge it into the footprint cache."""
-        from .jlc_footprint_check import import_seed
+        from .jlc_footprint_check import import_seed  # noqa: PLC0415
 
         with wx.FileDialog(
             self,
