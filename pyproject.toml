@@ -157,7 +157,6 @@ split-on-trailing-comma = false
 "common/progress.py" = ["T201"]
 "scripts/*.py" = ["T201", "PLC0415"]
 "tests/test_jlcfootprint_solver.py" = ["D"]
-"tests/test_jlcfootprint_quality.py" = ["D"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25
