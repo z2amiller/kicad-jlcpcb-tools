@@ -234,7 +234,7 @@ def test_nan_coordinate_is_underdetermined_not_an_exception():
     """A NaN pad coordinate must not raise out of the solver; it reports underdetermined instead.
 
     Moved here from the deleted ``test_jlcfootprint_quality_extra.py`` (a solver
-    regression, not a quality-assessment one): it never called ``assess_quality``
+    regression, not a quality-assessment one): it never called ``the old quality assessment``
     and asserts only on ``TransformResult``.
     """
     r = solve_transform(
