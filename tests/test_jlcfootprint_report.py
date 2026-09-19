@@ -177,3 +177,38 @@ def test_summary_without_the_legacy_rules_shows_no_comparison():
             "Unresolved, raw angle emitted (0)",
         ]
     )
+
+
+def test_the_summary_counts_the_two_position_sources_when_the_setting_is_on():
+    """Spec 17.4: with the setting on, the header line says where Mid X/Y came from."""
+    rows = _rows()
+    rows[0].position_source = "origin"
+
+    text = format_summary(summarise(rows, exact_origin=True))
+
+    assert text.splitlines()[0] == (
+        "Positions: 1 at JLC's package origin, 6 at the pad-box centre"
+    )
+    assert text.splitlines()[1] == ""
+    assert text.splitlines()[2].startswith("Does not fit (")
+
+
+def test_the_summary_says_nothing_about_positions_when_the_setting_is_off():
+    """Off, the summary is exactly M3's, whatever a row happens to carry."""
+    rows = _rows()
+    rows[0].position_source = "origin"
+
+    assert format_summary(summarise(rows)).splitlines()[0].startswith("Does not fit (")
+
+
+def test_the_position_counts_cover_every_placed_part_once():
+    """Red and unresolved parts are counted too: the two numbers add up to the CPL."""
+    rows = _rows()
+    for row in rows:
+        row.position_source = "origin"
+    rows[-1].position_source = "pad-box"
+
+    summary = summarise(rows, exact_origin=True)
+
+    assert len(summary.at_origin) + len(summary.at_pad_box) == len(rows)
+    assert len(summary.at_pad_box) == 1
