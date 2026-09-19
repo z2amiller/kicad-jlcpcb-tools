@@ -875,8 +875,18 @@ def test_the_override_and_refetch_callbacks_repaint_every_shared_row(monkeypatch
     ]
     check.set_override.return_value = None
     assert main.JLCPCBTools._set_jlc_override(window, "C1", 90, "") is None
+    # The dialog's "Re-fetch" is the same action as the menu's (spec 16.4 -> 16.5),
+    # so it goes through the facade, which is what logs the one line the log window
+    # shows; calling check.refetch here directly would log nothing at all.
+    refetched: list = []
+    monkeypatch.setattr(
+        main,
+        "refetch_jlc_footprint_references",
+        lambda *args: refetched.append(args) or 1,
+    )
     assert main.JLCPCBTools._refetch_jlc_references(window, ["C1"]) == "fresh"
-    check.refetch.assert_called_once_with(["C1"])
+    assert refetched == [(window, ["C1"], check)]
+    check.refetch.assert_not_called()
     assert main.JLCPCBTools._refetch_jlc_references(window, []) is None
 
 
