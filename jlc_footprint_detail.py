@@ -30,7 +30,7 @@ from .jlcfootprint.presentation import (
     parse_override,
 )
 
-MIN_SIZE = (960, 560)  # spec 16.4's minimum
+MIN_SIZE = (960, 560)  # the smallest the dialog may be drawn (spec 16.4)
 # What the dialog opens at when nothing is remembered: the canvas at its own minimum
 # beside both fact columns in full, which eighteen lines of facts need.
 DEFAULT_SIZE = (1180, 760)
@@ -66,7 +66,7 @@ ROLE_COLOURS = {
     # The cross lands on JLC's own pad whenever the origin sits over one (M3's U1 on
     # a TO-252 tab), where an accent-blue mark on an accent-blue pad loses half of
     # itself, so it takes the annotations' text colour like the pin-1 ring and the
-    # "+" marks rather than the JLC colour spec 17.5 names.
+    # "+" marks rather than the JLC blue named for it (spec 17.5).
     "jlc_origin": ((236, 236, 236), (32, 32, 32)),
     "jlc_raw_pad": ((150, 150, 150), (128, 128, 128)),
     "scale_bar": ((236, 236, 236), (32, 32, 32)),
@@ -179,7 +179,7 @@ class OverlayCanvas(wx.Panel):
 
 
 class OverrideDialog(wx.Dialog):
-    """Ask for an override angle and a note (spec 16.4's "Set override…")."""
+    """Ask for an override angle and a note, behind "Set override…" (spec 16.4)."""
 
     def __init__(
         self,
@@ -342,7 +342,7 @@ class JlcFootprintDetailDialog(wx.Dialog):
         self.detail = detail
         state, text, cpl = banner(detail)
         self.canvas.set_detail(detail)
-        # Spec 16.4: when there is no transform, the banner says why.
+        # When there is no transform, the banner says why (spec 16.4).
         note = self.canvas.build_overlay().note
         if note:
             text = f"{text} {note[0].upper()}{note[1:]}."
@@ -457,9 +457,9 @@ class JlcFootprintDetailDialog(wx.Dialog):
         """Re-flow the banner over as many lines as the dialog's width needs.
 
         A plain ``wx.StaticText`` clips a long verdict sentence rather than
-        wrapping it, and spec 16.4 wants the whole banner readable -- including the
+        wrapping it, and the whole banner has to be readable -- including the
         sentence saying why there is no transform, which is the tail that a refusal
-        loses.  Wrapping keeps the tint, which ``SetForegroundColour`` sets on the
+        loses (spec 16.4).  Wrapping keeps the tint, which ``SetForegroundColour`` sets on the
         same control.
         """
         width = self.GetClientSize().GetWidth() - 2 * BANNER_MARGIN_PX - BANNER_SLACK_PX

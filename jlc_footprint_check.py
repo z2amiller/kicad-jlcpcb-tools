@@ -43,7 +43,7 @@ def shared_buckets() -> Buckets:
 
 
 def is_footprint_check_enabled(settings: dict) -> bool:
-    """Return the setting that switches the resolver path on (spec section 9)."""
+    """Return the setting that switches the resolver path on (spec 9)."""
     return bool(settings.get("jlcfootprint", {}).get("enabled", True))
 
 
@@ -104,7 +104,7 @@ def import_seed(window: Any, path: str) -> SeedImportResult:
 
 
 def wait_for_pending_fetches(window: Any, check: FootprintCheck) -> bool:
-    """Wait with a cancellable dialog until no part is pending (spec section 8).
+    """Wait with a cancellable dialog until no part is pending (spec 8).
 
     Returns False when the user cancels or the breaker has tripped; the caller then
     emits the pending parts with their raw angle.
@@ -141,8 +141,9 @@ def wait_for_pending_fetches(window: Any, check: FootprintCheck) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# The four actions of spec 16.5.  The window's menu calls these; the tests call
-# them directly against a real cache and verdict store in a temporary directory.
+# The four actions the JLC submenu offers (spec 16.5).  The window's menu calls
+# these; the tests call them directly against a real cache and verdict store in a
+# temporary directory.
 # ---------------------------------------------------------------------------
 
 
