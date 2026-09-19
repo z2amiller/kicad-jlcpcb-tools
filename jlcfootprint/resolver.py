@@ -77,7 +77,7 @@ BODY_EXCESS_MAX_MM = 1.5
 
 # The statuses whose row carries a derived rotation and a placement, so the CPL may
 # use both (spec section 8 for the rotation, 17.3 for the origin).  ``verdicts.py``
-# re-exports this name, which is where it lived before M4.
+# imports this name from here and re-exports it for its own callers.
 APPLIED_STATUSES = ("green", "yellow")
 
 

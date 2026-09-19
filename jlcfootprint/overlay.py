@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from .fit import Placement, package_origin
 from .geometry import Pad, named_pads, pad_geom
+from .polarity import terminal_of
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only
     from .controller import PartDetail
@@ -329,8 +330,6 @@ def _cross(x: float, y: float, role: str) -> list:
 
 def _kicad_positive(detail: PartDetail) -> str | None:
     """Return the KiCad pad number carrying the positive terminal, from the schematic."""
-    from .polarity import terminal_of  # noqa: PLC0415 - avoids an import cycle
-
     for pad in named_pads(detail.kicad_pads):
         if terminal_of(pad) in ("anode", "positive"):
             return pad.number

@@ -117,9 +117,8 @@ class StoredVerdict:
     def display_text(self) -> str:
         """Return the Rotation column text: the angle, "set", "!" or "raw" (spec 16.3).
 
-        A pending row reads "raw", which is what the CPL emits for it; the ellipsis
-        the first design showed while fetching is retired, and the JLC column's clock
-        carries that state instead.
+        A pending row reads "raw", which is what the CPL emits for it; the JLC
+        column's clock carries the fetch state instead.
         """
         if self.override_rotation is not None:
             return f"{self.override_rotation}° set"
@@ -292,7 +291,11 @@ class VerdictStore:
             )
 
     def delete(self, lcsc: str, footprint_hash: str) -> None:
-        """Drop one verdict row (a refresh re-resolves the part from scratch)."""
+        """Drop one verdict row outright, leaving nothing pending in its place.
+
+        Unlike a refresh, which marks every row pending and keeps it (spec 16.5),
+        this removes the row entirely; the tests use it to orphan a row.
+        """
         with closing(self.connect()) as con, con:
             con.execute(
                 "DELETE FROM footprint_verdict WHERE lcsc = ? AND footprint_hash = ?",

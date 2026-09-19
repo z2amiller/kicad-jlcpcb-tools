@@ -1,6 +1,6 @@
 """Minimal KiCad .kicad_pcb footprint parser for tools and tests (stdlib, no pcbnew).
 
-The plugin itself reads pads through pcbnew (M1); this parser exists for the
+The plugin itself reads pads through pcbnew; this parser exists for the
 validator and the test-suite.
 
 Extracts footprint data only — skips tracks, zones, nets, and all other
