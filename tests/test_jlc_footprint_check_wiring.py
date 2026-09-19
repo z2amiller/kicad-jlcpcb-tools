@@ -448,9 +448,29 @@ def test_the_window_menu_handlers_call_the_actions_and_repaint(mainwindow):
         (("Q1", "pending"),),
         (("R1", "pending"),),
     ]
+    # Refresh and Clear cache only repaint when the facade reports a Yes: both are
+    # confirmations, and a stubbed 0 stands in for "No" without a real dialog.
     model.reset_mock()
+    module.refresh_jlc_footprint_board_data = lambda *_args, **_kwargs: 2
+    window.on_jlc_footprint_refresh()
+    assert model.set_jlc_state.call_args_list == [
+        (("Q1", "pending"),),
+        (("R1", "pending"),),
+    ]
+    model.reset_mock()
+    module.refresh_jlc_footprint_board_data = lambda *_args, **_kwargs: 0
+    window.on_jlc_footprint_refresh()
+    model.set_jlc_state.assert_not_called()
+
+    model.reset_mock()
+    module.clear_jlc_footprint_cache = lambda *_args, **_kwargs: 0
+    window.on_jlc_footprint_clear_cache()
+    model.set_jlc_state.assert_not_called()
+    model.reset_mock()
+    module.clear_jlc_footprint_cache = lambda *_args, **_kwargs: 3
     window.on_jlc_footprint_clear_cache()
     assert model.set_jlc_state.call_count == 2
+
     window.jlc_footprint_check = None
     model.reset_mock()
     for handler in (
