@@ -208,7 +208,7 @@ def ccw_correction(math_rotation_deg: float) -> int:
     Feed it ``TransformResult.rotation_deg`` (or the raw angle; both snap here).
     Exact 45-degree ties round to the even multiple, which is deterministic and
     irrelevant in practice because such a solve fails a pad anyway.  Never feed
-    the result back into ``assess_quality``, which works in the math frame.
+    the result back into ``fit.align`` and ``quality.angular_rms``, which works in the math frame.
     """
     return (round(math_rotation_deg / 90.0) * 90) % 360
 
