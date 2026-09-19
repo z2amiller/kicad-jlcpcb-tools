@@ -18,7 +18,7 @@ from jlcfootprint.easyeda_parse import (
 from jlcfootprint.geometry import pad_hash
 from jlcfootprint.kicad_adapter import BoardPart, verdict_key
 from jlcfootprint.verdicts import PENDING, VerdictStore
-from jlcfootprint.worker import FOOTPRINT, SYMBOL, FetchWorker
+from jlcfootprint.worker import FOOTPRINT, SYMBOL, Buckets, FetchWorker
 
 from .jlcfootprint_support import (
     footprints_available,
@@ -195,6 +195,10 @@ def setup(tmp_path):
         }
     )
     clock = Clock()
+    # Buckets built on the fake clock so try_take/seconds_until_token refill against
+    # clock.now instead of the real wall clock; otherwise run_pending's token wait
+    # busy-loops through real seconds while only the worker's own clock is fake.
+    buckets = Buckets.default(clock=clock, jitter=lambda: 0.0)
     check = FootprintCheck(
         cache,
         verdicts,
@@ -204,6 +208,7 @@ def setup(tmp_path):
         worker=None,
         message=messages.append,
         now=clock,
+        buckets=buckets,
     )
     check.worker.wait = clock.wait
     check.worker.clock = clock
