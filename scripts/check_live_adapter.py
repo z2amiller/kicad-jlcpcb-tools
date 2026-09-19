@@ -27,14 +27,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from jlcfootprint.boardfile import footprint_pads, parse_kicad_pcb  # noqa: E402
-from jlcfootprint.geometry import (  # noqa: E402
-    Pad,
-    easyeda_pads_to_mm,
-    mirror_box,
-    mirror_y,
-)
+from jlcfootprint.easyeda_parse import resolve_record  # noqa: E402
+from jlcfootprint.geometry import Pad, mirror_box, mirror_y  # noqa: E402
 from jlcfootprint.kicad_adapter import board_parts, verdict_key  # noqa: E402
-from jlcfootprint.resolver import Verdict, resolve  # noqa: E402
+from jlcfootprint.resolver import Verdict  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_board import load_pro_index, load_pro_record, load_record  # noqa: E402
@@ -131,23 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         if record is None or record.status != "ok":
             continue
         resolved += 1
-        jlc = easyeda_pads_to_mm(record.pads)
-        from_file = resolve(
-            pads,
-            fp.footprint_name,
-            record.status,
-            record.package_name,
-            jlc,
-            record.symbol_pins,
-        )
-        from_live = resolve(
-            part.pads,
-            part.footprint_name,
-            record.status,
-            record.package_name,
-            jlc,
-            record.symbol_pins,
-        )
+        from_file = resolve_record(pads, fp.footprint_name, record)
+        from_live = resolve_record(part.pads, part.footprint_name, record)
         if (from_file.status, from_file.rotation, from_file.fit) != (
             from_live.status,
             from_live.rotation,
