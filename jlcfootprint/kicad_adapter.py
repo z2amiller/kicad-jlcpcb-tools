@@ -265,7 +265,7 @@ def board_parts(
     """
     if pcbnew is None:
         try:
-            import pcbnew as pcbnew_module  # noqa: PLC0415
+            import pcbnew as pcbnew_module
 
             pcbnew = pcbnew_module
         except ImportError:

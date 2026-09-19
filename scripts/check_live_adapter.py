@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         help="read the parts from Pro-host recordings instead of the classic fixtures",
     )
     args = parser.parse_args(argv)
-    import pcbnew  # noqa: PLC0415
+    import pcbnew
 
     file_parts = {fp.reference: fp for fp in parse_kicad_pcb(str(args.board))}
     live = {

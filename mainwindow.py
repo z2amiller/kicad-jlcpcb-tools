@@ -1723,8 +1723,8 @@ class JLCPCBTools(wx.Frame):
     def _set_jlc_override(
         self,
         reference: str,
-        rotation: Optional[int],
-        note: str,  # noqa: UP045
+        rotation: Optional[int],  # noqa: UP045
+        note: str,
     ) -> Any:
         """Write an override (or clear it), repaint the rows that share the verdict, return the detail."""
         check = self._active_jlc_footprint_check()

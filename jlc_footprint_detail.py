@@ -193,8 +193,11 @@ class OverrideDialog(wx.Dialog):
     """Ask for an override angle and a note (spec 16.4's "Set override…")."""
 
     def __init__(
-        self, parent: Any, rotation: Optional[int] = None, note: str = ""
-    ) -> None:  # noqa: UP045
+        self,
+        parent: Any,
+        rotation: Optional[int] = None,  # noqa: UP045
+        note: str = "",
+    ) -> None:
         wx.Dialog.__init__(
             self,
             parent,

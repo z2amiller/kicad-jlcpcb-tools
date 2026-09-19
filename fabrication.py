@@ -449,8 +449,8 @@ class Fabrication:
         self,
         footprint: Any,
         decision: Any,
-        match: Optional[CorrectionMatch],
-        part: dict,  # noqa: UP045
+        match: Optional[CorrectionMatch],  # noqa: UP045
+        part: dict,
         position_source: str = "pad-box",
     ) -> float:
         """Apply the footprint check's decision (spec section 8) and record the summary row.
