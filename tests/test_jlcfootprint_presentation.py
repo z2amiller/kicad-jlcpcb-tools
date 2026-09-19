@@ -283,6 +283,21 @@ def test_the_queue_states_speak_for_themselves():
     )
 
 
+def test_a_pending_row_with_an_override_still_says_so_in_the_hover():
+    """Re-fetch keeps the override on a row it marks pending (spec 16.5); the hover says so."""
+    overridden = decision(
+        status="pending", pending=True, override_rotation=180, override_note="kept"
+    )
+    assert verdict_text(overridden, FetchState()) == (
+        "Waiting for EasyEDA data; the Rotation column shows what the CPL emits. "
+        "Override 180° set by you."
+    )
+    plain = Decision("Q9", "C9", status="pending", pending=True)
+    assert verdict_text(plain, FetchState()) == (
+        "Waiting for EasyEDA data; the Rotation column shows what the CPL emits."
+    )
+
+
 def test_describe_seconds_is_the_controllers_wording():
     """Seconds under a minute, else whole minutes."""
     assert (describe_seconds(0.4), describe_seconds(59.4), describe_seconds(90.0)) == (
