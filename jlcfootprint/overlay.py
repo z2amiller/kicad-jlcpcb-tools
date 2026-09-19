@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 import math
 from typing import TYPE_CHECKING
 
-from .fit import Placement
+from .fit import Placement, package_origin
 from .geometry import Pad, named_pads, pad_geom
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only
@@ -88,15 +88,14 @@ def inverse(placement: Placement) -> Placement:
 
     ``Placement`` turns KiCad pads onto the JLC drawing (``fit.transformed``); the
     canvas needs the other direction, which is the same rotation negated with the
-    offset turned with it.
+    offset turned with it.  That turned offset is where JLC's drawing origin lands
+    in the footprint frame, so it is :func:`fit.package_origin` itself.
     """
-    theta = math.radians(-placement.rotation_deg)
-    cos, sin = math.cos(theta), math.sin(theta)
-    x, y = -placement.offset_x, -placement.offset_y
+    offset_x, offset_y = package_origin(placement)
     return Placement(
         rotation_deg=(-placement.rotation_deg) % 360,
-        offset_x=x * cos - y * sin,
-        offset_y=x * sin + y * cos,
+        offset_x=offset_x,
+        offset_y=offset_y,
         is_mirrored=placement.is_mirrored,
         is_underdetermined=placement.is_underdetermined,
         residual=placement.residual,
