@@ -59,9 +59,11 @@ ROLE_COLOURS = {
     # real canvas under KiCad's wx, 2026-09-17).
     "jlc_pin1": ((236, 236, 236), (32, 32, 32)),
     "jlc_plus": ((236, 236, 236), (32, 32, 32)),
-    # The origin cross sits between the pads rather than on one, so it keeps JLC's
-    # own colour (spec 17.5) instead of the annotations' text colour.
-    "jlc_origin": ((124, 176, 255), (0, 82, 204)),
+    # The cross lands on JLC's own pad whenever the origin sits over one (M3's U1 on
+    # a TO-252 tab), where an accent-blue mark on an accent-blue pad loses half of
+    # itself, so it takes the annotations' text colour like the pin-1 ring and the
+    # "+" marks rather than the JLC colour spec 17.5 names.
+    "jlc_origin": ((236, 236, 236), (32, 32, 32)),
     "jlc_raw_pad": ((150, 150, 150), (128, 128, 128)),
     "scale_bar": ((236, 236, 236), (32, 32, 32)),
     "scale_label": ((236, 236, 236), (32, 32, 32)),
