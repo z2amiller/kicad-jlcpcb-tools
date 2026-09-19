@@ -325,6 +325,13 @@ def test_the_report_prints_the_origin_offset_from_the_pad_box_centre(tmp_path):
     # C2132's EasyEDA drawing sits 0.099 mm right of the pad box KiCad draws.
     assert validator.origin_offset(rows[0])[0] == pytest.approx(0.099, abs=0.001)
     assert "  0.10   0.00" in table.splitlines()[1]
+    # It is the offset, not the origin: a footprint whose pad box is not on its own
+    # origin (a connector numbered from pin 1) shows the two apart.
+    moved = dict(rows[0])
+    moved["centre"] = (0.5, -0.25)
+    assert validator.origin_offset(moved) == pytest.approx(
+        (0.099 - 0.5, 0.25), abs=0.001
+    )
 
 
 def test_the_report_leaves_the_origin_columns_blank_without_a_verdict(tmp_path):
