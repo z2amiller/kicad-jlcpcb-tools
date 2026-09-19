@@ -83,7 +83,7 @@ def test_live_record_round_trip(cache):
     assert cache.counts() == {"parts": 1, "packages": 1}
 
 
-def test_needs_fetch_rules(cache):
+def test_needs_rules(cache):
     """Absent and error rows fetch; ok rows never; none rows after thirty days."""
     assert cache.needs("C1")
     cache.store(recorded("C2132"), now=1000)
