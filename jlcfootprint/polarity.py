@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import re
 
-from .drawing import DrawingMarks
-from .easyeda_parse import PIN1_ANODE_LABELS, PIN1_CATHODE_LABELS, SymbolPin
 from .geometry import Pad
 from .naming import (
     CATHODE_PIN1_FAMILIES,
@@ -20,6 +18,7 @@ from .naming import (
     extract_family,
     extract_orientation_tokens,
 )
+from .records import PIN1_ANODE_LABELS, PIN1_CATHODE_LABELS, DrawingMarks, SymbolPin
 
 # Pin-function tokens, after normalisation, that name the terminals.  ``C`` is a
 # collector on KiCad's transistor symbols and a cathode on some vendor symbols; it is

@@ -14,8 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from .drawing import DrawingMarks
-from .easyeda_parse import SymbolPin, pin1_polarity
+from .easyeda_parse import pin1_polarity
 from .fit import (
     FitReport,
     Placement,
@@ -43,6 +42,7 @@ from .polarity import (
     token_is_weak,
     token_reference_side,
 )
+from .records import DrawingMarks, SymbolPin
 
 __all__ = [
     "Verdict",
