@@ -223,7 +223,9 @@ def _shape_list(container: dict) -> list[str]:
     ]
 
 
-def _classify_body(body: Any) -> tuple[str, str | None, Any]:
+def _classify_body(
+    body: Any, not_found_split: bool = True
+) -> tuple[str, str | None, Any]:
     """Classify a response body the way all four parsers open.
 
     Returns ``(status, error, result)``.  ``status`` is ``"none"`` or ``"error"``
@@ -234,12 +236,20 @@ def _classify_body(body: Any) -> tuple[str, str | None, Any]:
     body carried it, unvalidated.  What counts as a usable result differs by
     endpoint (a non-empty dict for the three per-part parsers, a list of devices
     for the batch lookup), so that check stays with each caller.
+
+    ``not_found_split`` is False for the batch lookup, which has no ``none``
+    status to reach: ``DevicesResult`` carries only an ``error``.  It never asked
+    whether the code is a not-found one, and asking is not free -- a ``code`` that
+    is a list or a dict cannot be tested against a frozenset, so the membership
+    would raise ``TypeError`` out of a parser documented never to raise.
     """
     if not isinstance(body, dict):
         return "error", "response is not a JSON object", None
     if body.get("success") is False:
         code = body.get("code")
         detail = f"code {code}: {body.get('message', '')}".strip(": ")
+        if not not_found_split:
+            return "error", detail, None
         return ("none" if code in _NOT_FOUND_CODES else "error"), detail, None
     return "ok", None, body.get("result")
 
@@ -521,7 +531,7 @@ def parse_devices_response(body: Any, codes: list[str]) -> DevicesResult:
     footprint uuid is a miss: there is nothing to align.  Never raises.
     """
     result = DevicesResult()
-    status, error, raw = _classify_body(body)
+    status, error, raw = _classify_body(body, not_found_split=False)
     if status != "ok":
         result.error = error or ""
         return result
