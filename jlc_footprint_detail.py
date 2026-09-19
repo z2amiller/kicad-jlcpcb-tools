@@ -14,7 +14,11 @@ from typing import Any, Optional
 
 import wx  # pylint: disable=import-error
 
-from .helpers import HighResWxSize
+from .helpers import (
+    JLC_CELL_COLOURS as BANNER_COLOURS,
+    HighResWxSize,
+    is_dark_background,
+)
 from .jlcfootprint.overlay import DEFAULT_LAYERS, JLC_PLACED, JLC_RAW, KICAD, overlay
 from .jlcfootprint.presentation import (
     OVERRIDE_ANGLES,
@@ -69,21 +73,6 @@ ROLE_COLOURS = {
     "scale_label": ((236, 236, 236), (32, 32, 32)),
     "angle_label": ((236, 236, 236), (32, 32, 32)),
 }
-BANNER_COLOURS = {
-    "red": ((255, 128, 128), (176, 0, 0)),
-    "yellow": ((255, 211, 102), (128, 52, 0)),
-    "caveat": ((255, 211, 102), (128, 52, 0)),
-    "unknown": ((176, 176, 176), (102, 102, 102)),
-    "paused": ((176, 176, 176), (102, 102, 102)),
-    "pending": ((176, 176, 176), (102, 102, 102)),
-    "green": ((96, 200, 120), (0, 112, 48)),
-    "override": ((124, 176, 255), (0, 82, 204)),
-}
-
-
-def is_dark_background() -> bool:
-    """Return whether the window background is dark, as the cell styles ask it."""
-    return wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW).GetLuminance() < 0.5
 
 
 def role_colour(role: str, dark: bool) -> Any:
