@@ -1,4 +1,4 @@
-"""Per-part rotation, fit and polarity verdicts (spec section 7).
+"""Per-part rotation, fit and polarity verdicts (spec 7).
 
 Pure and stdlib only.  The caller supplies KiCad pads in the footprint's own
 frame, EasyEDA pads already converted to millimetres, and the symbol pins.
@@ -67,16 +67,16 @@ DRAWING_NOTES = {
     "footprint": "polarity from the footprint's + mark",
     "symbol": "polarity from the symbol's + mark",
 }
-# The body caveat (spec 16.6 item 4): the JLC body may overhang the KiCad courtyard by
-# this fraction of the courtyard's shorter side, never less than the floor (drawing
-# noise on an 0201) nor more than the ceiling (a DIP-40 still flags a wide body).
+# The body caveat: the JLC body may overhang the KiCad courtyard by this fraction of
+# the courtyard's shorter side, never less than the floor (drawing noise on an 0201)
+# nor more than the ceiling (a DIP-40 still flags a wide body) (spec 16.6).
 BODY_EXCESS_FRACTION = 0.10
 BODY_EXCESS_MIN_MM = 0.15
 BODY_EXCESS_MAX_MM = 1.5
 
 # The statuses whose row carries a derived rotation and a placement, so the CPL may
-# use both (spec section 8 for the rotation, 17.3 for the origin).  ``verdicts.py``
-# imports this name from here for its own row logic.
+# use the rotation for its angle and the placement for its position (spec 8, 17.3).
+# ``verdicts.py`` imports this name from here for its own row logic.
 APPLIED_STATUSES = ("green", "yellow")
 
 
@@ -161,9 +161,10 @@ def _finish_multi_pin(
 ) -> Verdict:
     """Set the rotation and status of a multi-pin part whose pads fit.
 
-    ``by_name`` says how the pads were paired: on their numbers (spec 7.2) or by
-    pin function (spec 16.6 item 1b).  Only a by-name alignment can rest on
-    "shared pad names", so the notes that say so are its own.
+    ``by_name`` says how the pads were paired: on their numbers (spec 7.2) or, when
+    that fails, by the pin functions the schematic gave them (spec 16.6).  Only a
+    by-name alignment can rest on "shared pad names", so the notes that say so are
+    its own.
     """
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "geometry"
@@ -245,7 +246,7 @@ def _resolve_multi_pin(
     verdict: Verdict,
     symbol_pins: list[SymbolPin],
 ) -> Verdict:
-    """Align by pad name (spec section 7.2), or by pin function when the names fail."""
+    """Align by pad name (spec 7.2), or by pin function when the names fail."""
     kicad, jlc, jlc_rest = pair_by_name(kicad_pads, jlc_pads)
     if len(kicad) < 2:
         by_function = _resolve_by_function(kicad_pads, jlc_pads, verdict, symbol_pins)
@@ -413,7 +414,7 @@ def _reference_vote(
     if source == "seed":
         notes.append("reference terminal from the seeded per-footprint polarity")
     # A token nothing checked, on the one family whose token the crawl found weak,
-    # is resolved at medium confidence (spec 16.9; the note text is unchanged).
+    # is resolved at medium confidence (spec 16.9).
     weak_token = source == "token" and len(votes) == 1 and token_is_weak(package_name)
     return jlc_ref, source, outvoted, polarity, weak_token
 
@@ -498,7 +499,7 @@ def _resolve_polarized(
         and verdict.name_rotation is not None
         and verdict.name_rotation != verdict.rotation
     ):
-        # Only a token that was applied can accuse the footprint (kicad-z9y4).
+        # Only a token that was applied can accuse the footprint.
         verdict.confidence = "medium"
         verdict.notes.append(
             f"KiCad footprint drawn non-standard; name says {verdict.name_rotation}°"
@@ -568,7 +569,7 @@ def _body_caveat(
     courtyard: tuple[float, float, float, float],
     body: tuple[float, float, float, float],
 ) -> None:
-    """Note a JLC body that overhangs the KiCad courtyard (spec 16.6 item 4).
+    """Note a JLC body that overhangs the KiCad courtyard (spec 16.6).
 
     The status and the rotation stand: the pads fit, the part is only bigger than
     the footprint's author allowed for, which the preview shows.
@@ -601,7 +602,7 @@ def resolve(
     marks: DrawingMarks | None = None,
     kicad_courtyard: tuple[float, float, float, float] | None = None,
 ) -> Verdict:
-    """Return the verdict for one part (spec section 7).
+    """Return the verdict for one part (spec 7).
 
     ``kicad_pads`` are in the footprint's own frame (bottom-side parts already
     un-mirrored by the caller); ``jlc_pads`` are millimetres in KiCad's frame.

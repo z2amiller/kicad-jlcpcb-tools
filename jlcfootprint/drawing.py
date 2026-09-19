@@ -1,4 +1,4 @@
-"""Polarity marks and the body outline read from EasyEDA drawings (spec 16.6, items 2 and 4).
+"""Polarity marks and the body outline read from EasyEDA drawings (spec 16.6).
 
 No EasyEDA record carries a pad's polarity as metadata.  What the data carries is
 the drawing: the symbol draws a ``+`` beside its positive pin and the footprint

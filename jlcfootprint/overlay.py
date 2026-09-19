@@ -30,7 +30,7 @@ JLC_PLACED = "jlc_placed"
 JLC_RAW = "jlc_raw"
 DEFAULT_LAYERS = (KICAD, JLC_PLACED)
 
-MARGIN_FRACTION = 0.15  # spec 16.4: the pads plus a 15 % margin
+MARGIN_FRACTION = 0.15  # the canvas frames the pads plus a 15 % margin (spec 16.4)
 SCALE_BAR_LENGTHS_MM = (0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
 SCALE_BAR_TARGET = 0.25  # about a quarter of the canvas
 PIN1_DOT_PX = 3.0  # fixed in DIP whatever the scale
@@ -169,9 +169,9 @@ def overlay(
             note = "no placement: the JLC pads are drawn as the drawing has them"
         else:
             note = "no JLC pads cached for this part yet"
-    # The frame is measured from every pad set the part has, shown or not, so that
-    # toggling a checkbox never rescales the drawing (spec 16.4, amended 2026-09-18:
-    # the frame is fixed across the toggles).  Only a real resize rescales.
+    # The frame is measured from every pad set the part has, shown or not, so
+    # toggling a checkbox never rescales the drawing; only a real resize does
+    # (spec 16.4).
     kicad_boxes = _boxes(detail.kicad_pads, None)
     placed_boxes = (
         _boxes(detail.jlc_pads, inverse(placement)) if placement is not None else []
