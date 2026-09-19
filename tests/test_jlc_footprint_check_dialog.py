@@ -443,30 +443,39 @@ def test_the_checkboxes_switch_the_canvas_layers(dialog_module):
 
 def test_the_painter_draws_every_primitive_onto_the_device_context(dialog_module):
     """Spec 16.7: the canvas is checked through a recording device-context double."""
+    module = dialog_module.module
     dialog = build(dialog_module, make_detail())
     dialog.canvas.client_size = _Size(420, 300)
     drawing = dialog.canvas.build_overlay()
     dc = RecordingDC()
-    drawn = dialog_module.module.draw_primitives(dc, drawing.primitives, dark=True)
+    drawn = module.draw_primitives(dc, drawing.primitives, dark=True)
     assert drawn == len(drawing.primitives)
     assert len(dc.calls) == len(drawing.primitives)
-    # Every pad rectangle reaches the context at its own coordinates.
+    # Every pad rectangle reaches the context at its own coordinates, and its brush
+    # says which pad set it is: the JLC pads filled in the JLC colour, the KiCad pads
+    # outlined in the KiCad colour, not just "some fill happened somewhere".
     rectangles = dc.of("rect")
     assert len(rectangles) == 4
-    for primitive in drawing.by_role("kicad_pad") + drawing.by_role("jlc_pad"):
-        assert any(
-            call[1:5]
-            == (
-                int(round(primitive.x)),
-                int(round(primitive.y)),
-                max(1, int(round(primitive.width))),
-                max(1, int(round(primitive.height))),
-            )
-            for call in rectangles
+
+    def rect_for(primitive):
+        key = (
+            int(round(primitive.x)),
+            int(round(primitive.y)),
+            max(1, int(round(primitive.width))),
+            max(1, int(round(primitive.height))),
         )
-    # KiCad pads are outlines, JLC pads are filled: the brush says which.
-    styles = {call[5][2] for call in rectangles}
-    assert len(styles) == 2
+        matches = [call for call in rectangles if call[1:5] == key]
+        assert matches
+        return matches[0]
+
+    for primitive in drawing.by_role("kicad_pad"):
+        brush = rect_for(primitive)[5]
+        assert brush[1] == module.role_colour("kicad_pad", True)
+        assert brush[2] is not None  # outline: a transparent brush
+    for primitive in drawing.by_role("jlc_pad"):
+        brush = rect_for(primitive)[5]
+        assert brush[1] == module.role_colour("jlc_pad", True)
+        assert brush[2] is None  # filled: a solid brush
     # Pin 1: a filled dot and a hollow ring.
     circles = dc.of("circle")
     assert len(circles) == 2
