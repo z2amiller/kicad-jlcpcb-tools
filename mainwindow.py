@@ -1739,7 +1739,7 @@ class JLCPCBTools(wx.Frame):
         if check is None:
             return None
         wanted = list(references)
-        check.refetch(wanted)
+        refetch_jlc_footprint_references(self, wanted, check)
         self._repaint_jlc_references(wanted)
         return check.detail(wanted[0]) if wanted else None
 
