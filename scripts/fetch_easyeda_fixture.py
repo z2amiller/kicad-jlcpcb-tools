@@ -10,7 +10,7 @@ Usage:
 Classic per-LCSC responses land in ``tests/fixtures/jlcfootprint/easyeda/<lcsc>.json``;
 classic per-uuid footprint responses in ``tests/fixtures/jlcfootprint/easyeda_uuid/
 uuid_<uuid>.json`` (``pro_<uuid>.json`` with ``--pro``).  The EasyEDA Pro host's
-answers, which the plugin fetches live (spec section 15), land in
+answers, which the plugin fetches live (spec 15), land in
 ``tests/fixtures/jlcfootprint/easyeda_pro/``: ``--batch`` records one
 ``searchByCodes`` answer as ``devices_<name>.json`` (the codes asked and the body,
 so misses are known), ``--footprint`` and ``--symbol`` record one document each

@@ -7,7 +7,8 @@ Reads the cases CSV (scripts/corner_case/cases.csv by default), loads each
 footprint from KiCad's library, places the parts on a grid at the requested
 rotation and side, sets the LCSC field and any pin functions, draws the outline
 and writes the board (scripts/corner_case/corner_case.kicad_pcb by default).
-Spec section 11; the M3 board is scripts/corner_case_m3/ (spec 16.6).
+This board is the resolver's gate (spec 11); the second one, for the resolver
+batch, is scripts/corner_case_m3/ (spec 16.6).
 """
 
 from __future__ import annotations
