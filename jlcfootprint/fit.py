@@ -214,10 +214,20 @@ def align(kicad: dict[str, Pad], jlc: dict[str, Pad]) -> Placement:
         {key: (pad.x, pad.y) for key, pad in jlc.items()},
     )
     common_keys = sorted(set(kicad.keys()) & set(jlc.keys()))
-    rms = angular_rms(
-        [(kicad[key].x, kicad[key].y) for key in common_keys],
-        [(jlc[key].x, jlc[key].y) for key in common_keys],
-        transform.rotation_deg,
+    # An underdetermined solve has no rotation worth checking the bearings against,
+    # and a non-finite pad coordinate (which is how the solver reaches that flag
+    # without raising) would make the RMS NaN.  The resolver copies the placement
+    # into the verdict before it refuses on ``is_underdetermined``, so that NaN
+    # would reach the stored ``angular_rms`` column; the assessment this call
+    # replaced reported 0.0 for exactly these transforms.
+    rms = (
+        0.0
+        if transform.is_underdetermined
+        else angular_rms(
+            [(kicad[key].x, kicad[key].y) for key in common_keys],
+            [(jlc[key].x, jlc[key].y) for key in common_keys],
+            transform.rotation_deg,
+        )
     )
     kx, ky = centroid(list(kicad.values()))
     jx, jy = centroid(list(jlc.values()))
