@@ -14,7 +14,7 @@ import math
 
 from .geometry import Pad, centroid, named_pads, pad_geom, rotate
 from .polarity import is_no_function, normalise_function
-from .quality import assess_quality
+from .quality import angular_rms
 from .records import SymbolPin
 from .solver import solve_transform
 
@@ -213,10 +213,11 @@ def align(kicad: dict[str, Pad], jlc: dict[str, Pad]) -> Placement:
         {key: (pad.x, pad.y) for key, pad in kicad.items()},
         {key: (pad.x, pad.y) for key, pad in jlc.items()},
     )
-    quality = assess_quality(
-        {key: pad_geom(pad) for key, pad in kicad.items()},
-        {key: pad_geom(pad) for key, pad in jlc.items()},
-        transform,
+    common_keys = sorted(set(kicad.keys()) & set(jlc.keys()))
+    rms = angular_rms(
+        [(kicad[key].x, kicad[key].y) for key in common_keys],
+        [(jlc[key].x, jlc[key].y) for key in common_keys],
+        transform.rotation_deg,
     )
     kx, ky = centroid(list(kicad.values()))
     jx, jy = centroid(list(jlc.values()))
@@ -228,7 +229,7 @@ def align(kicad: dict[str, Pad], jlc: dict[str, Pad]) -> Placement:
         is_mirrored=transform.is_mirrored,
         is_underdetermined=transform.is_underdetermined,
         residual=transform.residual,
-        angular_rms=quality.angular_rms_deg,
+        angular_rms=rms,
         matched=len(kicad),
     )
 

@@ -211,6 +211,20 @@ def test_two_pads_coincident_is_underdetermined():
     assert r.quality_flag == "underdetermined"
 
 
+def test_nan_coordinate_is_underdetermined_not_an_exception():
+    """A NaN pad coordinate must not raise out of the solver; it reports underdetermined instead.
+
+    Moved here from the deleted ``test_jlcfootprint_quality_extra.py`` (a solver
+    regression, not a quality-assessment one): it never called ``assess_quality``
+    and asserts only on ``TransformResult``.
+    """
+    r = solve_transform(
+        {"1": (float("nan"), 0.0), "2": (1.0, 0.0)}, {"1": (0.0, 0.0), "2": (1.0, 0.0)}
+    )
+    assert r.is_underdetermined
+    assert r.quality_flag == "underdetermined"
+
+
 def test_applied_transform_matches_b():
     """Sanity-check: applying the returned transform to A should yield B."""
     b = transform_set(QFP4, deg=45.0, dx=7.0, dy=-3.0)
