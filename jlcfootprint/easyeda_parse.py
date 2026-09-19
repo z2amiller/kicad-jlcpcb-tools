@@ -223,6 +223,44 @@ def _shape_list(container: dict) -> list[str]:
     ]
 
 
+def _classify_body(body: Any) -> tuple[str, str | None, Any]:
+    """Classify a response body the way all four parsers open.
+
+    Returns ``(status, error, result)``.  ``status`` is ``"none"`` or ``"error"``
+    for a body that is not a JSON object or carries ``success: false`` (a
+    not-found code is ``none``, any other code is ``error`` so the cache retries
+    it), with ``error`` the detail text; otherwise ``status`` is ``"ok"``,
+    ``error`` is None and ``result`` is ``body.get("result")`` exactly as the
+    body carried it, unvalidated.  What counts as a usable result differs by
+    endpoint (a non-empty dict for the three per-part parsers, a list of devices
+    for the batch lookup), so that check stays with each caller.
+    """
+    if not isinstance(body, dict):
+        return "error", "response is not a JSON object", None
+    if body.get("success") is False:
+        code = body.get("code")
+        detail = f"code {code}: {body.get('message', '')}".strip(": ")
+        return ("none" if code in _NOT_FOUND_CODES else "error"), detail, None
+    return "ok", None, body.get("result")
+
+
+def _classic_origin(head: dict, record: Any) -> tuple[float, float]:
+    """Return a classic footprint's origin from its head, in canvas units.
+
+    Shared by the per-LCSC response's packageDetail and the per-uuid endpoint's
+    older classic form, the only two places a classic footprint's head is read.
+    An unreadable x or y falls back to (0, 0) with a note on ``record`` rather
+    than raising.
+    """
+    try:
+        origin_x = float(head.get("x", 0.0) or 0.0)
+        origin_y = float(head.get("y", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        origin_x = origin_y = 0.0
+        record.error = "footprint origin unreadable; pads left in canvas coordinates"
+    return origin_x, origin_y
+
+
 def parse_component_response(body: Any, lcsc: str) -> ComponentRecord:
     """Classify and parse one per-LCSC response body.
 
@@ -233,17 +271,9 @@ def parse_component_response(body: Any, lcsc: str) -> ComponentRecord:
     parking it for a month.  Anything malformed is ``error`` and never raises.  A
     record without a puuid is also ``error``.
     """
-    if not isinstance(body, dict):
-        return ComponentRecord(
-            lcsc=lcsc, status="error", error="response is not a JSON object"
-        )
-    if body.get("success") is False:
-        code = body.get("code")
-        detail = f"code {code}: {body.get('message', '')}".strip(": ")
-        if code in _NOT_FOUND_CODES:
-            return ComponentRecord(lcsc=lcsc, status="none", error=detail)
-        return ComponentRecord(lcsc=lcsc, status="error", error=detail)
-    result = body.get("result")
+    status, error, result = _classify_body(body)
+    if status != "ok":
+        return ComponentRecord(lcsc=lcsc, status=status, error=error or "")
     if result in (None, {}, [], ""):
         return ComponentRecord(lcsc=lcsc, status="none")
     if not isinstance(result, dict):
@@ -277,14 +307,7 @@ def parse_component_response(body: Any, lcsc: str) -> ComponentRecord:
         )
         record.puuid = record.puuid or str(package.get("uuid") or "")
         record.footprint_shapes = _shape_list(package_data)
-        try:
-            origin_x = float(package_head.get("x", 0.0) or 0.0)
-            origin_y = float(package_head.get("y", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            origin_x = origin_y = 0.0
-            record.error = (
-                "footprint origin unreadable; pads left in canvas coordinates"
-            )
+        origin_x, origin_y = _classic_origin(package_head, record)
         record.pads, skipped_pads = parse_footprint_pads(
             record.footprint_shapes, origin_x, origin_y
         )
@@ -423,15 +446,11 @@ def parse_puuid_response(body: Any, puuid: str) -> FootprintRecord:
     Status rules follow :func:`parse_component_response`; malformed input never raises.
     """
     record = FootprintRecord(puuid=puuid)
-    if not isinstance(body, dict):
-        record.error = "response is not a JSON object"
+    status, error, result = _classify_body(body)
+    if status != "ok":
+        record.status = status
+        record.error = error or ""
         return record
-    if body.get("success") is False:
-        code = body.get("code")
-        record.error = f"code {code}: {body.get('message', '')}".strip(": ")
-        record.status = "none" if code in _NOT_FOUND_CODES else "error"
-        return record
-    result = body.get("result")
     if result in (None, {}, [], ""):
         record.status = "none"
         return record
@@ -450,14 +469,7 @@ def parse_puuid_response(body: Any, puuid: str) -> FootprintRecord:
             _dict(head.get("c_para")).get("package") or ""
         )
         record.footprint_shapes = _shape_list(package_data)
-        try:
-            origin_x = float(head.get("x", 0.0) or 0.0)
-            origin_y = float(head.get("y", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            origin_x = origin_y = 0.0
-            record.error = (
-                "footprint origin unreadable; pads left in canvas coordinates"
-            )
+        origin_x, origin_y = _classic_origin(head, record)
         record.pads, record.skipped_shapes = parse_footprint_pads(
             record.footprint_shapes, origin_x, origin_y
         )
@@ -509,14 +521,10 @@ def parse_devices_response(body: Any, codes: list[str]) -> DevicesResult:
     footprint uuid is a miss: there is nothing to align.  Never raises.
     """
     result = DevicesResult()
-    if not isinstance(body, dict):
-        result.error = "response is not a JSON object"
+    status, error, raw = _classify_body(body)
+    if status != "ok":
+        result.error = error or ""
         return result
-    if body.get("success") is False:
-        code = body.get("code")
-        result.error = f"code {code}: {body.get('message', '')}".strip(": ")
-        return result
-    raw = body.get("result")
     if raw is None:
         raw = []
     items = raw.get("lists", []) if isinstance(raw, dict) else raw
@@ -642,15 +650,11 @@ def parse_symbol_response(body: Any, uuid: str) -> SymbolRecord:
     the uuid names no usable symbol.
     """
     record = SymbolRecord(uuid=uuid)
-    if not isinstance(body, dict):
-        record.error = "response is not a JSON object"
+    status, error, result = _classify_body(body)
+    if status != "ok":
+        record.status = status
+        record.error = error or ""
         return record
-    if body.get("success") is False:
-        code = body.get("code")
-        record.error = f"code {code}: {body.get('message', '')}".strip(": ")
-        record.status = "none" if code in _NOT_FOUND_CODES else "error"
-        return record
-    result = body.get("result")
     if result in (None, {}, [], ""):
         record.status = "none"
         return record
