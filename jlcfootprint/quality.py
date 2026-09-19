@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import math
 from typing import Literal
 
+from .geometry import rotate
 from .solver import TransformResult
 
 # (x_centre, y_centre, width, height) in mm — all footprint-local.
@@ -63,10 +64,7 @@ class QualityAssessment:
 
 def _rotate_2d(x: float, y: float, theta_deg: float) -> tuple[float, float]:
     """Rotate point (x, y) by theta_deg degrees around the origin."""
-    theta = math.radians(theta_deg)
-    c = math.cos(theta)
-    s = math.sin(theta)
-    return (c * x - s * y, s * x + c * y)
+    return rotate(x, y, theta_deg)
 
 
 def _swap_wh_for_rotation(w: float, h: float, rotation_deg: int) -> tuple[float, float]:
