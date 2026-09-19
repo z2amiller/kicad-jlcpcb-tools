@@ -695,6 +695,56 @@ def test_the_package_name_is_read_from_the_cache_once_per_part(setup):
     assert "C0000" not in check._package_names
 
 
+def test_the_package_name_memo_reads_the_cache_only_once_per_part(setup):
+    """A second call for the same LCSC must not touch the cache again."""
+    check, _board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    calls: list = []
+    original_part = check.cache.part
+    check.cache.part = lambda lcsc: calls.append(lcsc) or original_part(lcsc)
+    assert check.package_name("C2132") == recorded("C2132").package_name
+    assert check.package_name("C2132") == recorded("C2132").package_name
+    assert calls == ["C2132"]
+
+
+def test_a_name_that_lands_after_an_empty_read_is_picked_up_next_time(setup):
+    """A part with no footprint yet has no name to remember; the next call rereads it."""
+    check, _board, _events, _messages, _client = setup
+    check.scan_board()  # Q1 (C2132) is only queued: nothing is cached yet.
+    assert check.package_name("C2132") == ""
+    assert "C2132" not in check._package_names
+    check.worker.run_pending()  # The footprint has landed now.
+    assert check.package_name("C2132") == recorded("C2132").package_name
+    assert check._package_names["C2132"] == recorded("C2132").package_name
+
+
+def test_the_three_actions_forget_the_memoised_package_name(setup):
+    """Re-fetch, Refresh board and Clear cache must each drop the memoised name too.
+
+    Priming the memo first is what test_clearing_the_cache_empties_it_but_keeps_the
+    _schema missed: with nothing memoised beforehand, dropping the memo's own
+    ``.pop``/``.clear()`` call has nothing to undo and the test cannot see it.
+    """
+    check, _board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+
+    assert check.package_name("C2132") == recorded("C2132").package_name
+    check.refetch(["Q1"])
+    assert check.package_name("C2132") == ""  # not the stale memoised name
+
+    check.worker.run_pending()
+    assert check.package_name("C2132") == recorded("C2132").package_name
+    check.refresh_board()
+    assert check.package_name("C2132") == ""
+
+    check.worker.run_pending()
+    assert check.package_name("C2132") == recorded("C2132").package_name
+    check.clear_cache()
+    assert check.package_name("C2132") == ""
+
+
 # ---------------------------------------------------------------------------
 # The detail view, the override and the re-fetch (spec 16.4, 16.5)
 # ---------------------------------------------------------------------------
