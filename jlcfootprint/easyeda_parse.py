@@ -3,11 +3,11 @@
 The classic per-LCSC response carries two drawings.  ``result.dataStr`` is the
 schematic symbol, per part, whose ``P~`` shapes carry pin numbers and optional
 labels such as ``A`` and ``K``.  ``result.packageDetail.dataStr`` is the
-footprint, per puuid, whose ``PAD~`` shapes carry the pad geometry.  Spec
-section 2.  The EasyEDA Pro host answers the batch device lookup with one
-record per known part (symbol uuid, footprint uuid, package name) and the
-per-uuid endpoint with one document, a footprint or a symbol, in the Pro text
-form (newline-delimited JSON arrays).  Spec section 15.
+footprint, per puuid, whose ``PAD~`` shapes carry the pad geometry (spec 2).
+The EasyEDA Pro host answers the batch device lookup with one record per known
+part (symbol uuid, footprint uuid, package name) and the per-uuid endpoint with
+one document, a footprint or a symbol, in the Pro text form (newline-delimited
+JSON arrays) (spec 15).
 """
 
 from __future__ import annotations
