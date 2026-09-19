@@ -1,4 +1,4 @@
-"""Validate the resolver against a board and recorded EasyEDA responses (spec section 11).
+"""Validate the resolver against a board and recorded EasyEDA responses (spec 11).
 
 Usage:
     python3 scripts/validate_board.py BOARD.kicad_pcb [--fixtures DIR] [--truth truth.csv]
@@ -8,7 +8,7 @@ Without --truth it prints one verdict per part that has an LCSC field.  With
 --truth it compares the CPL rotation the resolver would emit against the
 rotation JLC's preview settled on, and exits 1 on any disagreement.  This is
 the M0 gate.  With --pro-fixtures the parts are read the way the plugin fetches
-them live (spec section 15): the recorded batch answers ``devices_*.json`` give
+them live (spec 15): the recorded batch answers ``devices_*.json`` give
 each part's uuids, ``footprint_<uuid>.json`` its pads and ``symbol_<uuid>.json``
 its pins; the classic fixtures are not consulted.
 
@@ -425,7 +425,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--flip-y",
         action="store_true",
-        help="flip EasyEDA Y before matching (spec section 6 calibration)",
+        help="flip EasyEDA Y before matching, which the gate calibrates (spec 6)",
     )
     parser.add_argument(
         "--report",

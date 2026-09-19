@@ -9,8 +9,8 @@ For every footprint the adapter's pads (footprint frame, bottom parts un-mirrore
 pad rotation modulo 180) and its courtyard box must equal the validator's file pads
 and box and give the same verdict key; where a recorded EasyEDA response exists the
 resolver must return the same status, fit, rotation and package origin from both,
-the last to 1 nanometre (spec 17.6: the origin is read out of the same frame the
-pads are).  ``--pro-fixtures`` reads the parts from the Pro recordings instead, which
+the last to 1 nanometre, because the origin is read out of the same frame the pads
+are (spec 17.6).  ``--pro-fixtures`` reads the parts from the Pro recordings instead, which
 is how the boards whose parts have no classic fixture reach the resolver.  Exits 1 on
 any difference.  This is how the adapter's frame was confirmed on 2026-09-16 (47 of 47
 parts) and its courtyard reader on 2026-09-17.
