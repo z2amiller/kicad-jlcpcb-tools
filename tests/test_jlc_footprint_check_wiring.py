@@ -389,6 +389,13 @@ def test_clearing_the_cache_confirms_and_deletes_every_row(actions, caplog):
         in (actions.answers["asked"][0])
     )
     assert "seed file" in actions.answers["asked"][0]
+    parts, _seconds = actions.check.board_estimate()
+    assert parts == 2  # the confirmation's own count matches the board: C2132 and C77
+    assert (
+        "This board's parts are fetched again: 2 part(s), about 6 s. Rotation "
+        "overrides are kept, and a seed file can be imported again from Settings."
+        in actions.answers["asked"][0]
+    )
     assert actions.check.cache.counts() == {"parts": 1, "packages": 1}
     actions.answers["yes"] = True
     with caplog.at_level(logging.INFO):
