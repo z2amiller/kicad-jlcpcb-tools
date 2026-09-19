@@ -677,3 +677,39 @@ def parse_symbol_response(body: Any, uuid: str) -> SymbolRecord:
         return record
     record.status = "ok"
     return record
+
+
+def assemble_record(
+    lcsc: str,
+    hit: DeviceHit,
+    footprint: FootprintRecord,
+    symbol: SymbolRecord | None,
+) -> ComponentRecord:
+    """Join a batch hit and its footprint and symbol documents into one record.
+
+    This is the join ``validate_board.load_pro_record`` and
+    ``tests/jlcfootprint_support.pro_record`` build by hand from the Pro
+    fixtures, the way the plugin's live fetch builds it from the network.
+    ``hit`` names the uuids and the batch lookup's package name; ``footprint``
+    is the parsed per-uuid footprint document, whatever its own status (a
+    caller that only wants an ``ok`` part checks that itself, before or after
+    calling this); ``symbol`` is the parsed per-uuid symbol document, or None
+    when the part names no symbol uuid or none was fetched for it. A symbol
+    whose own status is not ``ok`` leaves the record without pins, same as no
+    symbol at all.
+    """
+    record = ComponentRecord(
+        lcsc=lcsc,
+        status=footprint.status,
+        symbol_uuid=hit.symbol_uuid,
+        puuid=hit.puuid,
+        package_name=footprint.package_name or hit.package_name,
+        pads=footprint.pads,
+        footprint_shapes=footprint.footprint_shapes,
+        footprint_source="puuid-endpoint",
+        footprint_origin=footprint.footprint_origin,
+    )
+    if symbol is not None and symbol.status == "ok":
+        record.symbol_pins = symbol.pins
+        record.symbol_shapes = symbol.shapes
+    return record

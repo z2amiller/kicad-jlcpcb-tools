@@ -42,6 +42,7 @@ from jlcfootprint.drawing import drawing_marks  # noqa: E402
 from jlcfootprint.easyeda_parse import (  # noqa: E402
     ComponentRecord,
     DeviceHit,
+    assemble_record,
     parse_component_response,
     parse_devices_response,
     parse_puuid_response,
@@ -117,14 +118,6 @@ def load_pro_record(
     hit = index[lcsc]
     if hit is None:
         return ComponentRecord(lcsc=lcsc, status="none")
-    record = ComponentRecord(
-        lcsc=lcsc,
-        status="ok",
-        symbol_uuid=hit.symbol_uuid,
-        puuid=hit.puuid,
-        package_name=hit.package_name,
-        footprint_source="puuid-endpoint",
-    )
     footprint_path = pro_dir / f"footprint_{hit.puuid}.json"
     if not footprint_path.exists():
         return None
@@ -133,10 +126,7 @@ def load_pro_record(
     )
     if footprint.status != "ok":
         return ComponentRecord(lcsc=lcsc, status="none")
-    record.package_name = footprint.package_name or hit.package_name
-    record.pads = footprint.pads
-    record.footprint_shapes = footprint.footprint_shapes
-    record.footprint_origin = footprint.footprint_origin
+    symbol = None
     if hit.symbol_uuid:
         symbol_path = pro_dir / f"symbol_{hit.symbol_uuid}.json"
         if not symbol_path.exists():
@@ -144,10 +134,7 @@ def load_pro_record(
         symbol = parse_symbol_response(
             json.loads(symbol_path.read_text(encoding="utf-8")), hit.symbol_uuid
         )
-        if symbol.status == "ok":
-            record.symbol_pins = symbol.pins
-            record.symbol_shapes = symbol.shapes
-    return record
+    return assemble_record(lcsc, hit, footprint, symbol)
 
 
 def evaluate_footprints(

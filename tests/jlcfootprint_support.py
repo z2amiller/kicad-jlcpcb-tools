@@ -17,6 +17,7 @@ from jlcfootprint.easyeda_parse import (
     DevicesResult,
     FootprintRecord,
     SymbolRecord,
+    assemble_record,
     parse_component_response,
     parse_devices_response,
     parse_puuid_response,
@@ -147,25 +148,12 @@ def pro_record(lcsc: str) -> ComponentRecord:
     footprint = parse_puuid_response(
         recorded_document("footprint", hit.puuid), hit.puuid
     )
-    record = ComponentRecord(
-        lcsc=lcsc,
-        status=footprint.status,
-        symbol_uuid=hit.symbol_uuid,
-        puuid=hit.puuid,
-        package_name=footprint.package_name or hit.package_name,
-        pads=footprint.pads,
-        footprint_shapes=footprint.footprint_shapes,
-        footprint_source="puuid-endpoint",
-        footprint_origin=footprint.footprint_origin,
-    )
+    symbol = None
     if hit.symbol_uuid:
         symbol = parse_symbol_response(
             recorded_document("symbol", hit.symbol_uuid), hit.symbol_uuid
         )
-        if symbol.status == "ok":
-            record.symbol_pins = symbol.pins
-            record.symbol_shapes = symbol.shapes
-    return record
+    return assemble_record(lcsc, hit, footprint, symbol)
 
 
 # ---------------------------------------------------------------------------
