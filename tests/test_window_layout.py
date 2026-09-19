@@ -216,7 +216,9 @@ class _Dialog(_TopLevelWindow):
         self.IsModal.return_value = False
 
 
-def _column(model_column: int, width: int, title: str = "Column") -> MagicMock:
+def _column(
+    model_column: int, width: int, title: str = "Column", *, resizeable: bool = True
+) -> MagicMock:
     column = MagicMock()
     column.GetModelColumn.return_value = model_column
     column.GetTitle.return_value = title
@@ -227,6 +229,7 @@ def _column(model_column: int, width: int, title: str = "Column") -> MagicMock:
     column.SetWidth.side_effect = lambda value: setattr(
         column, "specified_width", value
     )
+    column.IsResizeable.return_value = resizeable
     return column
 
 
@@ -275,9 +278,23 @@ def _control(
     control.AppendColumn.side_effect = append
 
     def append_text(
-        label: str, model_column: int, *, width: int, **_kwargs: Any
+        label: str,
+        model_column: int,
+        *,
+        width: int,
+        flags: Optional[int] = None,
+        **_kwargs: Any,
     ) -> MagicMock:
-        column = _column(model_column, width, label)
+        # wx's own default (an omitted ``flags``) is DATAVIEW_COL_RESIZABLE; an
+        # explicit ``flags=0``, as the JLC and Std columns pass, clears that bit.
+        resizeable_bit = _wx["wx.dataview"].DATAVIEW_COL_RESIZABLE
+        effective_flags = resizeable_bit if flags is None else flags
+        column = _column(
+            model_column,
+            width,
+            label,
+            resizeable=bool(effective_flags & resizeable_bit),
+        )
         control.AppendColumn(column)
         return column
 

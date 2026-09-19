@@ -208,6 +208,10 @@ def test_the_view_column_sits_between_type_and_std_with_std_s_width(monkeypatch)
     assert jlc.sortable is True
     assert "JLC_COL" not in main.FOOTPRINT_COLUMN_KEYS.values()
     assert window.jlc_column is jlc
+    # Both columns pass flags=0, mirroring upstream's Std: neither can be resized
+    # or reordered from the header.
+    assert jlc.IsResizeable() is False
+    assert standard.IsResizeable() is False
 
 
 def _enabled(settings: dict) -> bool:
