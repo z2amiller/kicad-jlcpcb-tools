@@ -15,9 +15,10 @@ from .part_type_tooltip import create_type_fee_popup
 class TypeCellTooltip:
     """Coordinate delayed Type help with per-column and assembly information for each row.
 
-    ``column_help`` maps a model column to its own help for the hovered row (spec
-    16.3: the JLC column's cell explains that part's verdict); every other column
-    falls back to ``get_row_help``, and the Type column keeps its fee popup.
+    ``column_help`` maps a model column to its own help for the hovered row, which
+    is how the JLC column's cell explains that part's verdict (spec 16.3); every
+    other column falls back to ``get_row_help``, and the Type column keeps its fee
+    popup.
     """
 
     def __init__(
