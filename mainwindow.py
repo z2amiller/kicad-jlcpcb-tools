@@ -85,13 +85,11 @@ from .helpers import (
 from .jlc_footprint_detail import JlcFootprintDetailDialog
 from .jlc_footprint_check import (
     clear_cache as clear_jlc_footprint_cache,
+    create_footprint_check,
+    is_footprint_check_enabled,
     recheck_board as recheck_jlc_footprint_board,
     refetch_references as refetch_jlc_footprint_references,
     refresh_board_data as refresh_jlc_footprint_board_data,
-)
-from .jlc_footprint_check import (
-    create_footprint_check,
-    is_footprint_check_enabled,
     show_generate_summary,
     wait_for_pending_fetches,
 )
