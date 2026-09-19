@@ -18,14 +18,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
-from typing import TYPE_CHECKING
 
 from .fit import Placement, package_origin
 from .geometry import Pad, named_pads, pad_geom
+from .model import PartDetail
 from .polarity import terminal_of
-
-if TYPE_CHECKING:  # pragma: no cover - annotations only
-    from .controller import PartDetail
 
 # What the canvas can show; the dialog's three checkboxes switch these.
 KICAD = "kicad"
