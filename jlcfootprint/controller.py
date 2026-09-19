@@ -723,11 +723,6 @@ class FootprintCheck:
         for lcsc in lcscs:
             self.cache.forget(lcsc)
             self._package_names.pop(lcsc, None)
-        logger.info(
-            "jlcfootprint: re-fetching %d part(s): %s",
-            len(lcscs),
-            ", ".join(lcscs) or "none",
-        )
         return self.scan_board(wanted)
 
     def recheck_board(self) -> int:
@@ -750,7 +745,6 @@ class FootprintCheck:
                     continue
                 self._resolve_and_store(part, cached)
             checked += 1
-        logger.info("jlcfootprint: re-checked %d part(s)", checked)
         return checked
 
     def refresh_board(self) -> ScanSummary:
@@ -763,7 +757,6 @@ class FootprintCheck:
         for lcsc in lcscs:
             self.cache.forget(lcsc)
             self._package_names.pop(lcsc, None)
-        logger.info("jlcfootprint: refreshing %d part(s) from EasyEDA", len(lcscs))
         return self.scan_board()
 
     def clear_cache(self) -> ScanSummary:
@@ -773,14 +766,8 @@ class FootprintCheck:
         and their overrides are the project's and are not touched here beyond the
         rescan's pending marks.
         """
-        counts = self.cache.counts()
         self.cache.clear()
         self._package_names.clear()
-        logger.info(
-            "jlcfootprint: cleared the cache (%d part(s), %d footprint(s))",
-            counts["parts"],
-            counts["packages"],
-        )
         return self.scan_board()
 
     def board_estimate(self) -> tuple[int, float]:

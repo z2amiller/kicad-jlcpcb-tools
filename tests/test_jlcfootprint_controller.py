@@ -804,7 +804,7 @@ def test_two_placements_of_one_part_share_the_verdict_and_the_repaint(setup):
     assert check.references_sharing_verdict("nope") == []
 
 
-def test_refetching_forgets_the_cached_rows_and_queues_the_parts_again(setup, caplog):
+def test_refetching_forgets_the_cached_rows_and_queues_the_parts_again(setup):
     """Spec 16.5: the cache row goes, the verdict is pending again, the override stays."""
     check, board, _events, _messages, _client = setup
     check.scan_board()
@@ -812,9 +812,7 @@ def test_refetching_forgets_the_cached_rows_and_queues_the_parts_again(setup, ca
     part = board["parts"][0]
     check.set_override("Q1", 270, "keep me")
     assert check.cache.status("C2132") == "ok"
-    with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
-        summary = check.refetch(["Q1"])
-    assert "re-fetching 1 part(s): C2132" in caplog.text
+    summary = check.refetch(["Q1"])
     assert check.cache.status("C2132") is None
     assert summary.enqueued == 1
     stored = check.verdicts.get("C2132", part.footprint_hash)
@@ -851,18 +849,14 @@ def test_the_board_estimate_is_the_number_the_queue_itself_quotes(setup):
     assert (parts, seconds) == (summary.enqueued, summary.estimate_s)
 
 
-def test_rechecking_the_board_resolves_from_the_cache_without_any_request(
-    setup, caplog
-):
+def test_rechecking_the_board_resolves_from_the_cache_without_any_request(setup):
     """Spec 16.5: the resolver runs again on cached data, no lookup, no document."""
     check, board, _events, _messages, client = setup
     check.scan_board()
     check.worker.run_pending()
     calls = (len(client.lookups), len(client.documents))
     check.verdicts.delete("C2132", board["parts"][0].footprint_hash)
-    with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
-        assert check.recheck_board() == 2
-    assert "re-checked 2 part(s)" in caplog.text
+    assert check.recheck_board() == 2
     assert (len(client.lookups), len(client.documents)) == calls
     assert check.verdicts.get("C2132", board["parts"][0].footprint_hash) is not None
     # A part the cache does not know is skipped rather than fetched.
@@ -882,30 +876,26 @@ def test_rechecking_skips_a_part_whose_cache_row_is_incomplete(setup):
     assert check.verdicts.get("C2132", part.footprint_hash).status == PENDING
 
 
-def test_refreshing_the_board_forgets_every_row_and_rescans(setup, caplog):
+def test_refreshing_the_board_forgets_every_row_and_rescans(setup):
     """Spec 16.5: every LCSC on the board is fetched again, overrides kept."""
     check, board, _events, _messages, _client = setup
     check.scan_board()
     check.worker.run_pending()
     check.set_override("Q1", 90, "keep me")
-    with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
-        summary = check.refresh_board()
-    assert "refreshing 2 part(s) from EasyEDA" in caplog.text
+    summary = check.refresh_board()
     assert summary.enqueued == 2
     assert check.cache.status("C2132") is None and check.cache.status("C2286") is None
     row = check.verdicts.get("C2132", board["parts"][0].footprint_hash)
     assert (row.status, row.override_rotation) == (PENDING, 90)
 
 
-def test_clearing_the_cache_empties_it_but_keeps_the_schema(setup, caplog):
+def test_clearing_the_cache_empties_it_but_keeps_the_schema(setup):
     """Spec 16.5: every cache row goes, the board is rescanned, a seed can refill it."""
     check, _board, _events, _messages, _client = setup
     check.scan_board()
     check.worker.run_pending()
     assert check.cache.counts()["parts"] >= 2
-    with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
-        summary = check.clear_cache()
-    assert "cleared the cache" in caplog.text
+    summary = check.clear_cache()
     assert check.cache.counts() == {"parts": 0, "packages": 0}
     assert summary.enqueued == 2
     assert check.package_name("C2132") == ""
