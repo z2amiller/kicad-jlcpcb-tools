@@ -20,9 +20,9 @@ from .model import Decision, FetchState, PartDetail
 # decimals the line prints can tell apart.
 ORIGIN_EPSILON_MM = 0.005
 
-# The column's states, worst first: this is also the ascending sort order of
-# spec 16.3 (a misfit, a warning, no data, paused, queued, a derived green, an
-# override, then the parts the check says nothing about).
+# The column's states, worst first, which is also the column's ascending sort
+# order: a misfit, a warning, no data, paused, queued, a derived green, an
+# override, then the parts the check says nothing about (spec 16.3).
 BLANK = ""
 RED = "red"
 YELLOW = "yellow"
@@ -100,7 +100,7 @@ def glyph(state: str) -> str:
 
 
 def jlc_state(decision: Decision | None, fetch: FetchState | None = None) -> str:
-    """Return the JLC column's state for one part (spec 16.3's table).
+    """Return the JLC column's state for one part, which picks its glyph (spec 16.3).
 
     ``decision`` is :class:`jlcfootprint.controller.Decision` (None for a part the
     check has not seen) and ``fetch`` :class:`jlcfootprint.controller.FetchState`,
@@ -170,7 +170,7 @@ def verdict_text(
     kicad_footprint: str = "",
     jlc_package: str = "",
 ) -> str:
-    """Return one to three sentences of help for a JLC cell (spec 16.3's list).
+    """Return one to three sentences of help for a JLC cell's hover (spec 16.3).
 
     Composed from the stored verdict on the decision, the fetch queue's state and
     the two package names; nothing here reads a database or touches wx.  The

@@ -16,9 +16,9 @@ from typing import NamedTuple
 EASYEDA_UNIT_MM = 0.254
 
 # Whether EasyEDA's Y axis must be flipped to match KiCad's Y-down frame for the
-# classic per-LCSC response format.  Spec section 6: fixed by the validation gate,
-# not assumed; the shadow run reproduced SOT-23 (180) and SOIC-8 -BL (90) against
-# recorded responses with no flip, and Task 12 confirms it against JLC's preview.
+# classic per-LCSC response format.  Settled by the validation gate against JLC's
+# own preview rather than assumed: with no flip, the recorded responses reproduce
+# SOT-23 at 180 and SOIC-8 -BL at 90 (spec 6).
 # (EasyEDA Pro footprint text, used by the crawl and the per-uuid endpoint, is in
 # mils with Y up; its parser flips.)
 FLIP_EASYEDA_Y = False
@@ -47,7 +47,7 @@ class Pad(NamedTuple):
 
 
 def named_pads(pads: list[Pad]) -> list[Pad]:
-    """Return the pads that carry a name (spec section 7.1).
+    """Return the pads that carry a name (spec 7.1).
 
     Unnamed pads are NPTH holes and paste-only copper.  Names are matched as
     strings by the resolver, so lettered connector pads (A1, B12) align too.
@@ -153,7 +153,7 @@ def pad_box_centre(pads: list[Pad]) -> tuple[float, float] | None:
     what upstream's ``Fabrication.get_position`` merges in board coordinates, so
     this is the position the CPL emits today expressed in the footprint frame.
     Unnamed pads (NPTH holes, paste-only copper) are left out, which is where the
-    two can differ (bead kicad-b4be).
+    two can differ.
     """
     boxes = [pad_geom(pad) for pad in named_pads(pads)]
     if not boxes:

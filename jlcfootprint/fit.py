@@ -1,4 +1,4 @@
-"""Pad pairing, placement and fit grading (spec section 7.2).
+"""Pad pairing, placement and fit grading (spec 7.2).
 
 Pure geometry: pair pads by name, solve the placement, transform KiCad pads into
 JLC's frame, grade how each JLC pad lands on KiCad copper, and align by shape
@@ -324,9 +324,11 @@ def assess_fit(
     """Grade the fit: every JLC pad must land on KiCad copper after the placement.
 
     Matched pads pair by key, and each is graded against every KiCad pad in
-    ``kicad_all`` that shares its partner's number (spec 16.6: a group is one
-    terminal).  Each remaining JLC pad (a tab numbered differently, a merged
-    connector pin) pairs with the nearest transformed KiCad pad, which may be
+    ``kicad_all`` that shares its partner's number, because every KiCad pad
+    carrying one number is one terminal: a DPAK's tab and the stub of its cut
+    lead are both pad 2 and are graded together (spec 16.6).  Each remaining JLC
+    pad (a tab numbered differently, a merged connector pin) pairs with the
+    nearest transformed KiCad pad, which may be
     reused; extra KiCad copper is never a misfit.  An unmatched JLC pad that lands on
     nothing is a misfit when it sits at the periphery (a pin the footprint lacks) but
     only a warning when it contains the JLC pad centroid (an exposed pad the footprint

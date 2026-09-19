@@ -20,7 +20,7 @@ from .verdicts import StoredVerdict
 
 @dataclass
 class FetchState:
-    """Where one part stands in the fetch queue (spec 16.3's ◷ and ‖ rows).
+    """Where one part stands in the fetch queue: the column's clock and pause rows (spec 16.3).
 
     ``state`` is ``idle`` (nothing outstanding), ``queued``, ``fetching`` (this
     part's own request is in flight, ``kind`` says which document), ``paused`` (a
@@ -38,7 +38,7 @@ class FetchState:
 
 @dataclass
 class Decision:
-    """What the CPL emits for one reference (spec section 8)."""
+    """What the CPL emits for one reference (spec 8)."""
 
     reference: str
     lcsc: str
@@ -49,7 +49,8 @@ class Decision:
     fit: str | None = None
     note: str = ""
     pending: bool = False
-    body_excess: float | None = None  # the body-size caveat in mm (spec 16.6 item 4)
+    # How far the JLC body overhangs the KiCad courtyard, in mm (spec 16.6).
+    body_excess: float | None = None
     # JLC's package origin in the KiCad footprint frame (spec 17.2), None without one;
     # the CPL places the part there only while ``jlcfootprint.exact_origin`` is on.
     origin: tuple | None = None

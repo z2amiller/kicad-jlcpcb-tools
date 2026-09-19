@@ -1,4 +1,4 @@
-"""The generate-time rotation summary (spec section 8, order per 16.6): four groups.
+"""The generate-time rotation summary: four groups, worst first (spec 8).
 
 "Does not fit" first, then the applied rotations with caveated fits marked, then
 the pin-1 marker warnings, then the unresolved parts.  Pure formatting over what
@@ -31,10 +31,11 @@ class CplRotation:
     note: str = ""
     pending: bool = False
     legacy_correction: int | None = None  # what the correction rules would have applied
-    body_excess: float | None = None  # the body-size caveat in mm (spec 16.6 item 4)
-    # Where Mid X/Y came from: 'origin' (JLC's package origin, spec 17.4) or
-    # 'pad-box' (upstream's pad bounding-box centre, which is every part's when
-    # ``jlcfootprint.exact_origin`` is off).
+    # How far the JLC body overhangs the KiCad courtyard, in mm (spec 16.6).
+    body_excess: float | None = None
+    # Where Mid X/Y came from: 'origin' is JLC's package origin and 'pad-box' is
+    # upstream's pad bounding-box centre, which is every part's while
+    # ``jlcfootprint.exact_origin`` is off (spec 17.4).
     position_source: str = "pad-box"
 
 
@@ -121,8 +122,8 @@ def format_summary(summary: GenerateSummary) -> str:
     lines: list[str] = []
     differs = {id(row) for row in summary.differs_from_legacy}
     if summary.exact_origin:
-        # Spec 17.4: with the setting on, say how the positions were split before
-        # anything else, because that is what changed about this CPL.
+        # With the setting on, say how the positions were split before anything
+        # else, because that is what changed about this CPL (spec 17.4).
         lines.append(
             f"Positions: {len(summary.at_origin)} at JLC's package origin, "
             f"{len(summary.at_pad_box)} at the pad-box centre"
