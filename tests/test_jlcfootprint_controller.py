@@ -743,6 +743,18 @@ def test_the_detail_of_a_part_with_no_data_still_describes_the_footprint(setup):
     bare = check.detail("R1")
     assert (bare.lcsc, bare.jlc_pads, bare.stored) == ("", [], None)
     assert bare.kicad_pads == []
+    # A row with a puuid but no footprint fetched yet ("ok" but no pads) is not
+    # resolved either: the `detail` guard keeps it out of the resolver, unlike the
+    # "pending" case above where the cache holds no row for the part at all.
+    check.cache.store_lookup("C2132", "sym-C2132", "puuid-not-fetched", 1)
+    calls: list = []
+    original_resolve = check.resolve_part
+    check.resolve_part = lambda *args, **kwargs: (
+        calls.append(1) or original_resolve(*args, **kwargs)
+    )
+    incomplete = check.detail("Q1")
+    assert incomplete.verdict is None
+    assert calls == []
 
 
 def test_the_detail_rereads_the_board_when_asked(setup):
