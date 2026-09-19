@@ -22,7 +22,7 @@ def resolve_record(
     polarity_source: str = "symbol",
     kicad_courtyard: tuple[float, float, float, float] | None = None,
 ) -> Verdict:
-    """Resolve one footprint against a cached record (spec section 7).
+    """Resolve one footprint against a cached record (spec 7).
 
     Builds the two arguments every caller assembled from a ``ComponentRecord`` by
     hand: the raw pads converted to millimetres and the drawings' polarity marks

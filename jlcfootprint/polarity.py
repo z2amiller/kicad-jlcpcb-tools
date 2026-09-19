@@ -1,4 +1,4 @@
-"""Terminal vocabulary for polarized two-pad parts (spec section 7.3).
+"""Terminal vocabulary for polarized two-pad parts (spec 7.3).
 
 Which pad is the cathode or the positive terminal, on the KiCad side from the
 schematic's pin functions and on the EasyEDA side from the footprint name's
@@ -30,7 +30,7 @@ _NEGATIVE_TOKENS = frozenset({"-", "NEG", "NEGATIVE"})
 _CAP_LABELS = frozenset({"+", "-", "POS", "NEG"})
 _DIODE_LABELS = (PIN1_CATHODE_LABELS | PIN1_ANODE_LABELS) - _CAP_LABELS
 # Pin functions that say "no connection" rather than naming a signal: they carry no
-# terminal and do not disqualify the other pads' functions (kicad-x2ib).
+# terminal and do not disqualify the other pads' functions.
 _NO_FUNCTION_TEXTS = frozenset({"NC", "N/C", "N.C.", "~", "DNC", "NP", "NU"})
 # The molded-chip tantalum drawings (``CAP-SMD_L3.2-W1.6-RD``), as against the cans
 # (``CAP-SMD_BD5.0-L5.3``): the family whose FD/RD token the crawl found least
@@ -128,7 +128,7 @@ def part_kind(
     kicad_pads: list[Pad],
     symbol_pins: list[SymbolPin],
 ) -> str:
-    """Return ``diode``, ``polar_cap`` or ``other`` (spec section 7.1).
+    """Return ``diode``, ``polar_cap`` or ``other`` (spec 7.1).
 
     Evidence is weighed from the most to the least reliable: the KiCad footprint's name
     and its pads' functions, then EasyEDA's package family, then the symbol's pin

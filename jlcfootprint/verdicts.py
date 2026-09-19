@@ -1,4 +1,4 @@
-"""Per-project verdict store: table ``footprint_verdict`` in ``project.db`` (spec section 5.3).
+"""Per-project verdict store: table ``footprint_verdict`` in ``project.db`` (spec 5.3).
 
 A verdict is keyed on the part and the KiCad pad geometry, ``(lcsc, footprint_hash)``,
 so editing a footprint orphans its verdict and its override together, by design.
@@ -71,7 +71,8 @@ class StoredVerdict:
     overlap_mean: float | None = None
     angular_rms: float | None = None
     residual_mm: float | None = None
-    body_excess_mm: float | None = None  # spec 16.6 item 4: the body-size caveat
+    # How far the JLC body overhangs the KiCad courtyard, in mm (spec 16.6).
+    body_excess_mm: float | None = None
     # JLC's package origin in the KiCad footprint frame (spec 17.3), NULL without one.
     origin_dx_mm: float | None = None
     origin_dy_mm: float | None = None
@@ -91,7 +92,7 @@ class StoredVerdict:
 
     @property
     def emitted_rotation(self) -> int | None:
-        """Return the correction the CPL applies (spec section 8), None for the raw angle."""
+        """Return the correction the CPL applies (spec 8), None for the raw angle."""
         if self.override_rotation is not None:
             return self.override_rotation
         if self.source == "derived":
