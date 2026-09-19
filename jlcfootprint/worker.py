@@ -1,4 +1,4 @@
-"""Background fetch worker: one daemon thread, two paced queues and a breaker (spec section 15).
+"""Background fetch worker: one daemon thread, two paced queues and a breaker (spec 15).
 
 The lookup queue holds LCSC codes and is served in chunks of up to 200 through the
 batch endpoint; the document queue holds footprint and symbol uuids, footprints
@@ -127,7 +127,7 @@ class Buckets:
         clock: Callable[[], float] = time.monotonic,
         jitter: Callable[[], float] = random.random,
     ) -> Buckets:
-        """Return the buckets with the paces spec section 15.3 gives."""
+        """Return the two queues' buckets at the paces one session may fetch at (spec 15.3)."""
         return cls(
             lookups=TokenBucket(
                 clock=clock,

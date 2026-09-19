@@ -1,4 +1,4 @@
-"""EasyEDA Pro client: the batch device lookup and per-uuid documents (spec section 15).
+"""EasyEDA Pro client: the batch device lookup and per-uuid documents (spec 15).
 
 Three calls, all on ``pro.easyeda.com``.  ``search_by_codes`` posts up to 200 LCSC
 codes and gets each known part's symbol uuid, footprint uuid and package name;
