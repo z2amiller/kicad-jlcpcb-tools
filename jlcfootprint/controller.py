@@ -30,10 +30,15 @@ from .easyeda_parse import ComponentRecord
 from .geometry import easyeda_pads_to_mm
 from .kicad_adapter import BoardPart
 from .model import Decision, FetchState, PartDetail
-from .presentation import describe_seconds, jlc_state, verdict_text
+from .presentation import describe_seconds
 from .resolver import Verdict, resolve
 from .verdicts import PENDING, StoredVerdict, VerdictStore
 from .worker import FOOTPRINT, LOOKUP, SYMBOL, Buckets, FetchWorker, estimate_seconds
+
+# Decision, FetchState and PartDetail are defined in .model; re-exported here so
+# `from jlcfootprint.controller import Decision` (etc.) keeps working. PartDetail
+# is otherwise unused in this module now that presentation.part_detail builds it.
+__all__ = ["Decision", "FetchState", "PartDetail"]
 
 logger = logging.getLogger(__name__)
 
@@ -500,59 +505,6 @@ class FootprintCheck:
                 self._package_names[lcsc] = name
         return name
 
-    def glyph_state(self, reference: str) -> str:
-        """Return the JLC column's state for one reference ("" when it has no part)."""
-        part = self.parts.get(reference)
-        if part is None:
-            return ""
-        return jlc_state(self.decision(part), self.fetch_state(part.lcsc))
-
-    def detail(self, reference: str, reread: bool = False) -> PartDetail | None:
-        """Return everything the detail dialog shows for one reference (spec 16.4).
-
-        ``reread`` re-reads the board first, which the dialog does on open so an edit
-        made since the last scan is what is drawn.  None when the reference is not on
-        the board at all.
-        """
-        if reread:
-            for part in self.read_board():
-                self.parts[part.reference] = part
-        part = self.parts.get(reference)
-        if part is None:
-            return None
-        decision = self.decision(part)
-        detail = PartDetail(
-            reference=part.reference,
-            lcsc=part.lcsc,
-            kicad_footprint=part.footprint_name,
-            kicad_pads=list(part.pads),
-            courtyard=part.courtyard,
-            is_bottom=part.is_bottom,
-            placed_rotation=part.placed_rotation,
-            stored=decision.verdict,
-            decision=decision,
-            fetch=self.fetch_state(part.lcsc),
-        )
-        if not part.lcsc:
-            return detail
-        cached = self.cache.part(part.lcsc)
-        if cached is None:
-            return detail
-        record = cached.record
-        detail.package_name = record.package_name
-        detail.puuid = record.puuid
-        detail.jlc_pads = easyeda_pads_to_mm(record.pads)
-        detail.symbol_pins = list(record.symbol_pins)
-        detail.marks = drawing_marks(
-            record.symbol_shapes, record.footprint_shapes, record.footprint_origin
-        )
-        detail.source = cached.source
-        detail.fetched_at = cached.fetched_at
-        if record.status == "ok" and record.pads:
-            # The placement the canvas draws is solved here, not read from the row.
-            detail.verdict = self.resolve_part(part, cached)
-        return detail
-
     def set_override(
         self, reference: str, rotation: int | None, note: str = ""
     ) -> StoredVerdict | None:
@@ -679,17 +631,4 @@ class FootprintCheck:
             other.reference
             for other in self.parts.values()
             if other.lcsc == part.lcsc and other.footprint_hash == part.footprint_hash
-        )
-
-    def cell_help(self, reference: str) -> str:
-        """Return the JLC cell's hover text for one reference (spec 16.3)."""
-        part = self.parts.get(reference)
-        if part is None:
-            return ""
-        decision = self.decision(part)
-        return verdict_text(
-            decision,
-            self.fetch_state(part.lcsc),
-            kicad_footprint=part.footprint_name,
-            jlc_package=self.package_name(part.lcsc),
         )

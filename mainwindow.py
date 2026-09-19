@@ -93,6 +93,7 @@ from .jlc_footprint_check import (
     show_generate_summary,
     wait_for_pending_fetches,
 )
+from .jlcfootprint.presentation import cell_help, glyph_state, part_detail
 from .kicad_drc import DRCViolationCounter
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
@@ -1698,7 +1699,7 @@ class JLCPCBTools(wx.Frame):
             reference = self._first_selected_jlc_reference()
         if reference is None:
             return
-        detail = check.detail(reference, reread=True)
+        detail = part_detail(check, reference, reread=True)
         if detail is None:
             return
         dialog = JlcFootprintDetailDialog(
@@ -1731,7 +1732,7 @@ class JLCPCBTools(wx.Frame):
         if check is None or check.set_override(reference, rotation, note) is None:
             return None
         self._repaint_jlc_references(check.references_sharing_verdict(reference))
-        return check.detail(reference)
+        return part_detail(check, reference)
 
     def _refetch_jlc_references(self, references: Iterable[str]) -> Any:
         """Re-fetch these parts' EasyEDA data and return the first one's fresh detail."""
@@ -1741,7 +1742,7 @@ class JLCPCBTools(wx.Frame):
         wanted = list(references)
         refetch_jlc_footprint_references(self, wanted, check)
         self._repaint_jlc_references(wanted)
-        return check.detail(wanted[0]) if wanted else None
+        return part_detail(check, wanted[0]) if wanted else None
 
     def _repaint_jlc_references(self, references: Iterable[str]) -> None:
         """Repaint the Rotation text and the JLC glyph of the given references."""
@@ -1759,13 +1760,13 @@ class JLCPCBTools(wx.Frame):
         check = self._active_jlc_footprint_check()
         if check is None:
             return ""
-        return check.cell_help(self.partlist_data_model.get_reference(item))
+        return cell_help(check, self.partlist_data_model.get_reference(item))
 
     def _apply_jlc_cell(self, reference: str) -> None:
         """Set one row's JLC glyph from the footprint check, or clear it when off."""
         check = self._active_jlc_footprint_check()
         self.partlist_data_model.set_jlc_state(
-            reference, "" if check is None else check.glyph_state(reference)
+            reference, "" if check is None else glyph_state(check, reference)
         )
 
     def _active_jlc_footprint_check(self):

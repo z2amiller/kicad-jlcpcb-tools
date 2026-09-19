@@ -795,12 +795,13 @@ def test_the_dialog_opens_on_the_first_selected_part_with_an_lcsc(monkeypatch):
 
     monkeypatch.setattr(main, "JlcFootprintDetailDialog", FakeDialog)
     check = MagicMock()
-    check.detail.return_value = "the detail"
+    fake_part_detail = MagicMock(return_value="the detail")
+    monkeypatch.setattr(main, "part_detail", fake_part_detail)
     window, model, control = _window(main, check, ("R9", "C1"), ("", "C7192"))
     main.JLCPCBTools.show_jlc_footprint_detail(window)
     (parent, detail, set_override, refetch, settings) = shown[0]
     assert parent is window and detail == "the detail"
-    check.detail.assert_called_once_with("C1", reread=True)
+    fake_part_detail.assert_called_once_with(check, "C1", reread=True)
     assert settings is window.settings
     window.save_settings.assert_called_once_with()
     # Nothing selected with an LCSC: no dialog.
@@ -844,8 +845,8 @@ def test_the_window_remembers_the_size_on_every_way_out(monkeypatch):
             order.append("destroyed")
 
     monkeypatch.setattr(main, "JlcFootprintDetailDialog", FakeDialog)
+    monkeypatch.setattr(main, "part_detail", MagicMock(return_value="the detail"))
     check = MagicMock()
-    check.detail.return_value = "the detail"
     window, _model, _control = _window(main, check)
     main.JLCPCBTools.show_jlc_footprint_detail(window)
     assert order == ["shown", "remembered", "destroyed"]
@@ -860,8 +861,8 @@ def test_the_override_and_refetch_callbacks_repaint_every_shared_row(monkeypatch
     check.set_override.return_value = "stored"
     check.references_sharing_verdict.return_value = ["C1", "C2"]
     check.display_text.return_value = "270° set"
-    check.glyph_state.return_value = "override"
-    check.detail.return_value = "fresh"
+    monkeypatch.setattr(main, "glyph_state", lambda check, reference: "override")
+    monkeypatch.setattr(main, "part_detail", MagicMock(return_value="fresh"))
     window, model, _control = _window(main, check)
     assert main.JLCPCBTools._set_jlc_override(window, "C1", 270, "note") == "fresh"
     check.set_override.assert_called_once_with("C1", 270, "note")

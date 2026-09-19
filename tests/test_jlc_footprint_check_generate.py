@@ -311,13 +311,17 @@ def _column_window(module, check, enabled=True):
     return window, model
 
 
-def test_rotation_cells_show_the_decision_or_the_rule(mainwindow):
+def test_rotation_cells_show_the_decision_or_the_rule(mainwindow, monkeypatch):
     """The Rotation column carries the check's text when it runs, else the rule as before."""
     module, _ = mainwindow
     check = SimpleNamespace(
         display_text=lambda reference: {"R1": "180°", "R2": ""}[reference],
-        glyph_state=lambda reference: {"R1": "green", "R2": "unknown"}[reference],
         generation=3,
+    )
+    monkeypatch.setattr(
+        module,
+        "glyph_state",
+        lambda check, reference: {"R1": "green", "R2": "unknown"}[reference],
     )
     window, model = _column_window(module, check)
     assert (
@@ -348,15 +352,15 @@ def test_rotation_cells_show_the_decision_or_the_rule(mainwindow):
     model.set_jlc_state.assert_not_called()
 
 
-def test_result_event_repaints_the_checked_references(mainwindow):
+def test_result_event_repaints_the_checked_references(mainwindow, monkeypatch):
     """A current-generation result repaints its references; a stale one changes nothing."""
     module, _ = mainwindow
     check = SimpleNamespace(
         display_text=lambda reference: "90° !",
-        glyph_state=lambda reference: "yellow",
         references_for=lambda lcsc: ["R1", "R2"],
         generation=3,
     )
+    monkeypatch.setattr(module, "glyph_state", lambda check, reference: "yellow")
     window, model = _column_window(module, check)
     module.JLCPCBTools.on_jlc_footprint_result(
         window, SimpleNamespace(lcsc="C1", generation=2)

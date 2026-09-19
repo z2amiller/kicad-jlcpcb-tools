@@ -434,13 +434,13 @@ def test_the_actions_do_nothing_without_a_running_check(actions):
     assert actions.answers["asked"] == []
 
 
-def test_the_window_menu_handlers_call_the_actions_and_repaint(mainwindow):
+def test_the_window_menu_handlers_call_the_actions_and_repaint(mainwindow, monkeypatch):
     """The four menu entries act through the facade and repaint what changed."""
     module, checks = mainwindow
     window = _make_window(module)
     window._start_jlc_footprint_check()
     ((_owner, _pcbnew, check),) = checks
-    check.glyph_state.return_value = "pending"
+    monkeypatch.setattr(module, "glyph_state", lambda check, reference: "pending")
     check.display_text.return_value = "raw"
     model = window.partlist_data_model
     model.columns = {"REF_COL": 0}
