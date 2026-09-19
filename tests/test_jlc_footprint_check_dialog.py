@@ -878,25 +878,26 @@ def test_the_context_menu_carries_the_jlc_submenu(monkeypatch):
     appended: list = []
 
     class FakeMenu:
-        """Record what was appended to a menu."""
+        """Record what was appended to a menu, and the order things arrived in."""
 
         def __init__(self):
             self.items = []
             self.submenus = []
             self.bindings = []
-            self.separators = 0
+            self.sequence = []
 
         def Append(self, item):
-            """Keep the item."""
+            """Keep the item and record it in the append order."""
             self.items.append(item)
+            self.sequence.append(item.label)
 
         def Bind(self, _event, handler, item):
             """Keep the binding."""
             self.bindings.append((handler, item))
 
         def AppendSeparator(self):
-            """Count the separators."""
-            self.separators += 1
+            """Record a separator in the append order."""
+            self.sequence.append("separator")
 
         def AppendSubMenu(self, submenu, label):
             """Keep the submenu and its label."""
@@ -920,15 +921,16 @@ def test_the_context_menu_carries_the_jlc_submenu(monkeypatch):
     parent_menu = FakeMenu()
     submenu = main.JLCPCBTools._append_jlc_footprint_menu(window, parent_menu)
     assert appended == ["JLC footprint"]
-    assert [item.label for item in submenu.items] == [
+    # Spec 16.3: a separator divides the per-part entries from the board-wide ones,
+    # so its position is pinned along with the entries, not just its count.
+    assert submenu.sequence == [
         "Details...",
         "Re-fetch data",
+        "separator",
         "Re-check board",
         "Refresh board data",
         "Clear cache",
     ]
-    # Spec 16.3: a separator between the per-part entries and the board-wide ones.
-    assert submenu.separators == 1
     assert [item.enabled for item in submenu.items] == [True] * 5
     assert [handler for handler, _item in submenu.bindings] == [
         window.on_jlc_footprint_details,
