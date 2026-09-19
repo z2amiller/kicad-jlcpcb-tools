@@ -13,7 +13,7 @@ from dataclasses import dataclass, fields
 import sqlite3
 import time
 
-from .resolver import Verdict
+from .resolver import APPLIED_STATUSES, Verdict
 
 CONNECT_TIMEOUT_S = 5.0
 
@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS footprint_verdict (
   angular_rms       REAL,
   residual_mm       REAL,
   body_excess_mm    REAL,
+  origin_dx_mm      REAL,
+  origin_dy_mm      REAL,
   override_rotation INTEGER,
   override_note     TEXT,
   notes             TEXT,
@@ -46,7 +48,6 @@ CREATE TABLE IF NOT EXISTS footprint_verdict (
 """
 
 PENDING = "pending"
-APPLIED_STATUSES = ("green", "yellow")
 
 
 @dataclass
@@ -71,6 +72,9 @@ class StoredVerdict:
     angular_rms: float | None = None
     residual_mm: float | None = None
     body_excess_mm: float | None = None  # spec 16.6 item 4: the body-size caveat
+    # JLC's package origin in the KiCad footprint frame (spec 17.3), NULL without one.
+    origin_dx_mm: float | None = None
+    origin_dy_mm: float | None = None
     override_rotation: int | None = None
     override_note: str | None = None
     notes: str | None = None
@@ -95,6 +99,21 @@ class StoredVerdict:
         return None
 
     @property
+    def origin(self) -> tuple[float, float] | None:
+        """Return the package origin the CPL may place this part at, or None (spec 17.3).
+
+        An override changes the rotation only, so an overridden green or yellow row
+        keeps its origin; a row marked pending keeps the two columns but reports no
+        origin until the re-resolve rewrites them, which is what keeps a part being
+        re-fetched on upstream's pad-box centre.
+        """
+        if self.status not in APPLIED_STATUSES:
+            return None
+        if self.origin_dx_mm is None or self.origin_dy_mm is None:
+            return None
+        return (self.origin_dx_mm, self.origin_dy_mm)
+
+    @property
     def display_text(self) -> str:
         """Return the Rotation column text: the angle, "set", "!" or "raw" (spec 16.3).
 
@@ -115,7 +134,11 @@ class StoredVerdict:
 
 _COLUMNS = tuple(field.name for field in fields(StoredVerdict))
 # Columns added after the first release, created on an existing table at open.
-_ADDED_COLUMNS = (("body_excess_mm", "REAL"),)
+_ADDED_COLUMNS = (
+    ("body_excess_mm", "REAL"),
+    ("origin_dx_mm", "REAL"),
+    ("origin_dy_mm", "REAL"),
+)
 
 
 def _table_columns(con: sqlite3.Connection) -> set:
@@ -210,7 +233,13 @@ class VerdictStore:
         verdict: Verdict,
         now: float | None = None,
     ) -> StoredVerdict:
-        """Store a resolver verdict, keeping any override already on the row."""
+        """Store a resolver verdict, keeping any override already on the row.
+
+        The origin columns follow the verdict's own rule (spec 17.3): a green or
+        yellow verdict writes JLC's package origin, everything else writes NULL, so
+        a part that stops fitting loses the origin the CPL would have used.
+        """
+        origin = verdict.origin
         stored = StoredVerdict(
             lcsc=lcsc,
             footprint_hash=footprint_hash,
@@ -230,6 +259,8 @@ class VerdictStore:
             angular_rms=verdict.angular_rms,
             residual_mm=verdict.residual_mm,
             body_excess_mm=verdict.body_excess_mm,
+            origin_dx_mm=origin[0] if origin is not None else None,
+            origin_dy_mm=origin[1] if origin is not None else None,
             notes=verdict.note_text or None,
             resolved_at=int(time.time() if now is None else now),
         )

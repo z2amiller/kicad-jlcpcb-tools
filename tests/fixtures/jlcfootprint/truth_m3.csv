@@ -1,17 +1,17 @@
-reference,observed_rotation,note
-U1,270,"JLC numbers the tab 3 and the S lead 2; the schematic's G/D/S pair the pins (preview 2026-09-17: right as emitted, as were U2 to U4 and every capacitor)"
-U2,270,"as U1 with IN/D/S from test-Placements U12: G pairs by elimination"
-U3,0,"U1 placed at 90: 90 + 270"
-U4,0,"TL-CW drawing, tab is pin 2 on both sides; the stub of the cut lead no longer counts as a fourth pad"
-U5,,"refused by design: without pin functions the numbering difference stays red (the package aligns at 270; the preview of 2026-09-17 showed it rotated at the raw angle, as a refusal must)"
-C1,0,"test-Placements C4 at the raw angle was not among the mis-rotated parts in the preview (2026-09-17); + marks beside pad 1"
-C2,0,"test-Placements C3, as C1"
-C3,0,"test-Placements C2, as C1"
-C4,180,"test-Placements C8 needed half a turn in the preview (screenshot 2026-09-17); + marks beside pad 1, which JLC draws on the right"
-C5,180,"test-Placements C5: the -R-RD token said 0 and the preview showed the + at the wrong end; the + marks decide"
-C6,180,"test-Placements C6, as C5"
-C7,180,"test-Placements C7, as C5"
-C8,0,"C1969735 (TMCP1A106MTRF on CAP-SMD_L2.0-W1.3-FD), the stand-in for C308913 (out of stock at upload): placed right at the raw angle in the preview (2026-09-17); the -FD token and both + marks agree, where the retired band rule said 180"
-C9,0,"corner-case C3's part on a 4 mm footprint: fits with the body caveat (0.9 mm)"
-C10,0,"corner-case C3's part on a 6.3 mm footprint: plain fit"
-C11,90,"C1 on the bottom at 90: (180 - 90) + 0"
+reference,observed_rotation,note,origin_dx_mm,origin_dy_mm
+U1,270,"JLC numbers the tab 3 and the S lead 2; the schematic's G/D/S pair the pins (preview 2026-09-17: right as emitted, as were U2 to U4 and every capacitor)",-1.845,0
+U2,270,"as U1 with IN/D/S from test-Placements U12: G pairs by elimination",-1.845,0
+U3,0,"U1 placed at 90: 90 + 270",-1.845,0
+U4,0,"TL-CW drawing, tab is pin 2 on both sides; the stub of the cut lead no longer counts as a fourth pad",-1.843,0
+U5,,"refused by design: without pin functions the numbering difference stays red (the package aligns at 270; the preview of 2026-09-17 showed it rotated at the raw angle, as a refusal must)",,
+C1,0,"test-Placements C4 at the raw angle was not among the mis-rotated parts in the preview (2026-09-17); + marks beside pad 1",0,0
+C2,0,"test-Placements C3, as C1",0,0
+C3,0,"test-Placements C2, as C1",0,0
+C4,180,"test-Placements C8 needed half a turn in the preview (screenshot 2026-09-17); + marks beside pad 1, which JLC draws on the right",0,0
+C5,180,"test-Placements C5: the -R-RD token said 0 and the preview showed the + at the wrong end; the + marks decide",0,0
+C6,180,"test-Placements C6, as C5",0,0
+C7,180,"test-Placements C7, as C5",0,0
+C8,0,"C1969735 (TMCP1A106MTRF on CAP-SMD_L2.0-W1.3-FD), the stand-in for C308913 (out of stock at upload): placed right at the raw angle in the preview (2026-09-17); the -FD token and both + marks agree, where the retired band rule said 180",0,0
+C9,0,"corner-case C3's part on a 4 mm footprint: fits with the body caveat (0.9 mm)",0,0
+C10,0,"corner-case C3's part on a 6.3 mm footprint: plain fit",0,0
+C11,90,"C1 on the bottom at 90: (180 - 90) + 0",0,0
