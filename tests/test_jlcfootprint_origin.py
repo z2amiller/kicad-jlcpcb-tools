@@ -15,8 +15,9 @@ from jlcfootprint.overlay import inverse
 from jlcfootprint.resolver import Verdict, resolve
 from jlcfootprint.verdicts import SCHEMA, VerdictStore
 
+from .jlc_footprint_wx_support import load_script
 from .jlcfootprint_support import footprints_available, library_pads, recorded
-from .test_jlcfootprint_validate import board_file, footprint_text, load_script
+from .test_jlcfootprint_validate import board_file, footprint_text
 
 TRUTH_HEADER = "reference,observed_rotation,origin_dx_mm,origin_dy_mm\n"
 
@@ -156,7 +157,7 @@ def test_a_dpak_reads_its_origin_well_off_the_pad_box_centre():
 
 def test_a_bottom_part_derives_the_same_origin_as_the_same_part_on_top(tmp_path):
     """The validator un-mirrors a bottom footprint, so both sides read one origin."""
-    validator = load_script()
+    validator = load_script("validate_board")
     body = footprint_text("Q1", "F.Cu", 0) + footprint_text(
         "Q2", "B.Cu", 0, mirror=True
     )
@@ -316,7 +317,7 @@ def sot23_rows(validator, tmp_path):
 
 def test_the_report_prints_the_origin_offset_from_the_pad_box_centre(tmp_path):
     """The two new columns say how far the CPL position moves, to two decimals."""
-    validator = load_script()
+    validator = load_script("validate_board")
     rows = sot23_rows(validator, tmp_path)
 
     table = validator.format_rows(rows)
@@ -336,7 +337,7 @@ def test_the_report_prints_the_origin_offset_from_the_pad_box_centre(tmp_path):
 
 def test_the_report_leaves_the_origin_columns_blank_without_a_verdict(tmp_path):
     """A part with no recorded response, and a refusal, print no origin."""
-    validator = load_script()
+    validator = load_script("validate_board")
     rows = sot23_rows(validator, tmp_path)
     rows[0]["verdict"] = None
 
@@ -350,7 +351,7 @@ def test_the_report_leaves_the_origin_columns_blank_without_a_verdict(tmp_path):
 
 def test_truth_origins_are_optional_and_blank_means_no_origin(tmp_path):
     """A truth file written before M4 gates nothing new; an empty pair expects none."""
-    validator = load_script()
+    validator = load_script("validate_board")
     without = truth_file(tmp_path, "Q1,180\n", header="reference,observed_rotation\n")
     assert validator.load_truth_origins(without) is None
 
@@ -363,7 +364,7 @@ def test_truth_origins_are_optional_and_blank_means_no_origin(tmp_path):
 
 def test_a_half_filled_truth_origin_is_rejected(tmp_path):
     """One of the two numbers missing is a mistake in the file, not a blank row."""
-    validator = load_script()
+    validator = load_script("validate_board")
     path = truth_file(tmp_path, "Q1,180,0.099,\n")
 
     with pytest.raises(SystemExit, match="non-numeric origin"):
@@ -376,7 +377,7 @@ def test_a_half_filled_truth_origin_is_rejected(tmp_path):
 )
 def test_a_truth_origin_is_compared_within_five_microns(tmp_path, dx, reasons):
     """Five microns of slack absorbs the drawing's rounding and nothing more."""
-    validator = load_script()
+    validator = load_script("validate_board")
     rows = sot23_rows(validator, tmp_path)
 
     failures = validator.compare(rows, {"Q1": "180"}, {"Q1": (dx, 0.0)})
@@ -387,7 +388,7 @@ def test_a_truth_origin_is_compared_within_five_microns(tmp_path, dx, reasons):
 
 def test_a_truth_row_expecting_no_origin_fails_when_one_is_derived(tmp_path):
     """A blank pair is a claim, so a part that does derive an origin is a disagreement."""
-    validator = load_script()
+    validator = load_script("validate_board")
     rows = sot23_rows(validator, tmp_path)
 
     failures = validator.compare(rows, {"Q1": "180"}, {"Q1": None})
@@ -398,7 +399,7 @@ def test_a_truth_row_expecting_no_origin_fails_when_one_is_derived(tmp_path):
 
 def test_a_truth_row_with_an_origin_fails_when_the_part_refuses(tmp_path):
     """A refusal carries no origin, so a filled truth row must fail rather than pass."""
-    validator = load_script()
+    validator = load_script("validate_board")
     rows = sot23_rows(validator, tmp_path)
     rows[0]["verdict"] = Verdict(status="red")
 

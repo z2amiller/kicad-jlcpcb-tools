@@ -62,7 +62,9 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
     violations_section = section_match.group(1) if section_match else report_text
 
     header_matches = list(
-        re.finditer(r"(?m)^\[(?P<code>[^\]]+)\]:\s*(?P<message>.*)$", violations_section)
+        re.finditer(
+            r"(?m)^\[(?P<code>[^\]]+)\]:\s*(?P<message>.*)$", violations_section
+        )
     )
 
     if header_matches:
@@ -78,7 +80,9 @@ def parse_drc_report(report_path: str) -> tuple[int, list[str]]:
                 else len(violations_section)
             )
             block = violations_section[start:end]
-            severity_match = re.search(r";\s*(error|warning)\b", block, flags=re.IGNORECASE)
+            severity_match = re.search(
+                r";\s*(error|warning)\b", block, flags=re.IGNORECASE
+            )
 
             if not severity_match:
                 unknown_count += 1
@@ -149,7 +153,9 @@ class DRCViolationCounter:
                 try:
                     error_count, error_messages = parse_drc_report(report_path)
                     if error_messages:
-                        logger.warning("First %d DRC error(s):", min(10, len(error_messages)))
+                        logger.warning(
+                            "First %d DRC error(s):", min(10, len(error_messages))
+                        )
                         for message in error_messages[:10]:
                             logger.warning("  %s", message)
                     return error_count
