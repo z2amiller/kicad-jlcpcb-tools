@@ -12,10 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from .easyeda_parse import SymbolPin
 from .geometry import Pad, centroid, named_pads, pad_geom
 from .polarity import is_no_function, normalise_function
 from .quality import assess_quality
+from .records import SymbolPin
 from .solver import solve_transform
 
 # A JLC pad lands on copper when its centre sits inside the inner part of the KiCad pad

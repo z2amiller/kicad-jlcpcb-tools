@@ -19,7 +19,6 @@ Stdlib only, pure functions, malformed records are skipped rather than raised.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import math
 import re
@@ -31,6 +30,7 @@ from .easyeda_parse import (
     pro_pin_records,
 )
 from .geometry import EASYEDA_UNIT_MM
+from .records import DrawingMarks
 
 # Drawing layers that carry polarity marks, by format: the top silkscreen and the
 # document layer (Pro numbers 3 and 13, classic numbers 3 and 12).
@@ -89,15 +89,6 @@ class Segment(NamedTuple):
     def midpoint(self) -> tuple[float, float]:
         """Return the bar's midpoint."""
         return ((self.x1 + self.x2) / 2.0, (self.y1 + self.y2) / 2.0)
-
-
-@dataclass(frozen=True)
-class DrawingMarks:
-    """What the drawings say: the ``+`` pin, the ``+`` pad and the body box in millimetres."""
-
-    positive_pin: str | None = None
-    positive_pad: str | None = None
-    body_box: tuple[float, float, float, float] | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -16,17 +16,10 @@ from dataclasses import dataclass, field
 import json
 from typing import Any
 
-# Label sets shared with the crawler's extract_pin1_polarity.
-PIN1_CATHODE_LABELS = frozenset({"K", "C", "CA", "CAT", "CATHODE", "K1", "NEG", "-"})
-PIN1_ANODE_LABELS = frozenset({"A", "AN", "ANODE", "A1", "AK", "POS", "+"})
+from .records import PIN1_ANODE_LABELS, PIN1_CATHODE_LABELS, SymbolPin
 
-
-@dataclass
-class SymbolPin:
-    """One schematic-symbol pin: its number and its label text (may be empty)."""
-
-    number: str
-    label: str
+# PIN1_CATHODE_LABELS, PIN1_ANODE_LABELS and SymbolPin live in .records, shared
+# with the resolver core; re-exported here so this module's own names are unchanged.
 
 
 @dataclass
