@@ -249,9 +249,7 @@ class PartDetailsDialog(wx.Dialog):
             return picture.replace("96x96", "900x900")
         image_id = data.get("productBigImageAccessId")
         if image_id:
-            return (
-                f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{image_id}"
-            )
+            return f"https://jlcpcb.com/api/file/downloadByFileSystemAccessId/{image_id}"
         return None
 
     def _apply_part_data(self, result, image_bytes):
@@ -302,20 +300,12 @@ class PartDetailsDialog(wx.Dialog):
         for price in data.get("jlcPrices", []) or []:
             start = price.get("startNumber")
             end = price.get("endNumber")
-            label = (
-                f"JLC Price for >{start}"
-                if end == -1
-                else f"JLC Price for {start}-{end}"
-            )
+            label = f"JLC Price for >{start}" if end == -1 else f"JLC Price for {start}-{end}"
             self.data_list.AppendItem([label, str(price.get("productPrice"))])
         for price in data.get("prices", []) or []:
             start = price.get("startNumber")
             end = price.get("endNumber")
-            label = (
-                f"LCSC Price for >{start}"
-                if end == -1
-                else f"LCSC Price for {start}-{end}"
-            )
+            label = f"LCSC Price for >{start}" if end == -1 else f"LCSC Price for {start}-{end}"
             self.data_list.AppendItem([label, str(price.get("productPrice"))])
         for attribute in data.get("attributes", []) or []:
             self.data_list.AppendItem(
