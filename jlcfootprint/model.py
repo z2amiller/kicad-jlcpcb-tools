@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .drawing import DrawingMarks
 from .geometry import Pad, named_pads, pad_pitch
+from .records import DrawingMarks
 from .resolver import Verdict
 from .verdicts import StoredVerdict
 
