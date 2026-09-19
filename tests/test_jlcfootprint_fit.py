@@ -5,6 +5,7 @@ import pytest
 from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.fit import (
     Placement,
+    align,
     courtyard_excess,
     group_fit,
     pad_fit,
@@ -106,6 +107,23 @@ def test_pair_by_function_ignores_no_connection_names():
     assert pairing is not None
     assert pairing.eliminated == ("1", "1")
     assert sorted(pairing.differences) == [("D", "2", "3"), ("S", "3", "2")]
+
+
+def test_an_underdetermined_solve_reports_no_angular_error():
+    """A non-finite pad coordinate leaves the placement's angular RMS at zero, not NaN.
+
+    ``solve_transform`` answers "underdetermined" for a NaN coordinate instead of
+    raising, and the resolver copies the placement into the verdict before it
+    refuses on that flag, so a NaN here would reach the stored ``angular_rms``
+    column and the detail dialog.  The quality assessment ``align`` used to call
+    guarded exactly this case; ``angular_rms`` on its own cannot see the flag.
+    """
+    nan = float("nan")
+    kicad = {"1": Pad("1", nan, 0.0, 1.0, 1.0), "2": Pad("2", 1.0, 0.0, 1.0, 1.0)}
+    jlc = {"1": Pad("1", 0.0, 0.0, 1.0, 1.0), "2": Pad("2", 1.0, 0.0, 1.0, 1.0)}
+    placement = align(kicad, jlc)
+    assert placement.is_underdetermined
+    assert placement.angular_rms == 0.0
 
 
 def test_transformed_box_rotates_and_moves_the_corners():
