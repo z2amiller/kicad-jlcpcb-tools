@@ -47,7 +47,6 @@ from jlcfootprint.easyeda_parse import (  # noqa: E402
     parse_devices_response,
     parse_puuid_response,
     parse_symbol_response,
-    resolve_record,
 )
 from jlcfootprint.geometry import (  # noqa: E402
     easyeda_pads_to_mm,
@@ -56,6 +55,7 @@ from jlcfootprint.geometry import (  # noqa: E402
     pad_box_centre,
 )
 from jlcfootprint.resolver import Verdict, resolve  # noqa: E402
+from jlcfootprint.resolving import resolve_record  # noqa: E402
 
 DEFAULT_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
 # How far a derived origin may sit from the truth row before the gate fails (spec 17.6).
