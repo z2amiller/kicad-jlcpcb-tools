@@ -313,6 +313,111 @@ def _two_pad_fit(
     return True
 
 
+def _reference_vote(
+    jlc_named: list[Pad],
+    package_name: str,
+    symbol_pins: list[SymbolPin],
+    polarity_source: str,
+    marks: DrawingMarks | None,
+    reference: str,
+    notes: list[str],
+) -> tuple[Pad | None, str, list[str], str | None, bool]:
+    """Vote for the EasyEDA pad carrying ``reference`` and what pin 1 means there.
+
+    The EasyEDA side's reference terminal has up to four sources: the name's FD/RD
+    token, the symbol's pin-1 label, and the ``+`` marks of the symbol and of the
+    footprint (spec 16.6).  Each names a pad; the majority decides and a tie is
+    inconsistent data.  Calibrated on 2026-09-17: the marks named the right pad on
+    all 22 parts with a known truth, the token on all diodes and electrolytics but
+    on a minority of the molded-chip tantalums, where the two marks outvote it.
+    A seeded label is weaker: it yields to a token that disagrees with it.
+
+    Returns ``(jlc_ref, source, outvoted, polarity, weak_token)``: the winning JLC
+    pad and where it came from (``token``, ``seed``, ``label`` or ``drawing``); the
+    names of the votes it outvoted; the pin-1 polarity the symbol's label or the
+    seed implies (``None`` once outvoted or disagreeing); and whether an
+    unchallenged token is from the one family the crawl found weak.  When nothing
+    votes, or the vote ties, ``jlc_ref`` is ``None`` and ``source`` carries the
+    verdict status to use instead -- the reason is already appended to ``notes``.
+    """
+    side = token_reference_side(package_name, reference)
+    polarity = pin1_polarity(symbol_pins)
+    token_pad = None
+    if side is not None:
+        token_pad = next((p for p in jlc_named if side_of(p, jlc_named) == side), None)
+        if token_pad is None:
+            notes.append("name token could not be applied: JLC pads are drawn vertical")
+    label_pad = label_reference_pad(jlc_named, polarity, reference)
+    seeded = polarity_source != "symbol"
+    symbol_drawn, footprint_drawn = drawing_reference_pads(jlc_named, marks, reference)
+    if (
+        seeded
+        and token_pad is not None
+        and label_pad is not None
+        and token_pad is not label_pad
+    ):
+        # The seed was read from one representative part per footprint; against
+        # this part's own name it is set aside (it may still be that the marks
+        # outvote the token below, so the note does not promise the token).
+        notes.append(
+            "seeded pin-1 polarity (per footprint) disagrees with the name token; not counted"
+        )
+        label_pad = None
+        polarity = None
+    votes: list[tuple[Pad, str]] = []
+    if token_pad is not None:
+        votes.append((token_pad, "name token"))
+    if label_pad is not None:
+        votes.append(
+            (label_pad, "seeded pin-1 polarity" if seeded else "symbol pin-1 label")
+        )
+    if symbol_drawn is not None:
+        votes.append((symbol_drawn, "symbol + mark"))
+    if footprint_drawn is not None:
+        votes.append((footprint_drawn, "footprint + mark"))
+    if not votes:
+        notes.append("polarity unknown; check in JLC preview")
+        return None, "unknown", [], None, False
+    sides: dict[int, list[str]] = {}
+    pads_by_id: dict[int, Pad] = {}
+    for pad, name in votes:
+        sides.setdefault(id(pad), []).append(name)
+        pads_by_id[id(pad)] = pad
+    ranked = sorted(sides.values(), key=len, reverse=True)
+    if len(ranked) > 1 and len(ranked[0]) == len(ranked[1]):
+        notes.append(
+            "EasyEDA data inconsistent: "
+            + " and ".join(", ".join(names) for names in ranked)
+            + " disagree"
+        )
+        return None, "red", [], None, False
+    winners = ranked[0]
+    jlc_ref = next(pad for pad, name in votes if name == winners[0])
+    outvoted = [name for pad, name in votes if pad is not jlc_ref]
+    if outvoted:
+        notes.append(
+            f"{', '.join(outvoted)} {'names' if len(outvoted) == 1 else 'name'} the other pad; "
+            f"{', '.join(winners)} {'decides' if len(winners) == 1 else 'decide'}"
+        )
+        if label_pad is not None and label_pad is not jlc_ref:
+            polarity = None
+    if token_pad is jlc_ref:
+        source = "token"
+    elif label_pad is jlc_ref:
+        source = "seed" if seeded else "label"
+    else:
+        source = "drawing"
+        if not outvoted:
+            drawn_by = [name.split(" ")[0] for name in winners]  # symbol, footprint
+            notes.append(DRAWING_NOTES["both" if len(drawn_by) == 2 else drawn_by[0]])
+    if source == "seed":
+        notes.append("reference terminal from the seeded per-footprint polarity")
+    # A token nothing checked, on the one family whose token the crawl found weak,
+    # is resolved at medium confidence (spec 16.9; the note text is unchanged).
+    weak_token = source == "token" and len(votes) == 1 and token_is_weak(package_name)
+    return jlc_ref, source, outvoted, polarity, weak_token
+
+
 def _resolve_polarized(
     kicad_named: list[Pad],
     jlc_named: list[Pad],
@@ -325,13 +430,10 @@ def _resolve_polarized(
 ) -> Verdict:
     """Align a polarized two-pad part by terminal meaning, never by pad number (spec 7.3).
 
-    The EasyEDA side's reference terminal has up to four sources: the name's FD/RD
-    token, the symbol's pin-1 label, and the ``+`` marks of the symbol and of the
-    footprint (spec 16.6).  Each names a pad; the majority decides and a tie is
-    inconsistent data.  Calibrated on 2026-09-17: the marks named the right pad on
-    all 22 parts with a known truth, the token on all diodes and electrolytics but
-    on a minority of the molded-chip tantalums, where the two marks outvote it.
-    A seeded label is weaker: it yields to a token that disagrees with it.
+    The KiCad side's reference pad comes from its pin functions or, by convention,
+    pad 1; :func:`_reference_vote` decides which EasyEDA pad is the reference and
+    what its pin 1 means.  Once both reference pads are known the two pads align
+    like any other two-pad part.
     """
     if _coincident(kicad_named) or _coincident(jlc_named):
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
@@ -350,85 +452,22 @@ def _resolve_polarized(
         return verdict.unresolved("unknown", "no_data", note)
     if note:
         verdict.notes.append(note)
-    polarity = pin1_polarity(symbol_pins)
-    token_pad = None
-    if side is not None:
-        token_pad = next((p for p in jlc_named if side_of(p, jlc_named) == side), None)
-        if token_pad is None:
-            verdict.notes.append(
-                "name token could not be applied: JLC pads are drawn vertical"
-            )
-    label_pad = label_reference_pad(jlc_named, polarity, reference)
-    seeded = polarity_source != "symbol"
-    symbol_drawn, footprint_drawn = drawing_reference_pads(jlc_named, marks, reference)
-    if (
-        seeded
-        and token_pad is not None
-        and label_pad is not None
-        and token_pad is not label_pad
-    ):
-        # The seed was read from one representative part per footprint; against
-        # this part's own name it is set aside (it may still be that the marks
-        # outvote the token below, so the note does not promise the token).
-        verdict.notes.append(
-            "seeded pin-1 polarity (per footprint) disagrees with the name token; not counted"
-        )
-        label_pad = None
-        polarity = None
-    votes: list[tuple[Pad, str]] = []
-    if token_pad is not None:
-        votes.append((token_pad, "name token"))
-    if label_pad is not None:
-        votes.append(
-            (label_pad, "seeded pin-1 polarity" if seeded else "symbol pin-1 label")
-        )
-    if symbol_drawn is not None:
-        votes.append((symbol_drawn, "symbol + mark"))
-    if footprint_drawn is not None:
-        votes.append((footprint_drawn, "footprint + mark"))
-    if not votes:
-        return verdict.unresolved(
-            "unknown", "no_data", "polarity unknown; check in JLC preview"
-        )
-    sides: dict[int, list[str]] = {}
-    pads_by_id: dict[int, Pad] = {}
-    for pad, name in votes:
-        sides.setdefault(id(pad), []).append(name)
-        pads_by_id[id(pad)] = pad
-    ranked = sorted(sides.values(), key=len, reverse=True)
-    if len(ranked) > 1 and len(ranked[0]) == len(ranked[1]):
-        return verdict.unresolved(
-            "red",
-            "no_data",
-            "EasyEDA data inconsistent: "
-            + " and ".join(", ".join(names) for names in ranked)
-            + " disagree",
-        )
-    winners = ranked[0]
-    jlc_ref = next(pad for pad, name in votes if name == winners[0])
-    outvoted = [name for pad, name in votes if pad is not jlc_ref]
-    if outvoted:
-        verdict.notes.append(
-            f"{', '.join(outvoted)} {'names' if len(outvoted) == 1 else 'name'} the other pad; "
-            f"{', '.join(winners)} {'decides' if len(winners) == 1 else 'decide'}"
-        )
-        if label_pad is not None and label_pad is not jlc_ref:
-            polarity = None
-    if token_pad is jlc_ref:
-        source = "token"
-    elif label_pad is jlc_ref:
-        source = "seed" if seeded else "label"
-    else:
-        source = "drawing"
-        if not outvoted:
-            drawn_by = [name.split(" ")[0] for name in winners]  # symbol, footprint
-            verdict.notes.append(
-                DRAWING_NOTES["both" if len(drawn_by) == 2 else drawn_by[0]]
-            )
-    if source == "seed":
-        verdict.notes.append(
-            "reference terminal from the seeded per-footprint polarity"
-        )
+    jlc_ref, source, outvoted, polarity, weak_token = _reference_vote(
+        jlc_named,
+        package_name,
+        symbol_pins,
+        polarity_source,
+        marks,
+        reference,
+        verdict.notes,
+    )
+    if jlc_ref is None:
+        # _reference_vote already recorded why; source carries the status to use.
+        verdict.status = source
+        verdict.fit = "no_data"
+        verdict.rotation = None
+        verdict.method = "none"
+        return verdict
     verdict.polarity_source = source
     if kind != "other":
         # The vote settles which EasyEDA pad carries the reference terminal and with it
@@ -449,9 +488,6 @@ def _resolve_polarized(
         return verdict
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "polarity"
-    # A token nothing checked, on the one family whose token the crawl found weak,
-    # is resolved at medium confidence (spec 16.9; the note text is unchanged).
-    weak_token = source == "token" and len(votes) == 1 and token_is_weak(package_name)
     verdict.confidence = (
         "medium"
         if assumed or outvoted or weak_token or source in ("seed", "drawing")
