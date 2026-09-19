@@ -24,14 +24,12 @@ import time
 from typing import Any
 
 from .cache import Cache, CachedPart
-from .drawing import drawing_marks
 from .easyeda_client import EasyEdaClient
-from .easyeda_parse import ComponentRecord
-from .geometry import easyeda_pads_to_mm
+from .easyeda_parse import ComponentRecord, resolve_record
 from .kicad_adapter import BoardPart
 from .model import Decision, FetchState, PartDetail
 from .presentation import describe_seconds
-from .resolver import Verdict, resolve
+from .resolver import Verdict
 from .verdicts import PENDING, StoredVerdict, VerdictStore
 from .worker import FOOTPRINT, LOOKUP, SYMBOL, Buckets, FetchWorker, estimate_seconds
 
@@ -217,18 +215,12 @@ class FootprintCheck:
     def resolve_part(self, part: BoardPart, cached: CachedPart) -> Verdict:
         """Run the resolver for one board part against its cached EasyEDA data."""
         record: ComponentRecord = cached.record
-        return resolve(
+        return resolve_record(
             part.pads,
             part.footprint_name,
-            record.status,
-            record.package_name,
-            easyeda_pads_to_mm(record.pads),
-            record.symbol_pins,
+            record,
             cached.polarity_source,
-            marks=drawing_marks(
-                record.symbol_shapes, record.footprint_shapes, record.footprint_origin
-            ),
-            kicad_courtyard=part.courtyard,
+            part.courtyard,
         )
 
     def _resolve_and_store(self, part: BoardPart, cached: CachedPart) -> StoredVerdict:
