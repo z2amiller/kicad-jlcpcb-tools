@@ -5,7 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from .wx_harness import load, load_mainwindow, load_siblings, package_stubs, wx_stubs
+from .jlc_footprint_wx_support import (
+    check_window,
+    facade_symbols,
+    load_facade,
+    load_window,
+)
 
 _PACKAGE = "jlc_footprint_check_generate_tests"
 
@@ -46,19 +51,14 @@ class FakeProgressDialog:
 @pytest.fixture
 def facade():
     """Load the real facade with fake dialogs."""
-    package = f"{_PACKAGE}_facade"
     FakeProgressDialog.instances = []
     FakeProgressDialog.script = []
-    stubs = wx_stubs(
-        PostEvent=MagicMock(),
+    with load_facade(
+        f"{_PACKAGE}_facade",
         ProgressDialog=FakeProgressDialog,
         MilliSleep=MagicMock(),
-        Dialog=type("Dialog", (), {}),
-    )
-    stubs.update(package_stubs(package))
-    stubs[f"{package}.events"] = load(package, "events", stubs)
-    with load_siblings(package, ("jlc_footprint_check",), stubs) as loaded:
-        yield loaded["jlc_footprint_check"], stubs["wx"]
+    ) as loaded:
+        yield loaded.module, loaded.wx
 
 
 def _check(pending_sequence, tripped=False):
@@ -154,30 +154,15 @@ def test_summary_dialog_shows_the_formatted_text(facade, monkeypatch):
 @pytest.fixture
 def mainwindow():
     """Load mainwindow with the facade's generate-time functions faked."""
-    facade = {
-        "clear_cache": MagicMock(return_value=0),
-        "create_footprint_check": MagicMock(),
-        "is_footprint_check_enabled": lambda settings: settings.get(
-            "jlcfootprint", {}
-        ).get("enabled", True),
-        "recheck_board": MagicMock(return_value=0),
-        "refetch_references": MagicMock(return_value=0),
-        "refresh_board_data": MagicMock(return_value=0),
-        "wait_for_pending_fetches": MagicMock(return_value=True),
-        "show_generate_summary": MagicMock(return_value="summary"),
-    }
-    module = load_mainwindow(
+    facade = facade_symbols()
+    module = load_window(
         _PACKAGE,
-        wx=wx_stubs(
-            Frame=type("Frame", (), {}),
-            NewIdRef=MagicMock(side_effect=object),
-            BeginBusyCursor=MagicMock(),
-            EndBusyCursor=MagicMock(),
-            IsBusy=MagicMock(return_value=True),
-            MessageBox=MagicMock(),
-            MessageDialog=MagicMock(),
-        ),
-        jlc_footprint_check=facade,
+        facade,
+        BeginBusyCursor=MagicMock(),
+        EndBusyCursor=MagicMock(),
+        IsBusy=MagicMock(return_value=True),
+        MessageBox=MagicMock(),
+        MessageDialog=MagicMock(),
     )
     return module, facade
 
@@ -301,10 +286,7 @@ def test_generate_takes_the_legacy_path_when_the_check_is_off(mainwindow):
 
 
 def _column_window(module, check, enabled=True):
-    window = object.__new__(module.JLCPCBTools)
-    window.settings = {"jlcfootprint": {"enabled": enabled}}
-    window.jlc_footprint_check = check
-    window.logger = MagicMock()
+    window = check_window(module, check, enabled=enabled)
     window.get_correction = MagicMock(return_value="0°, 0.0/0.0")
     model = MagicMock()
     model.columns = {"REF_COL": 0}

@@ -1,26 +1,13 @@
 """Tests for scripts/truth_from_presses.py: preview presses plus the uploaded CPL give JLC's angle."""
 
-import importlib.util
-from pathlib import Path
-
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def load_script():
-    """Import the converter script as a module without running its CLI."""
-    spec = importlib.util.spec_from_file_location(
-        "truth_from_presses", ROOT / "scripts" / "truth_from_presses.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from .jlc_footprint_wx_support import load_script
 
 
 def test_presses_add_to_the_uploaded_angle(tmp_path):
     """Comments and notes are tolerated, blanks stay blank, and a reference not in the CPL stops."""
-    converter = load_script()
+    converter = load_script("truth_from_presses")
     cpl = tmp_path / "cpl.csv"
     cpl.write_text(
         "Designator,Val,Package,Mid X,Mid Y,Rotation,Layer\n"

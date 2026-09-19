@@ -7,9 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests.correction_test_support import make_library
+from tests.jlc_footprint_wx_support import (
+    correction_library,
+    cpl_decision,
+    fabrication_modules,
+)
 from tests.test_fabrication_correction_recovery import Point, read_cpl
-from tests.wx_harness import load_correction_modules, module
 
 # The origin every part in these tests carries, in its own footprint frame.
 ORIGIN = (0.5, 0.25)
@@ -64,54 +67,22 @@ def footprint(
     )
 
 
-def decision(
-    origin: tuple | None = ORIGIN,
-    rotation: int | None = 0,
-    source: str = "derived",
-    status: str = "green",
-    lcsc: str = "C123",
-) -> SimpleNamespace:
-    """Return what the controller's decision carries for one reference."""
-    return SimpleNamespace(
-        rotation=rotation,
-        source=source,
-        status=status,
-        polarity_light=None,
-        fit="fits",
-        note="",
-        pending=False,
-        lcsc=lcsc,
-        body_excess=None,
-        origin=origin,
-    )
+def decision(origin: tuple | None = ORIGIN, rotation: int | None = 0, **fields):
+    """Return a decision carrying an origin, which is what these tests are about."""
+    return cpl_decision(rotation, origin=origin, **fields)
 
 
 @pytest.fixture
 def modules() -> Iterator[SimpleNamespace]:
     """Keep real storage and placement modules registered with one set of doubles."""
-    package = "fabrication_jlc_origin_tests"
-    pcbnew = MagicMock()
-    pcbnew.FromMM = lambda value: value
-    pcbnew.ToMM = lambda value: value
-    pcbnew.wxPoint = Point
-    pcbnew.VECTOR2I = Point
-    with load_correction_modules(
-        package=package,
-        pcbnew=pcbnew,
-        names=("fabrication",),
-        replacements={
-            f"{package}.footprint_helpers": module(
-                f"{package}.footprint_helpers", get_is_dnp=lambda _footprint: False
-            )
-        },
-    ) as loaded:
+    with fabrication_modules("fabrication_jlc_origin_tests", Point) as loaded:
         yield loaded
 
 
 @pytest.fixture
 def library(modules, tmp_path):
     """Create actual SQLite correction storage away from user databases."""
-    return make_library(modules.library, tmp_path)
+    return correction_library(modules, tmp_path)
 
 
 def fabrication(modules, library, tmp_path, footprints, exact_origin=True):

@@ -10,6 +10,7 @@ import pytest
 from jlcfootprint.presentation import SORT_ORDER
 
 from . import test_window_layout as layout
+from .jlc_footprint_wx_support import check_window, jlcfootprint_enabled
 from .stock_test_support import board_row, stock_modules
 
 
@@ -195,7 +196,7 @@ def test_the_view_column_sits_between_type_and_std_with_std_s_width(monkeypatch)
     main = layout.mainwindow
     monkeypatch.setattr(main, "TypeCellTooltip", MagicMock())
     monkeypatch.setattr(main.wx, "ToolTip", str, raising=False)
-    monkeypatch.setattr(main, "is_footprint_check_enabled", _enabled)
+    monkeypatch.setattr(main, "is_footprint_check_enabled", jlcfootprint_enabled)
     window = layout._open_main(monkeypatch, {})
     control = window.footprint_list
     titles = [column.GetTitle() for column in control.GetColumns()]
@@ -214,25 +215,11 @@ def test_the_view_column_sits_between_type_and_std_with_std_s_width(monkeypatch)
     assert standard.IsResizeable() is False
 
 
-def _enabled(settings: dict) -> bool:
-    """Read the shipped setting the way the facade does (the harness stubs it off)."""
-    return bool(settings.get("jlcfootprint", {}).get("enabled", True))
-
-
-def _window(module, check):
-    """Return a window with the real model and a footprint check double."""
-    window = object.__new__(module.JLCPCBTools)
-    window.settings = {"jlcfootprint": {"enabled": True}}
-    window.jlc_footprint_check = check
-    window.logger = MagicMock()
-    return window
-
-
 def test_the_window_fills_and_clears_the_glyph_through_the_check(models, monkeypatch):
     """A result repaints both cells of every reference; the setting off clears the glyph."""
     main = layout.mainwindow
     presenter = main.jlc_footprint_window
-    monkeypatch.setattr(presenter, "is_footprint_check_enabled", _enabled)
+    monkeypatch.setattr(presenter, "is_footprint_check_enabled", jlcfootprint_enabled)
     monkeypatch.setattr(presenter, "glyph_state", lambda check, reference: "caveat")
     model = _model(models, "R1", "R2")
     check = types.SimpleNamespace(
@@ -240,7 +227,7 @@ def test_the_window_fills_and_clears_the_glyph_through_the_check(models, monkeyp
         references_for=lambda lcsc: ["R1", "R2"],
         display_text=lambda reference: "180°",
     )
-    window = _window(main, check)
+    window = check_window(main, check)
     window.partlist_data_model = model
     main.JLCPCBTools.on_jlc_footprint_result(
         window, types.SimpleNamespace(lcsc="C1", generation=4)

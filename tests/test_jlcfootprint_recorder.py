@@ -1,25 +1,16 @@
 """Tests for scripts/fetch_easyeda_fixture.py with the network faked: pacing, backoff, what gets kept."""
 
-import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
+from .jlc_footprint_wx_support import load_script
+
 requests = pytest.importorskip("requests")
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
-
-
-def load_script():
-    """Import the recorder script as a module without running its CLI."""
-    spec = importlib.util.spec_from_file_location(
-        "fetch_easyeda_fixture", ROOT / "scripts" / "fetch_easyeda_fixture.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 class FakeResponse:
@@ -45,7 +36,7 @@ class FakeResponse:
 @pytest.fixture
 def fake_network(monkeypatch):
     """Serve queued responses, record every request URL, POST body and sleep."""
-    recorder = load_script()
+    recorder = load_script("fetch_easyeda_fixture")
     log = {"urls": [], "sleeps": [], "queue": [], "posts": []}
 
     def get(url, headers=None, timeout=None):

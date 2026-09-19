@@ -1,23 +1,15 @@
 """Tests for scripts/validate_board.py: the gate's evaluate and compare plumbing."""
 
-import importlib.util
+import importlib
 from pathlib import Path
 
 import pytest
 
+from .jlc_footprint_wx_support import load_script
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
 PRO_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda_pro"
-
-
-def load_script():
-    """Import the validator script as a module without running its CLI."""
-    spec = importlib.util.spec_from_file_location(
-        "validate_board", ROOT / "scripts" / "validate_board.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def footprint_text(reference, layer, placed, mirror=False):
@@ -54,7 +46,7 @@ def board_file(tmp_path, body):
 
 def test_sot23_at_every_placement_emits_the_same_correction(tmp_path):
     """Four top placements and two bottom ones all derive 180, and the CPL check agrees with itself."""
-    validator = load_script()
+    validator = load_script("validate_board")
     body = "".join(
         footprint_text(f"Q{i}", "F.Cu", r) for i, r in enumerate((0, 90, 180, 270), 1)
     )
@@ -77,7 +69,7 @@ def test_sot23_at_every_placement_emits_the_same_correction(tmp_path):
 
 def test_expected_cpl_rotation_matches_upstream():
     """Upstream mirrors bottom parts as 180 minus the angle, then adds the correction."""
-    validator = load_script()
+    validator = load_script("validate_board")
     assert validator.expected_cpl_rotation(90, False, 180) == 270
     assert validator.expected_cpl_rotation(90, True, 180) == 270
     assert validator.expected_cpl_rotation(0, True, 180) == 0
@@ -86,7 +78,7 @@ def test_expected_cpl_rotation_matches_upstream():
 
 def test_missing_fixture_and_blank_truth(tmp_path):
     """No recorded response is reported; a blank truth means 'must not derive'."""
-    validator = load_script()
+    validator = load_script("validate_board")
     body = footprint_text("Q1", "F.Cu", 0).replace("C2132", "C999999999")
     rows = validator.evaluate(board_file(tmp_path, body), FIXTURES)
     assert rows[0]["verdict"] is None
@@ -108,7 +100,7 @@ def test_missing_fixture_and_blank_truth(tmp_path):
 
 def test_rows_come_out_in_natural_reference_order(tmp_path):
     """Q2 sorts before Q10, whatever order pcbnew wrote the footprints in."""
-    validator = load_script()
+    validator = load_script("validate_board")
     body = "".join(footprint_text(ref, "F.Cu", 0) for ref in ("Q10", "Q2", "Q1"))
     rows = validator.evaluate(board_file(tmp_path, body), FIXTURES)
     assert [row["reference"] for row in rows] == ["Q1", "Q2", "Q10"]
@@ -117,7 +109,7 @@ def test_rows_come_out_in_natural_reference_order(tmp_path):
 
 def test_main_end_to_end_reports_and_exits(tmp_path, capsys):
     """The gate is main's exit code: 0 when JLC agrees, 1 with one reason line per disagreement."""
-    validator = load_script()
+    validator = load_script("validate_board")
     body = footprint_text("Q1", "F.Cu", 0) + footprint_text(
         "Q2", "B.Cu", 90, mirror=True
     )
@@ -142,7 +134,7 @@ def test_main_end_to_end_reports_and_exits(tmp_path, capsys):
 
 def test_load_truth_tolerates_spreadsheet_output(tmp_path):
     """A BOM, capitalised headers and a missing cell are read; a missing column stops the run."""
-    validator = load_script()
+    validator = load_script("validate_board")
     path = tmp_path / "truth.csv"
     path.write_text("﻿Reference,Observed_Rotation\nQ1,90\nQ2\n\n", encoding="utf-8")
     assert validator.load_truth(path) == {"Q1": "90", "Q2": ""}
@@ -153,7 +145,7 @@ def test_load_truth_tolerates_spreadsheet_output(tmp_path):
 
 def test_refused_part_with_a_recorded_angle_is_a_disagreement(tmp_path):
     """A red verdict against a JLC angle is reported with the status, never silently skipped."""
-    validator = load_script()
+    validator = load_script("validate_board")
     body = footprint_text("U1", "F.Cu", 0).replace("C2132", "C3014306")
     rows = validator.evaluate(board_file(tmp_path, body), FIXTURES)
     assert rows[0]["verdict"].status == "red"
@@ -170,7 +162,7 @@ def test_refused_part_with_a_recorded_angle_is_a_disagreement(tmp_path):
 
 def test_evaluate_uses_the_plugin_flip_constant_by_default(tmp_path, monkeypatch):
     """With no --flip-y the gate tests FLIP_EASYEDA_Y itself, so changing the constant changes the gate."""
-    validator = load_script()
+    validator = load_script("validate_board")
     board = board_file(tmp_path, footprint_text("Q1", "F.Cu", 0))
     as_shipped = validator.evaluate(board, FIXTURES)[0]["verdict"]
     geometry = importlib.import_module("jlcfootprint.geometry")
@@ -187,7 +179,7 @@ def test_evaluate_uses_the_plugin_flip_constant_by_default(tmp_path, monkeypatch
 
 def test_corrupt_fixture_names_the_file(tmp_path):
     """A truncated recording stops the run with its path instead of a bare JSON error."""
-    validator = load_script()
+    validator = load_script("validate_board")
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
     (fixtures / "C2132.json").write_text('{"success": tru', encoding="utf-8")
@@ -198,7 +190,7 @@ def test_corrupt_fixture_names_the_file(tmp_path):
 
 def test_axis_parts_compare_modulo_180():
     """A resistor JLC shows at 180 where we emit 0 is the same placement; polarized parts are not."""
-    validator = load_script()
+    validator = load_script("validate_board")
 
     def row(reference, method, rotation):
         return {
@@ -231,7 +223,7 @@ def test_pro_fixtures_assemble_a_part_like_the_cache_would(tmp_path):
     import json
     import shutil
 
-    validator = load_script()
+    validator = load_script("validate_board")
     index = validator.load_pro_index(PRO_FIXTURES)
     assert index["C2132"] is not None and len(index) >= 35
     record = validator.load_pro_record(PRO_FIXTURES, index, "C2132")
@@ -274,7 +266,7 @@ def test_pro_fixtures_assemble_a_part_like_the_cache_would(tmp_path):
 
 def test_pro_fixtures_reject_a_broken_batch_file(tmp_path):
     """A batch file that is not a recorded answer stops the run with its name."""
-    validator = load_script()
+    validator = load_script("validate_board")
     broken = tmp_path / "pro"
     broken.mkdir()
     (broken / "devices_bad.json").write_text("[]")
