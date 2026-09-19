@@ -240,10 +240,6 @@ class Cache:
                 needed.add("symbol")
         return needed
 
-    def needs_fetch(self, lcsc: str, now: float | None = None) -> bool:
-        """Return True when the part must hit the network for anything."""
-        return bool(self.needs(lcsc, now))
-
     @staticmethod
     def _has_package(con: sqlite3.Connection, puuid: str) -> bool:
         return (
