@@ -13,8 +13,14 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+from .geometry import pad_box_centre
+
 if TYPE_CHECKING:  # pragma: no cover - annotations only; no runtime import cycle
     from .controller import Decision, FetchState, PartDetail
+
+# Closer than this to the pad-box centre reads as "on" it, which is what the two
+# decimals the line prints can tell apart.
+ORIGIN_EPSILON_MM = 0.005
 
 # The column's states, worst first: this is also the ascending sort order of
 # spec 16.3 (a misfit, a warning, no data, paused, queued, a derived green, an
@@ -333,7 +339,39 @@ def kicad_facts(detail: PartDetail) -> list:
     return facts
 
 
-def jlc_facts(detail: PartDetail) -> list:
+def origin_text(detail: PartDetail, exact_origin: bool = False) -> str:
+    """Return the JLC panel's origin line: where it is and whether the CPL uses it (17.5).
+
+    The offset is the one the CPL applies, so it is read against the pad-box centre
+    upstream emits today; a part with no placement has no origin to state.
+    """
+    origin = detail.origin
+    if origin is None:
+        return "none: no placement"
+    used = "used in the CPL" if exact_origin else "not used: the setting is off"
+    centre = pad_box_centre(detail.kicad_pads)
+    if centre is None:
+        return f"{origin[0]:.2f}, {origin[1]:.2f} mm in the footprint frame; {used}"
+    dx, dy = origin[0] - centre[0], origin[1] - centre[1]
+    parts = []
+    if abs(dx) >= ORIGIN_EPSILON_MM:
+        parts.append(f"{abs(dx):.2f} mm {'right' if dx > 0 else 'left'}")
+    if abs(dy) >= ORIGIN_EPSILON_MM:
+        # The footprint frame is KiCad's, Y down, so a positive dy is below.
+        parts.append(f"{abs(dy):.2f} mm {'below' if dy > 0 else 'above'}")
+    if not parts:
+        return f"on the pad-box centre; {used}"
+    # "0.30 mm right, 0.15 mm below the pad-box centre" reads as the spec writes it;
+    # a horizontal word on its own needs the "of".
+    joint = (
+        " the pad-box centre"
+        if abs(dy) >= ORIGIN_EPSILON_MM
+        else " of the pad-box centre"
+    )
+    return f"{', '.join(parts)}{joint}; {used}"
+
+
+def jlc_facts(detail: PartDetail, exact_origin: bool = False) -> list:
     """Return the dialog's right column: what EasyEDA's drawing and symbol say."""
     pads = [pad for pad in detail.jlc_pads if pad.number]
     numbers = sorted({pad.number for pad in pads})
@@ -392,6 +430,7 @@ def jlc_facts(detail: PartDetail) -> list:
             )
             or "none",
         ),
+        ("Origin", origin_text(detail, exact_origin)),
         (
             "Fetched",
             f"{_when(detail.fetched_at)} ({detail.source})"

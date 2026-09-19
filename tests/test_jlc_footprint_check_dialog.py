@@ -375,7 +375,7 @@ def test_the_dialog_builds_for_every_state_of_a_row(dialog_module, state):
     assert dialog.cpl.GetLabel().startswith("The CPL emits")
     assert dialog.banner.colour is not None
     assert len(dialog.kicad_panel.grid.items) == 2 * 8  # label and value per fact
-    assert len(dialog.jlc_panel.grid.items) == 2 * 10
+    assert len(dialog.jlc_panel.grid.items) == 2 * 11  # the origin line since M4
     assert "Pads KiCad/JLC" in dialog.numbers.GetLabel()
     assert dialog.override_button.IsEnabled() is True
     assert dialog.clear_button.IsEnabled() is (state == "override")
@@ -966,3 +966,53 @@ def test_the_context_menu_carries_the_jlc_submenu(monkeypatch):
     window, _model, _control = _window(main, MagicMock(), ("R9",), ("",))
     bare = main.JLCPCBTools._append_jlc_footprint_menu(window, FakeMenu())
     assert [item.enabled for item in bare.items] == [False, False, True, True, True]
+
+
+# ---------------------------------------------------------------------------
+# M4: JLC's package origin on the canvas and in the facts (spec 17.5)
+# ---------------------------------------------------------------------------
+
+
+def _facts(panel) -> dict:
+    """Return a facts panel's label/value pairs as a dict."""
+    labels = [item.GetLabel() for item in panel.grid.items]
+    return {name.rstrip(":"): value for name, value in zip(labels[::2], labels[1::2])}
+
+
+@pytest.mark.parametrize("exact_origin", [True, False])
+def test_the_jlc_panel_s_origin_line_follows_the_setting(dialog_module, exact_origin):
+    """The dialog reads its own section of the window's settings, nothing else."""
+    dialog = build(
+        dialog_module,
+        make_detail(),
+        settings={"jlcfootprint": {"exact_origin": exact_origin}},
+    )
+
+    origin = _facts(dialog.jlc_panel)["Origin"]
+
+    assert origin.startswith("on the pad-box centre; ")
+    assert origin.endswith("used in the CPL" if exact_origin else "the setting is off")
+
+
+def test_a_dialog_without_settings_says_the_origin_is_not_used(dialog_module):
+    """No settings at all reads the setting off rather than crashing on the key."""
+    dialog = build(dialog_module, make_detail())
+
+    assert _facts(dialog.jlc_panel)["Origin"].endswith("not used: the setting is off")
+
+
+def test_the_painter_draws_the_origin_cross_in_jlc_s_own_colour(dialog_module):
+    """Spec 17.5: the cross is not an annotation on a pad, so it keeps the pad colour."""
+    module = dialog_module.module
+    dialog = build(dialog_module, make_detail())
+    dialog.canvas.client_size = _Size(420, 300)
+    drawing = dialog.canvas.build_overlay()
+
+    assert len(drawing.by_role("jlc_origin")) == 2
+    assert module.role_colour("jlc_origin", True) == module.role_colour("jlc_pad", True)
+    assert module.role_colour("jlc_origin", False) == module.role_colour(
+        "jlc_pad", False
+    )
+    dc = RecordingDC()
+    assert module.draw_primitives(dc, drawing.by_role("jlc_origin"), dark=True) == 2
+    assert len(dc.of("line")) == 2

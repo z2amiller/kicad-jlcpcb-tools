@@ -11,12 +11,13 @@ from jlcfootprint.overlay import (
     JLC_PLACED,
     JLC_RAW,
     KICAD,
+    ORIGIN_ARM_PX,
     grid_mm,
     inverse,
     overlay,
     placed,
 )
-from jlcfootprint.resolver import resolve
+from jlcfootprint.resolver import Verdict, resolve
 from jlcfootprint.verdicts import StoredVerdict
 
 CANVAS = (420, 300)
@@ -391,3 +392,45 @@ def test_the_inverse_of_a_turned_placement_is_its_own_inverse():
         assert (back.offset_x, back.offset_y) == pytest.approx(
             (placement.offset_x, placement.offset_y), abs=1e-9
         )
+
+
+def test_the_canvas_marks_jlc_s_package_origin_with_a_cross():
+    """Spec 17.5: two diagonals of a fixed DIP size, centred on the origin's pixel."""
+    drawing = overlay(polarized(), CANVAS)
+
+    arms = drawing.by_role("jlc_origin")
+
+    assert len(arms) == 2
+    assert {(arm.x2 - arm.x, arm.y2 - arm.y) for arm in arms} == {
+        (2 * ORIGIN_ARM_PX, 2 * ORIGIN_ARM_PX),
+        (2 * ORIGIN_ARM_PX, -2 * ORIGIN_ARM_PX),
+    }
+    centres = {((arm.x + arm.x2) / 2, (arm.y + arm.y2) / 2) for arm in arms}
+    assert len(centres) == 1
+
+
+def test_the_origin_cross_moves_with_the_drawing_s_own_origin():
+    """A drawing offset from the pads puts the cross off the canvas centre, by the offset."""
+    shifted = [Pad("1", -0.8, 0.0, 1.3, 1.5), Pad("2", 1.2, 0.0, 1.3, 1.5)]
+    matched_k, matched_j, _ = pair_by_name(KICAD_0805, shifted)
+    moved = detail(
+        jlc_pads=shifted,
+        verdict=Verdict(
+            status="green", rotation=0, placement=align(matched_k, matched_j)
+        ),
+    )
+
+    drawing = overlay(moved, CANVAS)
+
+    arm = drawing.by_role("jlc_origin")[0]
+    centre_x = (arm.x + arm.x2) / 2
+    # The drawing sits 0.2 mm right of the pads, so its origin is 0.2 mm left of them.
+    plain = overlay(polarized(), CANVAS).by_role("jlc_origin")[0]
+    assert centre_x < (plain.x + plain.x2) / 2
+
+
+def test_the_origin_cross_belongs_to_the_transformed_layer():
+    """Without a placement, or with the transformed layer off, no cross is drawn."""
+    assert overlay(polarized(), CANVAS, layers=(KICAD,)).by_role("jlc_origin") == []
+    assert overlay(detail(), CANVAS).by_role("jlc_origin") == []
+    assert overlay(polarized(), CANVAS, layers=(JLC_RAW,)).by_role("jlc_origin") == []
