@@ -85,14 +85,14 @@ def test_live_record_round_trip(cache):
 
 def test_needs_fetch_rules(cache):
     """Absent and error rows fetch; ok rows never; none rows after thirty days."""
-    assert cache.needs_fetch("C1")
+    assert cache.needs("C1")
     cache.store(recorded("C2132"), now=1000)
-    assert not cache.needs_fetch("C2132", now=10**9)
+    assert not cache.needs("C2132", now=10**9)
     cache.store(ComponentRecord(lcsc="C2", status="error", error="HTTP 403"), now=1000)
-    assert cache.needs_fetch("C2", now=1001)
+    assert cache.needs("C2", now=1001)
     cache.store(ComponentRecord(lcsc="C3", status="none"), now=1000)
-    assert not cache.needs_fetch("C3", now=1000 + NONE_RETRY_S - 1)
-    assert cache.needs_fetch("C3", now=1000 + NONE_RETRY_S)
+    assert not cache.needs("C3", now=1000 + NONE_RETRY_S - 1)
+    assert cache.needs("C3", now=1000 + NONE_RETRY_S)
     assert cache.status("C3") == "none"
     assert cache.status("C4") is None
 
@@ -125,7 +125,7 @@ def test_seeded_pin1_polarity_becomes_a_one_pin_symbol(cache):
     assert part.record.symbol_pins == [SymbolPin(number="1", label="A")]
     assert part.record.package_name == "LED0603-RD"
     assert _rounded(part.record.pads) == _rounded(recorded("C2132").pads)
-    assert not cache.needs_fetch("C9", now=10**9)
+    assert not cache.needs("C9", now=10**9)
 
 
 def test_stored_pad_formats_read_back_as_raw_pads():
@@ -248,7 +248,7 @@ def test_needs_follows_a_live_row_through_its_pieces(cache):
     assert cache.needs("C1") == {"lookup"}
     cache.store_lookup("C1", "sym-1", "fp-1", now=10)
     assert cache.needs("C1") == {"footprint", "symbol"}
-    assert cache.needs_fetch("C1")
+    assert cache.needs("C1")
     part = cache.part("C1")
     assert (part.record.status, part.record.puuid, part.record.symbol_uuid) == (
         "ok",
@@ -318,7 +318,7 @@ def test_seed_rows_never_need_a_symbol(cache):
             (json.dumps(PRO_SOT23), PADS_PRO),
         )
     assert cache.needs("C9") == set()
-    assert not cache.needs_fetch("C9")
+    assert not cache.needs("C9")
 
 
 def test_stored_origin_reads_the_classic_head_and_is_zero_otherwise():
