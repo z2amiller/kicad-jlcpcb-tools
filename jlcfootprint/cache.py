@@ -28,9 +28,9 @@ from .easyeda_parse import (
     SymbolRecord,
     parse_footprint_pads,
     parse_pro_pads,
-    pin1_polarity,
 )
 from .naming import parse_package_name
+from .records import pin1_polarity
 
 FILENAME = "jlcfootprint-cache.db"
 SCHEMA_VERSION = "1"

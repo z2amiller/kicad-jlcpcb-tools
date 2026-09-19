@@ -10,9 +10,9 @@ from jlcfootprint.easyeda_parse import (
     parse_component_response,
     parse_footprint_pads,
     parse_symbol_pins,
-    pin1_polarity,
 )
 from jlcfootprint.geometry import easyeda_pads_to_mm, named_pads
+from jlcfootprint.records import pin1_polarity
 
 FIXTURES = Path(__file__).parent / "fixtures" / "jlcfootprint" / "easyeda"
 

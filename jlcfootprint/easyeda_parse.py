@@ -16,10 +16,12 @@ from dataclasses import dataclass, field
 import json
 from typing import Any
 
-from .records import PIN1_ANODE_LABELS, PIN1_CATHODE_LABELS, SymbolPin
+from .records import SymbolPin
 
-# PIN1_CATHODE_LABELS, PIN1_ANODE_LABELS and SymbolPin live in .records, shared
-# with the resolver core; re-exported here so this module's own names are unchanged.
+# SymbolPin lives in .records, shared with the resolver core; re-exported here so
+# this module's own name is unchanged.  The pin-1 label sets and pin1_polarity,
+# which reads a symbol rather than parsing one, live there too and are imported
+# from .records by the two modules that use them.
 
 
 @dataclass
@@ -97,19 +99,6 @@ def parse_symbol_pins(shapes: list[Any]) -> tuple[list[SymbolPin], int]:
 def _normal_number(number: str) -> str:
     """Strip leading zeros from purely numeric pin numbers so ``01`` and ``1`` agree."""
     return (number.lstrip("0") or "0") if number.isdigit() else number
-
-
-def pin1_polarity(pins: list[SymbolPin]) -> str | None:
-    """Return 'K', 'A' or None for pin 1, using the crawler's label sets."""
-    for pin in pins:
-        if pin.number != "1":
-            continue
-        label = pin.label.upper()
-        if label in PIN1_CATHODE_LABELS:
-            return "K"
-        if label in PIN1_ANODE_LABELS:
-            return "A"
-    return None
 
 
 def parse_footprint_pads(
