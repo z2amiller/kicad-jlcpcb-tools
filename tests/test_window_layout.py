@@ -381,7 +381,12 @@ _helper_symbols = {
 _stubs = mainwindow_stubs(
     _PACKAGE,
     wx=_wx,
-    datamodel={"PartSelectorDataModel": MagicMock()},
+    # ``jlc_footprint_window`` is loaded under these stubs too, and it names the
+    # part list's model for the JLC column's index.
+    datamodel={
+        "PartSelectorDataModel": MagicMock(),
+        "PartListDataModel": type("PartListDataModel", (), {"columns": {}}),
+    },
     dataview_highlight={"HighlightedTextRenderer": MagicMock()},
     helpers=_helper_symbols,
 )

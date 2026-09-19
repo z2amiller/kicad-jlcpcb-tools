@@ -231,8 +231,9 @@ def _window(module, check):
 def test_the_window_fills_and_clears_the_glyph_through_the_check(models, monkeypatch):
     """A result repaints both cells of every reference; the setting off clears the glyph."""
     main = layout.mainwindow
-    monkeypatch.setattr(main, "is_footprint_check_enabled", _enabled)
-    monkeypatch.setattr(main, "glyph_state", lambda check, reference: "caveat")
+    presenter = main.jlc_footprint_window
+    monkeypatch.setattr(presenter, "is_footprint_check_enabled", _enabled)
+    monkeypatch.setattr(presenter, "glyph_state", lambda check, reference: "caveat")
     model = _model(models, "R1", "R2")
     check = types.SimpleNamespace(
         generation=4,

@@ -82,18 +82,12 @@ from .helpers import (
     getVersion,
     loadBitmapScaled,
 )
-from .jlc_footprint_detail import JlcFootprintDetailDialog
+from . import jlc_footprint_window
 from .jlc_footprint_check import (
-    clear_cache as clear_jlc_footprint_cache,
-    create_footprint_check,
     is_footprint_check_enabled,
-    recheck_board as recheck_jlc_footprint_board,
-    refetch_references as refetch_jlc_footprint_references,
-    refresh_board_data as refresh_jlc_footprint_board_data,
     show_generate_summary,
     wait_for_pending_fetches,
 )
-from .jlcfootprint.presentation import cell_help, glyph_state, part_detail
 from .kicad_drc import DRCViolationCounter
 from .library import CorrectionState, Library, LibraryState
 from .partdetails import PartDetailsDialog
@@ -145,11 +139,6 @@ ID_CONTEXT_MENU_ADD_ROT_BY_PACKAGE = wx.NewIdRef()
 ID_CONTEXT_MENU_ADD_ROT_BY_NAME = wx.NewIdRef()
 ID_CONTEXT_MENU_APPLY_PART_PREFERENCES = wx.NewIdRef()
 ID_CONTEXT_MENU_SAVE_PART_PREFERENCES = wx.NewIdRef()
-ID_CONTEXT_MENU_JLC_DETAILS = wx.NewIdRef()
-ID_CONTEXT_MENU_JLC_REFETCH = wx.NewIdRef()
-ID_CONTEXT_MENU_JLC_RECHECK = wx.NewIdRef()
-ID_CONTEXT_MENU_JLC_REFRESH = wx.NewIdRef()
-ID_CONTEXT_MENU_JLC_CLEAR_CACHE = wx.NewIdRef()
 
 
 class KicadProvider:
@@ -162,6 +151,10 @@ class KicadProvider:
 
 class JLCPCBTools(wx.Frame):
     """JLCPCBTools main application window."""
+
+    # Built on first use by the property below, so a window that never touches the
+    # JLC footprint check never builds one.
+    _jlc_footprint_presenter = None
 
     def __init__(
         self,
@@ -1606,200 +1599,98 @@ class JLCPCBTools(wx.Frame):
         """
         wx.PostEvent(self, BomDataChangedEvent(source="enrichment_update"))
 
+    @property
+    def jlc_footprint_presenter(self) -> jlc_footprint_window.JlcFootprintPresenter:
+        """Return this window's JLC footprint presenter, built once on first use.
+
+        Everything the window does with the footprint check lives there; the
+        methods below it are the delegators the hooks, the binds and the tests
+        reach.
+        """
+        presenter = self._jlc_footprint_presenter
+        if presenter is None:
+            presenter = self._jlc_footprint_presenter = (
+                jlc_footprint_window.JlcFootprintPresenter(self)
+            )
+        return presenter
+
     def _start_jlc_footprint_check(self) -> None:
         """Start the footprint check for the open board when the setting is on."""
-        self._stop_jlc_footprint_check()
-        if self.store is None or not is_footprint_check_enabled(self.settings):
-            return
-        try:
-            check = create_footprint_check(self, self.pcbnew)
-            check.start()
-            check.scan_board()
-        except (sqlite3.Error, OSError) as error:
-            self.logger.warning("JLC footprint check unavailable: %s", error)
-            return
-        self.jlc_footprint_check = check
+        self.jlc_footprint_presenter._start_jlc_footprint_check()
 
     def _stop_jlc_footprint_check(self) -> None:
         """Stop the footprint check's background thread, if one is running."""
-        check = getattr(self, "jlc_footprint_check", None)
-        if check is not None:
-            self.jlc_footprint_check = None
-            check.stop()
+        self.jlc_footprint_presenter._stop_jlc_footprint_check()
 
     def _enqueue_jlc_footprint_check(self, references: Iterable[str]) -> None:
         """Have newly assigned parts checked."""
-        check = getattr(self, "jlc_footprint_check", None)
-        if check is not None:
-            check.enqueue_references(references)
+        self.jlc_footprint_presenter._enqueue_jlc_footprint_check(references)
 
     def on_jlc_footprint_result(self, e):
-        """Repaint the Rotation cells of one checked part; a superseded board load's results are dropped."""
-        check = getattr(self, "jlc_footprint_check", None)
-        if check is None or getattr(e, "generation", None) != check.generation:
-            return
-        references = check.references_for(e.lcsc)
-        self.logger.debug(
-            "JLC footprint check: %s checked for %s",
-            e.lcsc,
-            ", ".join(references) or "no reference",
-        )
-        for reference in references:
-            self.partlist_data_model.set_rotation(
-                reference, check.display_text(reference) or "raw"
-            )
-            self._apply_jlc_cell(reference)
-
-    def _activated_model_column(self, event: Any) -> Optional[int]:  # noqa: UP045
-        """Return the model column an activation event names, or None when it names none.
-
-        wxGTK fills both the column object and its index; macOS fills the index only
-        (measured 2026-09-17 on wx 4.2.2a1 osx-cocoa), so the index is mapped back
-        through the control's own column positions.  A port that reports neither gets
-        the old behaviour and the context menu is the way in.
-        """
-        column = event.GetDataViewColumn()
-        if column is None:
-            index = event.GetColumn()
-            if index is None or index < 0:
-                return None
-            control = self.footprint_list
-            column = next(
-                (
-                    candidate
-                    for candidate in control.GetColumns()
-                    if control.GetColumnPosition(candidate) == index
-                ),
-                None,
-            )
-        return None if column is None else column.GetModelColumn()
+        """Repaint the Rotation and JLC cells of one checked part."""
+        self.jlc_footprint_presenter.on_jlc_footprint_result(e)
 
     def on_footprint_activated(self, event: Any) -> None:
         """Double-clicking a JLC cell opens the detail dialog; any other cell assigns a part."""
-        if self._activated_model_column(event) == PartListDataModel.columns["JLC_COL"]:
-            self.show_jlc_footprint_detail()
-            return
-        self.select_part(event)
+        self.jlc_footprint_presenter.on_footprint_activated(event)
 
-    def _first_selected_jlc_reference(self) -> Optional[str]:  # noqa: UP045
-        """Return the first selected reference that carries an LCSC number."""
-        model = self.partlist_data_model
-        for item in self.footprint_list.GetSelections():
-            reference = str(model.get_reference(item) or "")
-            if reference and str(model.get_lcsc(item) or "").strip():
-                return reference
-        return None
-
-    def show_jlc_footprint_detail(self, reference: Optional[str] = None) -> None:  # noqa: UP045
+    def show_jlc_footprint_detail(self, reference: Optional[str] = None) -> None:
         """Open the JLC footprint detail dialog for one part (spec 16.4)."""
-        check = self._active_jlc_footprint_check()
-        if check is None:
-            return
-        if reference is None:
-            reference = self._first_selected_jlc_reference()
-        if reference is None:
-            return
-        detail = part_detail(check, reference, reread=True)
-        if detail is None:
-            return
-        dialog = JlcFootprintDetailDialog(
-            self,
-            detail,
-            set_override=lambda rotation, note: self._set_jlc_override(
-                reference, rotation, note
-            ),
-            refetch=lambda: self._refetch_jlc_references([reference]),
-            settings=self.settings,
-        )
-        try:
-            dialog.ShowModal()
-        finally:
-            # A modal dialog dismissed with its Close button or Esc ends the modal
-            # loop directly and never sends EVT_CLOSE, so the size is remembered
-            # here rather than only from the window's own close box.
-            dialog.remember_size()
-            dialog.Destroy()
-        self.save_settings()
+        self.jlc_footprint_presenter.show_jlc_footprint_detail(reference)
 
     def _set_jlc_override(
-        self,
-        reference: str,
-        rotation: Optional[int],  # noqa: UP045
-        note: str,
+        self, reference: str, rotation: Optional[int], note: str
     ) -> Any:
-        """Write an override (or clear it), repaint the rows that share the verdict, return the detail."""
-        check = self._active_jlc_footprint_check()
-        if check is None or check.set_override(reference, rotation, note) is None:
-            return None
-        self._repaint_jlc_references(check.references_sharing_verdict(reference))
-        return part_detail(check, reference)
+        """Write an override (or clear it), repaint the shared rows, return the detail."""
+        return self.jlc_footprint_presenter._set_jlc_override(reference, rotation, note)
 
     def _refetch_jlc_references(self, references: Iterable[str]) -> Any:
         """Re-fetch these parts' EasyEDA data and return the first one's fresh detail."""
-        check = self._active_jlc_footprint_check()
-        if check is None:
-            return None
-        wanted = list(references)
-        refetch_jlc_footprint_references(self, wanted, check)
-        self._repaint_jlc_references(wanted)
-        return part_detail(check, wanted[0]) if wanted else None
-
-    def _repaint_jlc_references(self, references: Iterable[str]) -> None:
-        """Repaint the Rotation text and the JLC glyph of the given references."""
-        check = self._active_jlc_footprint_check()
-        if check is None:
-            return
-        for reference in references:
-            self.partlist_data_model.set_rotation(
-                reference, check.display_text(reference) or "raw"
-            )
-            self._apply_jlc_cell(reference)
+        return self.jlc_footprint_presenter._refetch_jlc_references(references)
 
     def _jlc_cell_help(self, item: Any) -> str:
         """Return the hover help for a JLC cell: that part's verdict text (spec 16.3)."""
-        check = self._active_jlc_footprint_check()
-        if check is None:
-            return ""
-        return cell_help(check, self.partlist_data_model.get_reference(item))
+        return self.jlc_footprint_presenter._jlc_cell_help(item)
 
     def _apply_jlc_cell(self, reference: str) -> None:
         """Set one row's JLC glyph from the footprint check, or clear it when off."""
-        check = self._active_jlc_footprint_check()
-        self.partlist_data_model.set_jlc_state(
-            reference, "" if check is None else glyph_state(check, reference)
-        )
-
-    def _active_jlc_footprint_check(self):
-        """Return the running footprint check when the setting is on, else None."""
-        if not is_footprint_check_enabled(getattr(self, "settings", {})):
-            return None
-        return getattr(self, "jlc_footprint_check", None)
+        self.jlc_footprint_presenter._apply_jlc_cell(reference)
 
     def _rotation_cell_text(self, part: dict[str, Any], corrections) -> str:
         """Return the Rotation column text: the footprint check's decision, else the rule."""
-        check = self._active_jlc_footprint_check()
-        if check is not None:
-            return check.display_text(part["reference"]) or "raw"
-        if corrections is None:
-            return "Unresolved"
-        return str(self.get_correction(part, corrections))
+        return self.jlc_footprint_presenter._rotation_cell_text(part, corrections)
 
     def _refresh_jlc_rotation_cells(self) -> None:
         """Repaint every Rotation and JLC cell from the footprint check's decisions."""
-        check = self._active_jlc_footprint_check()
-        if check is None:
-            return
-        model = self.partlist_data_model
-        for row in model.get_all():
-            reference = str(row[model.columns["REF_COL"]] or "")
-            model.set_rotation(reference, check.display_text(reference) or "raw")
-            self._apply_jlc_cell(reference)
+        self.jlc_footprint_presenter._refresh_jlc_rotation_cells()
 
     def read_corrections_for_summary(self):
-        """Read the correction rules for the rotation summary's comparison; None when unavailable."""
-        snapshot = self.library.read_correction_data()
-        self.update_correction_status(snapshot)
-        return snapshot.corrections
+        """Read the correction rules for the rotation summary's comparison."""
+        return self.jlc_footprint_presenter.read_corrections_for_summary()
+
+    def _append_jlc_footprint_menu(self, parent_menu: Any) -> Any:
+        """Append the "JLC footprint" submenu to the context menu (spec 16.3)."""
+        return self.jlc_footprint_presenter._append_jlc_footprint_menu(parent_menu)
+
+    def on_jlc_footprint_details(self, *_: object) -> None:
+        """Open the detail dialog for the first selected part with an LCSC."""
+        self.jlc_footprint_presenter.on_jlc_footprint_details()
+
+    def on_jlc_footprint_refetch(self, *_: object) -> None:
+        """Re-fetch the EasyEDA data of the selected parts (spec 16.5)."""
+        self.jlc_footprint_presenter.on_jlc_footprint_refetch()
+
+    def on_jlc_footprint_recheck(self, *_: object) -> None:
+        """Re-resolve every cached part on the board, with no network (spec 16.5)."""
+        self.jlc_footprint_presenter.on_jlc_footprint_recheck()
+
+    def on_jlc_footprint_refresh(self, *_: object) -> None:
+        """Forget and re-fetch every part on the board, after a confirmation (spec 16.5)."""
+        self.jlc_footprint_presenter.on_jlc_footprint_refresh()
+
+    def on_jlc_footprint_clear_cache(self, *_: object) -> None:
+        """Delete the whole EasyEDA cache, after a confirmation (spec 16.5)."""
+        self.jlc_footprint_presenter.on_jlc_footprint_clear_cache()
 
     def display_message(self, e):
         """Dispaly a message with the data from the event."""
@@ -2888,106 +2779,6 @@ class JLCPCBTools(wx.Frame):
 
         self.footprint_list.PopupMenu(right_click_menu)
         right_click_menu.Destroy()  # destroy to avoid memory leak
-
-    def _append_jlc_footprint_menu(self, parent_menu: Any) -> Any:
-        """Append the "JLC footprint" submenu to the context menu (spec 16.3).
-
-        Every entry is disabled when the check is off or its store is unavailable,
-        which is also what a board with no project storage looks like; the two
-        per-part entries also need a selected part with an LCSC number.
-        """
-        submenu = wx.Menu()
-        available = self._active_jlc_footprint_check() is not None
-        selected = available and self._first_selected_jlc_reference() is not None
-        for identifier, label, handler, enabled, separator in (
-            (
-                ID_CONTEXT_MENU_JLC_DETAILS,
-                "Details...",
-                self.on_jlc_footprint_details,
-                selected,
-                False,
-            ),
-            (
-                ID_CONTEXT_MENU_JLC_REFETCH,
-                "Re-fetch data",
-                self.on_jlc_footprint_refetch,
-                selected,
-                True,
-            ),
-            (
-                ID_CONTEXT_MENU_JLC_RECHECK,
-                "Re-check board",
-                self.on_jlc_footprint_recheck,
-                available,
-                False,
-            ),
-            (
-                ID_CONTEXT_MENU_JLC_REFRESH,
-                "Refresh board data",
-                self.on_jlc_footprint_refresh,
-                available,
-                False,
-            ),
-            (
-                ID_CONTEXT_MENU_JLC_CLEAR_CACHE,
-                "Clear cache",
-                self.on_jlc_footprint_clear_cache,
-                available,
-                False,
-            ),
-        ):
-            item = wx.MenuItem(submenu, identifier, label)
-            submenu.Append(item)
-            submenu.Bind(wx.EVT_MENU, handler, item)
-            item.Enable(bool(enabled))
-            if separator:
-                submenu.AppendSeparator()
-        parent_menu.AppendSubMenu(submenu, "JLC footprint")
-        return submenu
-
-    def on_jlc_footprint_details(self, *_: object) -> None:
-        """Open the detail dialog for the first selected part with an LCSC."""
-        self.show_jlc_footprint_detail()
-
-    def _selected_jlc_references(self) -> list[str]:
-        """Return every selected reference that carries an LCSC number."""
-        model = self.partlist_data_model
-        references = []
-        for item in self.footprint_list.GetSelections():
-            reference = str(model.get_reference(item) or "")
-            if reference and str(model.get_lcsc(item) or "").strip():
-                references.append(reference)
-        return references
-
-    def on_jlc_footprint_refetch(self, *_: object) -> None:
-        """Re-fetch the EasyEDA data of the selected parts (spec 16.5)."""
-        check = self._active_jlc_footprint_check()
-        references = self._selected_jlc_references()
-        if check is None or not references:
-            return
-        refetch_jlc_footprint_references(self, references, check)
-        self._repaint_jlc_references(references)
-
-    def on_jlc_footprint_recheck(self, *_: object) -> None:
-        """Re-resolve every cached part on the board, with no network (spec 16.5)."""
-        if self._active_jlc_footprint_check() is None:
-            return
-        recheck_jlc_footprint_board(self)
-        self._refresh_jlc_rotation_cells()
-
-    def on_jlc_footprint_refresh(self, *_: object) -> None:
-        """Forget and re-fetch every part on the board, after a confirmation (spec 16.5)."""
-        if self._active_jlc_footprint_check() is None:
-            return
-        if refresh_jlc_footprint_board_data(self):
-            self._refresh_jlc_rotation_cells()
-
-    def on_jlc_footprint_clear_cache(self, *_: object) -> None:
-        """Delete the whole EasyEDA cache, after a confirmation (spec 16.5)."""
-        if self._active_jlc_footprint_check() is None:
-            return
-        if clear_jlc_footprint_cache(self):
-            self._refresh_jlc_rotation_cells()
 
     def init_logger(self):
         """Initialize logger to log into textbox."""
