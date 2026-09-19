@@ -646,6 +646,28 @@ class SettingsDialog(wx.Dialog):
         )
 
         self.jlcfootprint_enabled_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        self.jlcfootprint_exact_origin_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Place parts at JLC's package origin",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="jlcfootprint.exact_origin",
+        )
+
+        self.jlcfootprint_exact_origin_setting.SetToolTip(
+            wx.ToolTip(
+                "Write each checked part's CPL position at the origin of JLC's own "
+                "package drawing instead of the centre of your pads; parts the check "
+                "could not judge keep the pad centre either way"
+            )
+        )
+
+        self.jlcfootprint_exact_origin_setting.Bind(
+            wx.EVT_CHECKBOX, self.update_settings
+        )
         self.jlcfootprint_seed_button = wx.Button(
             self,
             wx.ID_ANY,
@@ -662,6 +684,12 @@ class SettingsDialog(wx.Dialog):
         jlcfootprint_sizer = wx.BoxSizer(wx.HORIZONTAL)
         jlcfootprint_sizer.Add(
             self.jlcfootprint_enabled_setting, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        jlcfootprint_sizer.Add(
+            self.jlcfootprint_exact_origin_setting,
+            0,
+            wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
+            5,
         )
         jlcfootprint_sizer.AddStretchSpacer()
         jlcfootprint_sizer.Add(
@@ -932,8 +960,17 @@ class SettingsDialog(wx.Dialog):
         )
 
     def update_jlcfootprint_enabled(self, enabled: bool) -> None:
-        """Reflect whether CPL rotations come from the JLC footprint data."""
+        """Reflect whether CPL rotations come from the JLC footprint data.
+
+        The origin checkbox rides on this one: without the check there is no verdict
+        to take an origin from, so it is greyed out rather than silently ignored.
+        """
         self.jlcfootprint_enabled_setting.SetValue(bool(enabled))
+        self.jlcfootprint_exact_origin_setting.Enable(bool(enabled))
+
+    def update_jlcfootprint_exact_origin(self, enabled: bool) -> None:
+        """Reflect whether CPL positions come from JLC's package origin (spec 17.1)."""
+        self.jlcfootprint_exact_origin_setting.SetValue(bool(enabled))
 
     def seed_footprint_cache(self, *_) -> None:
         """Ask for a seed file and merge it into the footprint cache."""
@@ -976,6 +1013,10 @@ class SettingsDialog(wx.Dialog):
 
     def load_settings(self) -> None:
         """Load settings and set checkboxes accordingly."""
+        self.update_jlcfootprint_exact_origin(
+            self.parent.settings.get("jlcfootprint", {}).get("exact_origin", False)
+        )
+        # After the value, because this one also enables or disables that checkbox.
         self.update_jlcfootprint_enabled(
             self.parent.settings.get("jlcfootprint", {}).get("enabled", True)
         )

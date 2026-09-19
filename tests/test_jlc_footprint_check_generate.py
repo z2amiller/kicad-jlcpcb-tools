@@ -370,3 +370,55 @@ def test_result_event_repaints_the_checked_references(mainwindow):
         (("R1", "yellow"),),
         (("R2", "yellow"),),
     ]
+
+
+def test_the_summary_reports_the_position_split_from_the_window_s_settings(
+    facade, monkeypatch
+):
+    """Spec 17.4: the window carries the setting, so no generate step has to pass it."""
+    module, _ = facade
+    monkeypatch.setattr(
+        module,
+        "GenerateSummaryDialog",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ShowModal=lambda: 0, Destroy=lambda: None
+        ),
+    )
+    rows = [
+        module.CplRotation(
+            "Q1", "C1", "SOT-23", "v", 0, 180, 180, "derived", "green", None, "fits"
+        ),
+        module.CplRotation("Q2", "C2", "SOT-23", "v", 0, 0, None, "raw", "pending"),
+    ]
+    rows[0].position_source = "origin"
+    window = SimpleNamespace(settings={"jlcfootprint": {"exact_origin": True}})
+
+    text = module.show_generate_summary(window, rows, True)
+
+    assert text.startswith(
+        "Positions: 1 at JLC's package origin, 1 at the pad-box centre\n\n"
+    )
+    assert module.is_exact_origin_enabled(window.settings) is True
+    assert module.is_exact_origin_enabled({}) is False
+
+
+def test_a_window_carrying_no_settings_gets_m3_s_summary(facade, monkeypatch):
+    """A window object without the attribute reads the setting off, not on."""
+    module, _ = facade
+    monkeypatch.setattr(
+        module,
+        "GenerateSummaryDialog",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ShowModal=lambda: 0, Destroy=lambda: None
+        ),
+    )
+    rows = [
+        module.CplRotation(
+            "Q1", "C1", "SOT-23", "v", 0, 180, 180, "derived", "green", None, "fits"
+        )
+    ]
+    rows[0].position_source = "origin"
+
+    assert module.show_generate_summary(object(), rows, True).startswith(
+        "Does not fit (0)"
+    )

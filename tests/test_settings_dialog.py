@@ -501,3 +501,88 @@ def test_simplify_stock_event_updates_display_persists_and_reopens(
         parent.settings = {}
         parent.load_settings()
         assert SettingsDialog(parent).simplify_stock_setting.GetValue() is enabled
+
+
+def _origin_settings(enabled: bool, exact_origin: bool) -> dict:
+    """Return settings with the two JLC footprint switches set independently."""
+    settings_dict = _settings(False)
+    settings_dict["jlcfootprint"] = {
+        "enabled": enabled,
+        "exact_origin": exact_origin,
+    }
+    return settings_dict
+
+
+def test_the_exact_origin_checkbox_reads_its_own_setting():
+    """Its label is static and its value is the stored one (spec 17.1)."""
+    on = _dialog(_origin_settings(True, True)).jlcfootprint_exact_origin_setting
+    off = _dialog(_origin_settings(True, False)).jlcfootprint_exact_origin_setting
+
+    assert on.GetLabel() == off.GetLabel() == "Place parts at JLC's package origin"
+    assert (on.GetValue(), off.GetValue()) == (True, False)
+
+
+def test_the_exact_origin_checkbox_defaults_to_off():
+    """A settings file written before M4 has no key, so the box reads unchecked."""
+    settings_dict = _settings(True)
+    settings_dict["jlcfootprint"] = {"enabled": True}
+
+    assert _dialog(settings_dict).jlcfootprint_exact_origin_setting.GetValue() is False
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_the_exact_origin_checkbox_is_active_only_while_the_check_is_on(enabled):
+    """Without the check there is no verdict to take an origin from, so it greys out."""
+    dialog = _dialog(_origin_settings(enabled, True))
+
+    assert dialog.jlcfootprint_exact_origin_setting.IsEnabled() is enabled
+
+
+def test_turning_the_check_off_greys_the_exact_origin_checkbox_at_once():
+    """The enable handler runs on a real event and takes the other box with it."""
+    dialog = _dialog(_origin_settings(True, True))
+    control = dialog.jlcfootprint_enabled_setting
+    control.SetValue(False)
+
+    events = _fire(control)
+
+    assert dialog.jlcfootprint_exact_origin_setting.IsEnabled() is False
+    assert [(event.section, event.setting, event.value) for event in events] == [
+        ("jlcfootprint", "enabled", False)
+    ]
+
+
+def test_the_exact_origin_checkbox_posts_its_own_setting_event():
+    """Its name carries the section, so update_settings stores jlcfootprint.exact_origin."""
+    dialog = _dialog(_origin_settings(True, False))
+    control = dialog.jlcfootprint_exact_origin_setting
+    control.SetValue(True)
+
+    events = _fire(control)
+
+    assert [(event.section, event.setting, event.value) for event in events] == [
+        ("jlcfootprint", "exact_origin", True)
+    ]
+
+
+def test_the_exact_origin_setting_survives_the_main_window_and_a_reopen(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real event through the real window is written to settings.json and read back."""
+    monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    parent = object.__new__(JLCPCBTools)
+    parent.window = object()
+    parent.scale_factor = 1.0
+    parent.settings = _origin_settings(True, False)
+    parent.library = types.SimpleNamespace(datadir="/data")
+    dialog = SettingsDialog(parent)
+    control = dialog.jlcfootprint_exact_origin_setting
+    control.SetValue(True)
+
+    parent.update_settings(_fire(control)[0])
+
+    assert parent.settings["jlcfootprint"]["exact_origin"] is True
+    parent.settings = {}
+    parent.load_settings()
+    assert parent.settings["jlcfootprint"]["exact_origin"] is True
+    assert SettingsDialog(parent).jlcfootprint_exact_origin_setting.GetValue() is True
