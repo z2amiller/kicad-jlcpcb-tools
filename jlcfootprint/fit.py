@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from .geometry import Pad, centroid, named_pads, pad_geom
+from .geometry import Pad, centroid, named_pads, pad_geom, rotate
 from .polarity import is_no_function, normalise_function
 from .quality import assess_quality
 from .records import SymbolPin
@@ -220,11 +220,11 @@ def align(kicad: dict[str, Pad], jlc: dict[str, Pad]) -> Placement:
     )
     kx, ky = centroid(list(kicad.values()))
     jx, jy = centroid(list(jlc.values()))
-    theta = math.radians(transform.rotation_deg)
+    rx, ry = rotate(kx, ky, transform.rotation_deg)
     return Placement(
         rotation_deg=transform.rotation_deg,
-        offset_x=jx - (kx * math.cos(theta) - ky * math.sin(theta)),
-        offset_y=jy - (kx * math.sin(theta) + ky * math.cos(theta)),
+        offset_x=jx - rx,
+        offset_y=jy - ry,
         is_mirrored=transform.is_mirrored,
         is_underdetermined=transform.is_underdetermined,
         residual=transform.residual,
@@ -246,18 +246,15 @@ def package_origin(placement: Placement) -> tuple[float, float]:
     adapter, so the caller mirrors it back for a bottom part exactly as
     ``Fabrication.reposition`` mirrors a rule's offset.
     """
-    theta = math.radians(-placement.rotation_deg)
-    cos, sin = math.cos(theta), math.sin(theta)
     x, y = -placement.offset_x, -placement.offset_y
-    return (x * cos - y * sin, x * sin + y * cos)
+    return rotate(x, y, -placement.rotation_deg)
 
 
 def transformed(pad: Pad, placement: Placement) -> tuple[float, float, float, float]:
     """Return a KiCad pad's ``(x, y, w, h)`` after the placement (solver's math frame)."""
-    theta = math.radians(placement.rotation_deg)
-    cos, sin = math.cos(theta), math.sin(theta)
-    x = pad.x * cos - pad.y * sin + placement.offset_x
-    y = pad.x * sin + pad.y * cos + placement.offset_y
+    rx, ry = rotate(pad.x, pad.y, placement.rotation_deg)
+    x = rx + placement.offset_x
+    y = ry + placement.offset_y
     _, _, width, height = pad_geom(pad)
     if placement.rotation_deg % 180 == 90:
         width, height = height, width
@@ -399,8 +396,6 @@ def transformed_box(
     box: tuple[float, float, float, float], placement: Placement
 ) -> tuple[float, float, float, float]:
     """Return a KiCad-frame box after the placement, as the box of its moved corners."""
-    theta = math.radians(placement.rotation_deg)
-    cos, sin = math.cos(theta), math.sin(theta)
     xs, ys = [], []
     for x, y in (
         (box[0], box[1]),
@@ -408,8 +403,9 @@ def transformed_box(
         (box[2], box[3]),
         (box[0], box[3]),
     ):
-        xs.append(x * cos - y * sin + placement.offset_x)
-        ys.append(x * sin + y * cos + placement.offset_y)
+        rx, ry = rotate(x, y, placement.rotation_deg)
+        xs.append(rx + placement.offset_x)
+        ys.append(ry + placement.offset_y)
     return (min(xs), min(ys), max(xs), max(ys))
 
 
@@ -440,17 +436,14 @@ def shape_alignment(kicad: list[Pad], jlc: list[Pad]) -> tuple[int, int]:
     jx, jy = centroid(jlc)
     best: tuple[int, int, float] | None = None
     for rotation in (0, 90, 180, 270):
-        theta = math.radians(rotation)
-        cos, sin = math.cos(theta), math.sin(theta)
         placed = []
         for pad in kicad:
             x, y = pad.x - kx, pad.y - ky
             _, _, width, height = pad_geom(pad)
             if rotation % 180 == 90:
                 width, height = height, width
-            placed.append(
-                (x * cos - y * sin + jx, x * sin + y * cos + jy, width, height)
-            )
+            rx, ry = rotate(x, y, rotation)
+            placed.append((rx + jx, ry + jy, width, height))
         landed = 0
         distance = 0.0
         for jlc_pad in jlc:

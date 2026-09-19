@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from .fit import Placement, package_origin
+from .fit import Placement, package_origin, transformed
 from .geometry import Pad, named_pads, pad_geom
 from .model import PartDetail
 from .polarity import terminal_of
@@ -105,19 +105,10 @@ def inverse(placement: Placement) -> Placement:
 
 def placed(pad: Pad, placement: Placement | None) -> tuple:
     """Return ``(x, y, w, h)`` for one pad after a placement (or as it is, for None)."""
-    _, _, width, height = pad_geom(pad)
     if placement is None:
+        _, _, width, height = pad_geom(pad)
         return (pad.x, pad.y, width, height)
-    theta = math.radians(placement.rotation_deg)
-    cos, sin = math.cos(theta), math.sin(theta)
-    if placement.rotation_deg % 180 == 90:
-        width, height = height, width
-    return (
-        pad.x * cos - pad.y * sin + placement.offset_x,
-        pad.x * sin + pad.y * cos + placement.offset_y,
-        width,
-        height,
-    )
+    return transformed(pad, placement)
 
 
 def _boxes(pads: list[Pad], placement: Placement | None) -> list:
