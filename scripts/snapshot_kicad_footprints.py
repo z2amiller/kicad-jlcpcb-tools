@@ -22,7 +22,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tests.jlcfootprint_support import (  # noqa: E402
+from scripts.kicad_library import (  # noqa: E402
     KICAD_FOOTPRINTS,
     KICAD_SNAPSHOTS,
     installed_library_footprint,
