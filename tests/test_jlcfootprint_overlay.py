@@ -11,7 +11,6 @@ from jlcfootprint.overlay import (
     JLC_PLACED,
     JLC_RAW,
     KICAD,
-    MARGIN_FRACTION,
     grid_mm,
     inverse,
     overlay,
@@ -89,10 +88,10 @@ def test_the_scale_fits_both_pad_sets_with_a_margin_and_centres_them():
     drawing = overlay(polarized(), CANVAS)
     x1, y1, x2, y2 = drawing.bounds_mm
     assert (round(x1, 3), round(x2, 3)) == (-1.65, 1.65)  # the wider JLC pads
-    span = (x2 - x1) * (1.0 + 2 * MARGIN_FRACTION)
-    assert drawing.scale_px_per_mm == pytest.approx(
-        min(420 / span, 300 / ((y2 - y1) * (1.0 + 2 * MARGIN_FRACTION)))
-    )
+    # The literal this fixture produces at the spec's 15 % margin -- not recomputed
+    # from MARGIN_FRACTION, or a changed constant would move both sides at once and
+    # the assertion could never fail.
+    assert drawing.scale_px_per_mm == pytest.approx(97.9020979020979)
     pads = drawing.by_role("kicad_pad")
     centre_x = sum(pad.x + pad.width / 2.0 for pad in pads) / len(pads)
     assert centre_x == pytest.approx(210.0, abs=0.5)
