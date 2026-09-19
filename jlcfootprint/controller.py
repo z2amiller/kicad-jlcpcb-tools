@@ -107,8 +107,8 @@ class Decision:
     def display(self) -> str:
         """Return the Rotation column text: what the CPL emits, never the queue's state.
 
-        Spec 16.3 retired the pending ellipsis: a part still being fetched emits its
-        raw angle, so the cell says "raw" and the JLC column's clock says why.
+        A pending part's Rotation cell reads the raw angle; the JLC column's clock
+        shows why (spec 16.3).
         """
         if self.verdict is not None:
             return self.verdict.display_text
