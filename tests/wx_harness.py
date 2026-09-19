@@ -354,7 +354,6 @@ def load_mainwindow(package, *, wx=None, pcbnew=None, **overrides):
 
     The loaded module keeps its own reference to the fake wx, so a caller that
     needs to configure or assert on it can reach it as ``module.wx``.
-
     """
     stubs = mainwindow_stubs(package, wx=wx, pcbnew=pcbnew, **overrides)
 
