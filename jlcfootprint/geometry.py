@@ -124,6 +124,20 @@ def mirror_box(
     return (x1, -y2, x2, -y1)
 
 
+def rotate(x: float, y: float, degrees: float) -> tuple[float, float]:
+    """Rotate ``(x, y)`` counter-clockwise by ``degrees`` around the origin.
+
+    The one 2-by-2 the package's rotation sites shared by hand: ``math.radians``
+    then ``cos``, ``sin`` in the order they use.  A negative angle or a swapped
+    (x, y) pair still calls this; only sites whose angle has no degrees form
+    (already-radians values from ``atan2``) cannot, since converting those would
+    add a lossy round trip through ``degrees``/``radians``.
+    """
+    theta = math.radians(degrees)
+    cos, sin = math.cos(theta), math.sin(theta)
+    return (x * cos - y * sin, x * sin + y * cos)
+
+
 def centroid(pads: list[Pad]) -> tuple[float, float]:
     """Return the mean pad centre; raise ValueError for no pads."""
     if not pads:

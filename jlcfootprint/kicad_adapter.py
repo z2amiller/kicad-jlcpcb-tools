@@ -15,11 +15,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 import hashlib
 import json
-import math
 import re
 from typing import Any
 
-from .geometry import Pad, mirror_box, mirror_y, pad_hash
+from .geometry import Pad, mirror_box, mirror_y, pad_hash, rotate
 from .polarity import normalise_function
 
 # pcbnew's PAD_SHAPE and PAD_ATTRIB enumerations (KiCad 7 to 10) for boards read
@@ -121,15 +120,11 @@ def _relative_position(pad: Any, footprint: Any) -> tuple[float, float]:
     origin = footprint.GetPosition()
     point = pad.GetPosition()
     dx, dy = float(point.x - origin.x), float(point.y - origin.y)
-    theta = math.radians(_degrees(footprint.GetOrientation()))
     # A footprint's orientation turns its pads counter-clockwise as drawn, which on
     # pcbnew's Y-down canvas is board = R(-theta) * local, so removing the placement
     # is local = R(theta) * (board - origin), the matrix below.  Checked against
     # GetFPRelativePosition on 47 of 47 and 16 of 16 footprints, bottom side included.
-    return (
-        dx * math.cos(theta) - dy * math.sin(theta),
-        dx * math.sin(theta) + dy * math.cos(theta),
-    )
+    return rotate(dx, dy, _degrees(footprint.GetOrientation()))
 
 
 def _relative_rotation(pad: Any, footprint: Any) -> float:
@@ -203,8 +198,7 @@ def footprint_courtyard(
     if not callable(items):
         return None
     origin = footprint.GetPosition()
-    theta = math.radians(_degrees(footprint.GetOrientation()))
-    cos, sin = math.cos(theta), math.sin(theta)
+    orientation_deg = _degrees(footprint.GetOrientation())
     xs: list[float] = []
     ys: list[float] = []
     for item in items():
@@ -217,8 +211,9 @@ def footprint_courtyard(
         right, bottom = float(box.GetRight()) - half, float(box.GetBottom()) - half
         for bx, by in ((left, top), (right, top), (right, bottom), (left, bottom)):
             dx, dy = bx - float(origin.x), by - float(origin.y)
-            xs.append(dx * cos - dy * sin)
-            ys.append(dx * sin + dy * cos)
+            rx, ry = rotate(dx, dy, orientation_deg)
+            xs.append(rx)
+            ys.append(ry)
     if not xs:
         return None
     result = (to_mm(min(xs)), to_mm(min(ys)), to_mm(max(xs)), to_mm(max(ys)))
