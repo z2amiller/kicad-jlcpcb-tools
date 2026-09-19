@@ -363,17 +363,7 @@ def parse_kicad_pcb(path: str) -> list[KiCadFootprint]:
     """
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
-
-    root = _parse_sexp(text)
-    # root is (kicad_pcb ...) — its children include footprint nodes
-    footprints: list[KiCadFootprint] = []
-    for child in _children(root):
-        if _tag(child) == "footprint":
-            fp = _parse_footprint(child)  # type: ignore[arg-type]
-            if fp is not None:
-                footprints.append(fp)
-
-    return footprints
+    return parse_kicad_pcb_text(text)
 
 
 def parse_kicad_pcb_text(text: str) -> list[KiCadFootprint]:
