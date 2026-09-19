@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import time
 
-from .geometry import pad_box_centre
+from .drawing import drawing_marks
+from .geometry import easyeda_pads_to_mm, pad_box_centre
 from .model import Decision, FetchState, PartDetail
 
 # Closer than this to the pad-box centre reads as "on" it, which is what the two
@@ -246,11 +247,80 @@ def verdict_text(
     return " ".join(sentence for sentence in sentences if sentence)
 
 
+def glyph_state(check, reference: str) -> str:
+    """Return the JLC column's state for one reference ("" when it has no part)."""
+    part = check.parts.get(reference)
+    if part is None:
+        return ""
+    return jlc_state(check.decision(part), check.fetch_state(part.lcsc))
+
+
+def cell_help(check, reference: str) -> str:
+    """Return the JLC cell's hover text for one reference (spec 16.3)."""
+    part = check.parts.get(reference)
+    if part is None:
+        return ""
+    decision = check.decision(part)
+    return verdict_text(
+        decision,
+        check.fetch_state(part.lcsc),
+        kicad_footprint=part.footprint_name,
+        jlc_package=check.package_name(part.lcsc),
+    )
+
+
 # ---------------------------------------------------------------------------
 # The detail dialog's text (spec 16.4)
 # ---------------------------------------------------------------------------
 
 OVERRIDE_ANGLES = (0, 90, 180, 270)
+
+
+def part_detail(check, reference: str, reread: bool = False) -> PartDetail | None:
+    """Return everything the detail dialog shows for one reference (spec 16.4).
+
+    ``reread`` re-reads the board first, which the dialog does on open so an edit
+    made since the last scan is what is drawn.  None when the reference is not on
+    the board at all.
+    """
+    if reread:
+        for part in check.read_board():
+            check.parts[part.reference] = part
+    part = check.parts.get(reference)
+    if part is None:
+        return None
+    decision = check.decision(part)
+    detail = PartDetail(
+        reference=part.reference,
+        lcsc=part.lcsc,
+        kicad_footprint=part.footprint_name,
+        kicad_pads=list(part.pads),
+        courtyard=part.courtyard,
+        is_bottom=part.is_bottom,
+        placed_rotation=part.placed_rotation,
+        stored=decision.verdict,
+        decision=decision,
+        fetch=check.fetch_state(part.lcsc),
+    )
+    if not part.lcsc:
+        return detail
+    cached = check.cache.part(part.lcsc)
+    if cached is None:
+        return detail
+    record = cached.record
+    detail.package_name = record.package_name
+    detail.puuid = record.puuid
+    detail.jlc_pads = easyeda_pads_to_mm(record.pads)
+    detail.symbol_pins = list(record.symbol_pins)
+    detail.marks = drawing_marks(
+        record.symbol_shapes, record.footprint_shapes, record.footprint_origin
+    )
+    detail.source = cached.source
+    detail.fetched_at = cached.fetched_at
+    if record.status == "ok" and record.pads:
+        # The placement the canvas draws is solved here, not read from the row.
+        detail.verdict = check.resolve_part(part, cached)
+    return detail
 
 
 def dialog_title(detail: PartDetail) -> str:
