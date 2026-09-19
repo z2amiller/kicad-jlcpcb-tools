@@ -17,6 +17,7 @@ from jlcfootprint.resolver import resolve
 from jlcfootprint.verdicts import StoredVerdict
 
 from . import test_window_layout as layout
+from .jlc_footprint_wx_support import check_window, jlcfootprint_enabled
 from .wx_harness import load_siblings, package_stubs, wx_stubs
 
 KICAD_PADS = [
@@ -696,17 +697,9 @@ def test_a_zoomed_window_does_not_overwrite_the_remembered_size(dialog_module):
 # ---------------------------------------------------------------------------
 
 
-def _enabled(settings: dict) -> bool:
-    """Read the shipped setting the way the facade does (the harness stubs it off)."""
-    return bool(settings.get("jlcfootprint", {}).get("enabled", True))
-
-
 def _window(main, check, selections=("C1",), lcscs=("C7192",)):
     """Return a window with a footprint-check double and a selection."""
-    window = object.__new__(main.JLCPCBTools)
-    window.settings = {"jlcfootprint": {"enabled": True}}
-    window.jlc_footprint_check = check
-    window.logger = MagicMock()
+    window = check_window(main, check)
     window.save_settings = MagicMock()
     window.select_part = MagicMock()
     model = MagicMock()
@@ -734,7 +727,7 @@ def test_a_double_click_on_the_jlc_cell_opens_the_dialog(monkeypatch):
     """Spec 16.3: the activation event's column decides; any other column assigns a part."""
     main = layout.mainwindow
     monkeypatch.setattr(
-        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+        main.jlc_footprint_window, "is_footprint_check_enabled", jlcfootprint_enabled
     )
     opened: list = []
     monkeypatch.setattr(
@@ -773,7 +766,7 @@ def test_the_dialog_opens_on_the_first_selected_part_with_an_lcsc(monkeypatch):
     """Spec 16.3: "Details…" takes the first selected part that has a part number."""
     main = layout.mainwindow
     monkeypatch.setattr(
-        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+        main.jlc_footprint_window, "is_footprint_check_enabled", jlcfootprint_enabled
     )
     shown: list = []
 
@@ -829,7 +822,7 @@ def test_the_window_remembers_the_size_on_every_way_out(monkeypatch):
     """
     main = layout.mainwindow
     monkeypatch.setattr(
-        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+        main.jlc_footprint_window, "is_footprint_check_enabled", jlcfootprint_enabled
     )
     order: list = []
 
@@ -869,7 +862,7 @@ def test_the_override_and_refetch_callbacks_repaint_every_shared_row(monkeypatch
     """A change repaints the Rotation text and the glyph of every row on that verdict."""
     main = layout.mainwindow
     monkeypatch.setattr(
-        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+        main.jlc_footprint_window, "is_footprint_check_enabled", jlcfootprint_enabled
     )
     check = MagicMock()
     check.set_override.return_value = "stored"
@@ -913,7 +906,7 @@ def test_the_context_menu_carries_the_jlc_submenu(monkeypatch):
     """Spec 16.3: a "JLC footprint" submenu, its Details entry enabled only when it can open."""
     main = layout.mainwindow
     monkeypatch.setattr(
-        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+        main.jlc_footprint_window, "is_footprint_check_enabled", jlcfootprint_enabled
     )
     appended: list = []
 

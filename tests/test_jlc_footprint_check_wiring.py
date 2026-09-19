@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from .jlc_footprint_wx_support import facade_symbols, load_facade, load_window
 from .test_jlcfootprint_kicad_adapter import FakeFootprint, FakePad
-from .wx_harness import load, load_mainwindow, load_siblings, package_stubs, wx_stubs
 
 _PACKAGE = "jlc_footprint_check_wiring_tests"
 
@@ -23,12 +23,8 @@ _PACKAGE = "jlc_footprint_check_wiring_tests"
 @pytest.fixture
 def facade():
     """Load the real facade with a fake wx that records posted events."""
-    package = f"{_PACKAGE}_facade"
-    stubs = wx_stubs(PostEvent=MagicMock(), Dialog=type("Dialog", (), {}))
-    stubs.update(package_stubs(package))
-    stubs[f"{package}.events"] = load(package, "events", stubs)
-    with load_siblings(package, ("jlc_footprint_check",), stubs) as loaded:
-        yield loaded["jlc_footprint_check"], stubs["wx"], stubs[f"{package}.events"]
+    with load_facade(f"{_PACKAGE}_facade") as loaded:
+        yield loaded.module, loaded.wx, loaded.events
 
 
 def _window(tmp_path):
@@ -144,22 +140,7 @@ def mainwindow():
         checks.append((window, pcbnew, check))
         return check
 
-    module = load_mainwindow(
-        _PACKAGE,
-        wx=wx_stubs(Frame=type("Frame", (), {}), NewIdRef=lambda: 1),
-        jlc_footprint_check={
-            "clear_cache": lambda *_args, **_kwargs: 0,
-            "create_footprint_check": create,
-            "is_footprint_check_enabled": lambda settings: settings.get(
-                "jlcfootprint", {}
-            ).get("enabled", True),
-            "recheck_board": lambda *_args, **_kwargs: 0,
-            "refetch_references": lambda *_args, **_kwargs: 0,
-            "refresh_board_data": lambda *_args, **_kwargs: 0,
-            "show_generate_summary": lambda *_args, **_kwargs: "",
-            "wait_for_pending_fetches": lambda *_args, **_kwargs: True,
-        },
-    )
+    module = load_window(_PACKAGE, facade_symbols(create_footprint_check=create))
     return module, checks
 
 
