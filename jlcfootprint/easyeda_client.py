@@ -93,14 +93,14 @@ class Document:
 
 def _default_get(url: str, headers: dict, timeout: float) -> Any:
     """Perform the HTTP GET with requests, imported here so the package loads without it."""
-    import requests
+    import requests  # noqa: PLC0415
 
     return requests.get(url, headers=headers, timeout=timeout)
 
 
 def _default_post(url: str, headers: dict, json_body: Any, timeout: float) -> Any:
     """Perform the HTTP POST with a JSON body through requests."""
-    import requests
+    import requests  # noqa: PLC0415
 
     return requests.post(url, headers=headers, json=json_body, timeout=timeout)
 
