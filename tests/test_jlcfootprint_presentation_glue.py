@@ -6,13 +6,9 @@ from jlcfootprint.controller import FetchState
 from jlcfootprint.presentation import cell_help, glyph_state, part_detail
 from jlcfootprint.verdicts import PENDING
 from jlcfootprint.worker import FOOTPRINT
+from scripts.kicad_library import footprints_available
 
-from .jlcfootprint_support import (
-    controller_setup,
-    footprints_available,
-    recorded,
-    sot23,
-)
+from .jlcfootprint_support import controller_setup, recorded, sot23
 
 pytestmark = pytest.mark.skipif(
     not footprints_available(), reason="KiCad library footprints unavailable"

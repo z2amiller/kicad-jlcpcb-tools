@@ -7,12 +7,8 @@ from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
 from jlcfootprint.naming import parse_package_name
 from jlcfootprint.resolver import pair_by_name, resolve
-from tests.jlcfootprint_support import (
-    footprints_available,
-    library_pads,
-    recorded,
-    with_functions,
-)
+from scripts.kicad_library import footprints_available, library_pads, with_functions
+from tests.jlcfootprint_support import recorded
 
 pytestmark = pytest.mark.skipif(
     not footprints_available(),

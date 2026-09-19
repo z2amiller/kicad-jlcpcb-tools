@@ -7,7 +7,8 @@ from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
 from jlcfootprint.polarity import function_terminals, is_no_function, part_kind
 from jlcfootprint.resolver import YELLOW_NOTE, body_threshold_mm, resolve
-from tests.jlcfootprint_support import library_footprint, pro_record, with_functions
+from scripts.kicad_library import library_footprint, with_functions
+from tests.jlcfootprint_support import pro_record
 
 KICAD_SMF = [
     Pad("1", -1.45, 0.0, 1.3, 1.4, 0.0, "K"),
