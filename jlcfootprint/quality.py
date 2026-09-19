@@ -1,82 +1,20 @@
-"""Quality-assessment layer for rigid-transform pad alignment.
+"""Angular RMS: how well a solved rotation explains matched pad positions.
 
-Computes pad-overlap fraction and angular consistency on top of the raw
-linear residual already provided by ``jlcfootprint.solver``.  Designed as
-a pure function with no I/O so it can be tested offline without fixtures.
+For pads paired between a KiCad footprint and its JLC counterpart, compares
+each pad's bearing from its side's centroid to the other side's bearing for
+the same pad, after removing the transform's rotation.  The result is the
+root-mean-square of those per-pad errors, in degrees — the one number
+``fit.align`` folds into ``Placement.angular_rms`` and, from there, into the
+resolved ``Verdict``.  Pads sitting near their side's centroid (an exposed
+pad, a DPAK tab) have too unstable a bearing to judge and are left out of the
+average.
 
 Python 3.9 compatible; stdlib only.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
-from typing import Literal
-
-from .geometry import rotate
-from .solver import TransformResult
-
-# (x_centre, y_centre, width, height) in mm — all footprint-local.
-PadGeom = tuple[float, float, float, float]
-
-
-@dataclass
-class QualityAssessment:
-    """Result of the quality-assessment step.
-
-    Attributes:
-        tier: Categorical verdict — one of:
-            * ``"ok"``                   – rotation + size both look right.
-            * ``"ok_size_variant"``      – rotation OK, pads overlap but sizes differ.
-            * ``"suspect_offset_mismatch"`` – rotation OK but at least one pad
-                                              centre misses its target after transform.
-            * ``"rotation_mismatch"``    – angular RMS too large; rotation likely wrong.
-            * ``"no_data"``              – fewer than 1 matching pad.
-        angular_rms_deg:   RMS of per-pad bearing errors after removing the
-                           expected rotation (degrees).
-        overlap_fraction:  Fraction of matched pads whose bounding boxes
-                           overlap after applying the transform (0.0–1.0).
-        min_overlap_ratio: Smallest per-pad intersection_area/min(a_area, b_area).
-                           0.0 when any pad has zero overlap.
-        mean_overlap_ratio: Mean of per-pad overlap ratios.
-        notes: Human-readable diagnostic string.
-
-    """
-
-    tier: Literal[
-        "ok",
-        "ok_size_variant",
-        "suspect_offset_mismatch",
-        "rotation_mismatch",
-        "no_data",
-    ]
-    angular_rms_deg: float
-    overlap_fraction: float
-    min_overlap_ratio: float
-    mean_overlap_ratio: float
-    notes: str
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _rotate_2d(x: float, y: float, theta_deg: float) -> tuple[float, float]:
-    """Rotate point (x, y) by theta_deg degrees around the origin."""
-    return rotate(x, y, theta_deg)
-
-
-def _swap_wh_for_rotation(w: float, h: float, rotation_deg: int) -> tuple[float, float]:
-    """Return (effective_w, effective_h) after a 90°-snapped rotation.
-
-    For 0°/180° the bbox dimensions are unchanged.
-    For 90°/270° width and height are swapped (the rectangle tips onto its side).
-    """
-    rot = rotation_deg % 180  # 0 or 90
-    if rot == 90:
-        return h, w
-    return w, h
 
 
 def _normalize_angle(deg: float) -> float:
@@ -88,131 +26,24 @@ def _normalize_angle(deg: float) -> float:
     return deg
 
 
-def _pad_overlap_ratio(
-    ax: float,
-    ay: float,
-    aw: float,
-    ah: float,
-    bx: float,
-    by: float,
-    bw: float,
-    bh: float,
+def angular_rms(
+    kicad_centres: list[tuple[float, float]],
+    jlc_centres: list[tuple[float, float]],
+    rotation_deg: float,
 ) -> float:
-    """Return intersection_area / min(a_area, b_area) for two axis-aligned rectangles.
+    """Return the RMS bearing error, in degrees, between matched pad centres.
 
-    Returns 0.0 if either area is zero or the boxes do not intersect.
+    ``kicad_centres`` and ``jlc_centres`` are the same pads' (x, y) centres in
+    each footprint's own frame, paired by position (as ``fit.align`` pairs
+    them by dict key).  Empty input reports zero error rather than dividing by
+    zero, which is also what a footprint with no matching pads reported before
+    this was split out of the assessment that used to guard it.
     """
-    a_area = aw * ah
-    b_area = bw * bh
-    min_area = min(a_area, b_area)
-    if min_area <= 0.0:
+    n = len(kicad_centres)
+    if n == 0:
         return 0.0
 
-    ix = max(0.0, min(ax + aw / 2, bx + bw / 2) - max(ax - aw / 2, bx - bw / 2))
-    iy = max(0.0, min(ay + ah / 2, by + bh / 2) - max(ay - ah / 2, by - bh / 2))
-    intersection_area = ix * iy
-    return intersection_area / min_area
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def assess_quality(
-    kicad_pads: dict[str, PadGeom],
-    jlc_pads: dict[str, PadGeom],
-    transform: TransformResult,
-) -> QualityAssessment:
-    """Assess alignment quality between two pad sets given a solved transform.
-
-    Parameters
-    ----------
-    kicad_pads:
-        Mapping from pad number (str) to ``(x, y, width, height)`` in mm,
-        in the KiCad footprint's local frame.
-    jlc_pads:
-        Same format, in the JLC/EasyEDA footprint's local frame.
-    transform:
-        Result from ``jlcfootprint.solver.solve_transform``.  The snapped
-        rotation and offset fields are used; the raw rotation is ignored.
-
-    Returns
-    -------
-    QualityAssessment
-
-    """
-    common_keys = sorted(set(kicad_pads.keys()) & set(jlc_pads.keys()))
-    n = len(common_keys)
-
-    if n == 0:
-        return QualityAssessment(
-            tier="no_data",
-            angular_rms_deg=0.0,
-            overlap_fraction=0.0,
-            min_overlap_ratio=0.0,
-            mean_overlap_ratio=0.0,
-            notes="no matching pad numbers between KiCad and JLC footprints",
-        )
-
-    if transform.is_underdetermined or transform.quality_flag == "no_pads":
-        return QualityAssessment(
-            tier="no_data",
-            angular_rms_deg=0.0,
-            overlap_fraction=0.0,
-            min_overlap_ratio=0.0,
-            mean_overlap_ratio=0.0,
-            notes="transform is underdetermined",
-        )
-
-    rot_deg = transform.rotation_deg  # snapped: 0/90/180/270
-    # The solver's offset belongs to the raw angle; with the snapped angle the
-    # translation that keeps the centroids together is what a placement means.
-    ck_x0 = sum(kicad_pads[k][0] for k in common_keys) / n
-    ck_y0 = sum(kicad_pads[k][1] for k in common_keys) / n
-    cj_x0 = sum(jlc_pads[k][0] for k in common_keys) / n
-    cj_y0 = sum(jlc_pads[k][1] for k in common_keys) / n
-    rck_x, rck_y = _rotate_2d(ck_x0, ck_y0, rot_deg)
-    tx = cj_x0 - rck_x
-    ty = cj_y0 - rck_y
-
-    # ------------------------------------------------------------------
-    # Transform KiCad pad centres into JLC frame.
-    # ------------------------------------------------------------------
-    transformed_kicad: list[tuple[float, float, float, float]] = []
-    for key in common_keys:
-        kx, ky, kw, kh = kicad_pads[key]
-        # Rotate centre.
-        new_cx, new_cy = _rotate_2d(kx, ky, rot_deg)
-        new_cx += tx
-        new_cy += ty
-        # Swap dimensions for 90°/270° rotations.
-        new_w, new_h = _swap_wh_for_rotation(kw, kh, rot_deg)
-        transformed_kicad.append((new_cx, new_cy, new_w, new_h))
-
-    jlc_geoms: list[tuple[float, float, float, float]] = [
-        jlc_pads[key] for key in common_keys
-    ]
-
-    # ------------------------------------------------------------------
-    # Per-pad overlap ratios.
-    # ------------------------------------------------------------------
-    overlap_ratios = []
-    for (ax, ay, aw, ah), (bx, by, bw, bh) in zip(transformed_kicad, jlc_geoms):
-        ratio = _pad_overlap_ratio(ax, ay, aw, ah, bx, by, bw, bh)
-        overlap_ratios.append(ratio)
-
-    overlap_fraction = sum(1 for r in overlap_ratios if r > 0) / n
-    min_overlap_ratio = min(overlap_ratios)
-    mean_overlap_ratio = sum(overlap_ratios) / n
-
-    # ------------------------------------------------------------------
-    # Angular RMS.
-    # ------------------------------------------------------------------
     # Centroids in each frame (using *original* KiCad centres, not transformed).
-    kicad_centres = [(kicad_pads[k][0], kicad_pads[k][1]) for k in common_keys]
-    jlc_centres = [(jlc_pads[k][0], jlc_pads[k][1]) for k in common_keys]
-
     ck_x = sum(p[0] for p in kicad_centres) / n
     ck_y = sum(p[1] for p in kicad_centres) / n
     cj_x = sum(p[0] for p in jlc_centres) / n
@@ -239,7 +70,7 @@ def assess_quality(
             continue
         bearing_kicad = math.degrees(math.atan2(dk_y, dk_x))
         bearing_jlc = math.degrees(math.atan2(dj_y, dj_x))
-        err = _normalize_angle(bearing_jlc - bearing_kicad - rot_deg)
+        err = _normalize_angle(bearing_jlc - bearing_kicad - rotation_deg)
         angular_errs_sq.append(err * err)
 
     if angular_errs_sq:
@@ -248,49 +79,4 @@ def assess_quality(
         # All pads coincide with centroids — underdetermined, treat as 0 error.
         angular_rms_deg = 0.0
 
-    # ------------------------------------------------------------------
-    # Classify.
-    # ------------------------------------------------------------------
-    overlapping_count = sum(1 for r in overlap_ratios if r > 0)
-
-    if angular_rms_deg >= 10.0:
-        tier: Literal[
-            "ok",
-            "ok_size_variant",
-            "suspect_offset_mismatch",
-            "rotation_mismatch",
-            "no_data",
-        ] = "rotation_mismatch"
-        notes = (
-            f"{overlapping_count} of {n} pads overlap; "
-            f"angular rms {angular_rms_deg:.1f}° (threshold 10°) — rotation likely wrong"
-        )
-    elif overlap_fraction < 1.0:
-        tier = "suspect_offset_mismatch"
-        notes = (
-            f"{overlapping_count} of {n} pads overlap; "
-            f"angular rms {angular_rms_deg:.1f}° — rotation OK but offset suspect"
-        )
-    elif min_overlap_ratio >= 0.5:
-        tier = "ok"
-        notes = (
-            f"all {n} pads overlap; "
-            f"min overlap ratio {min_overlap_ratio:.2f}; "
-            f"angular rms {angular_rms_deg:.1f}°"
-        )
-    else:
-        tier = "ok_size_variant"
-        notes = (
-            f"all {n} pads overlap but size differs "
-            f"(min overlap ratio {min_overlap_ratio:.2f} < 0.5); "
-            f"angular rms {angular_rms_deg:.1f}°"
-        )
-
-    return QualityAssessment(
-        tier=tier,
-        angular_rms_deg=angular_rms_deg,
-        overlap_fraction=overlap_fraction,
-        min_overlap_ratio=min_overlap_ratio,
-        mean_overlap_ratio=mean_overlap_ratio,
-        notes=notes,
-    )
+    return angular_rms_deg
