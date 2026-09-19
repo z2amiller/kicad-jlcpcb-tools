@@ -793,6 +793,35 @@ def test_an_override_on_a_part_with_no_verdict_row_yet_creates_one(setup):
     assert check.display_text("Q1") == "90° set"
 
 
+def test_set_override_runs_under_the_controllers_lock(setup):
+    """The read-mark-write-read sequence is atomic with the worker's result handlers.
+
+    Without the lock, a `save` landing between the first read and `mark_pending`
+    would be overwritten back to pending until the next result lands.
+    """
+    check, board, _events, _messages, _client = setup
+    check.scan_board()
+    check.worker.run_pending()
+    real_set_override = check.verdicts.set_override
+    lock_held = []
+
+    def spy(*args, **kwargs):
+        def probe():
+            got = check.lock.acquire(blocking=False)
+            lock_held.append(got)
+            if got:
+                check.lock.release()
+
+        thread = threading.Thread(target=probe)
+        thread.start()
+        thread.join(5.0)
+        return real_set_override(*args, **kwargs)
+
+    check.verdicts.set_override = spy
+    check.set_override("Q1", 270, "note")
+    assert lock_held == [False]  # another thread could not acquire it meanwhile
+
+
 def test_two_placements_of_one_part_share_the_verdict_and_the_repaint(setup):
     """An override set on one reference repaints every reference on that row (spec 5.3)."""
     check, board, _events, _messages, _client = setup

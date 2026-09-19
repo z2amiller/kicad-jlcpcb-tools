@@ -684,19 +684,23 @@ class FootprintCheck:
         part = self.parts.get(reference)
         if part is None or not part.lcsc:
             return None
-        stored = self.verdicts.get(part.lcsc, part.footprint_hash)
-        if stored is None:
-            # A part with no row yet (never fetched) can still carry a decision.
-            self.verdicts.mark_pending(
-                part.lcsc, part.footprint_hash, part.footprint_name, self.now()
+        # Atomic with the worker's result handlers (the class docstring's contract),
+        # so a `save` landing between the read and the write is never overwritten
+        # back to pending by this method's own mark_pending.
+        with self.lock:
+            stored = self.verdicts.get(part.lcsc, part.footprint_hash)
+            if stored is None:
+                # A part with no row yet (never fetched) can still carry a decision.
+                self.verdicts.mark_pending(
+                    part.lcsc, part.footprint_hash, part.footprint_name, self.now()
+                )
+            self.verdicts.set_override(
+                part.lcsc,
+                part.footprint_hash,
+                rotation,
+                note if rotation is not None else "",
             )
-        self.verdicts.set_override(
-            part.lcsc,
-            part.footprint_hash,
-            rotation,
-            note if rotation is not None else "",
-        )
-        updated = self.verdicts.get(part.lcsc, part.footprint_hash)
+            updated = self.verdicts.get(part.lcsc, part.footprint_hash)
         logger.info(
             "jlcfootprint: %s %s override %s%s",
             reference,
