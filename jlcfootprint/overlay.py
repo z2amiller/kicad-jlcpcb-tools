@@ -39,6 +39,7 @@ PIN1_DOT_PX = 3.0  # fixed in DIP whatever the scale
 PIN1_RING_PX = 5.0
 PLUS_ARM_PX = 4.0
 PLUS_GAP_PX = 5.0  # between a pad's edge and the "+" that names it
+ORIGIN_ARM_PX = 5.0  # half a diagonal of the cross on JLC's package origin
 EDGE_PX = 8.0
 LINE_HEIGHT_PX = 14.0
 
@@ -269,6 +270,12 @@ def overlay(
             centre = to_px(x, y)
             edge = height * scale / 2.0 + PLUS_GAP_PX + PLUS_ARM_PX
             items.extend(_plus(centre[0], centre[1] + direction * edge, role))
+    # JLC's package origin: a small diagonal cross in the JLC colour, drawn over the
+    # pads (spec 17.5).  It belongs to the transformed layer, because the origin is
+    # only meaningful once the placement has put the drawing on the footprint; an X
+    # rather than a "+" so it cannot be read as a polarity mark.
+    if JLC_PLACED in wanted and placement is not None:
+        items.extend(_cross(*to_px(*package_origin(placement)), "jlc_origin"))
     # The scale bar in the bottom left corner, one grid square long.
     bar_y = height_px - EDGE_PX
     items.append(
@@ -308,6 +315,15 @@ def _plus(x: float, y: float, role: str) -> list:
     return [
         Primitive("line", role, x=x - PLUS_ARM_PX, y=y, x2=x + PLUS_ARM_PX, y2=y),
         Primitive("line", role, x=x, y=y - PLUS_ARM_PX, x2=x, y2=y + PLUS_ARM_PX),
+    ]
+
+
+def _cross(x: float, y: float, role: str) -> list:
+    """Return the two diagonals of an X centred on a point, a fixed size in DIP."""
+    arm = ORIGIN_ARM_PX
+    return [
+        Primitive("line", role, x=x - arm, y=y - arm, x2=x + arm, y2=y + arm),
+        Primitive("line", role, x=x - arm, y=y + arm, x2=x + arm, y2=y - arm),
     ]
 
 

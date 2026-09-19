@@ -59,6 +59,9 @@ ROLE_COLOURS = {
     # real canvas under KiCad's wx, 2026-09-17).
     "jlc_pin1": ((236, 236, 236), (32, 32, 32)),
     "jlc_plus": ((236, 236, 236), (32, 32, 32)),
+    # The origin cross sits between the pads rather than on one, so it keeps JLC's
+    # own colour (spec 17.5) instead of the annotations' text colour.
+    "jlc_origin": ((124, 176, 255), (0, 82, 204)),
     "jlc_raw_pad": ((150, 150, 150), (128, 128, 128)),
     "scale_bar": ((236, 236, 236), (32, 32, 32)),
     "scale_label": ((236, 236, 236), (32, 32, 32)),
@@ -360,7 +363,10 @@ class JlcFootprintDetailDialog(wx.Dialog):
             )
         self.cpl.SetLabel(cpl)
         self._fill(self.kicad_panel, kicad_facts(detail))
-        self._fill(self.jlc_panel, jlc_facts(detail))
+        self._fill(
+            self.jlc_panel,
+            jlc_facts(detail, bool(self._section().get("exact_origin", False))),
+        )
         numbers = [f"{label} {value}" for label, value in fit_numbers(detail)]
         self.numbers.SetLabel("   ".join(numbers[:3]) + "\n" + "   ".join(numbers[3:]))
         stored = detail.stored

@@ -14,6 +14,7 @@ from jlcfootprint.presentation import (
     jlc_facts,
     jlc_state,
     kicad_facts,
+    origin_text,
     parse_override,
     sort_rank,
     verdict_text,
@@ -495,3 +496,82 @@ def test_a_board_estimate_reads_as_parts_and_a_rough_time():
 
     assert describe_board_estimate(66, 95.0) == "66 part(s), about 2 min"
     assert describe_board_estimate(1, 3.0) == "1 part(s), about 3 s"
+
+
+def _origin_detail(jlc_pads):
+    """Return a detail whose JLC drawing is the given pads, re-resolved."""
+    from jlcfootprint.drawing import DrawingMarks
+    from jlcfootprint.easyeda_parse import SymbolPin
+    from jlcfootprint.geometry import Pad
+    from jlcfootprint.resolver import resolve
+
+    kicad = [
+        Pad("1", -1.0, 0.0, 1.2, 1.4, 0.0, "+"),
+        Pad("2", 1.0, 0.0, 1.2, 1.4, 0.0, "-"),
+    ]
+    marks = DrawingMarks(positive_pin="1", positive_pad="1")
+    return part_detail(
+        kicad_pads=kicad,
+        jlc_pads=jlc_pads,
+        marks=marks,
+        verdict=resolve(
+            kicad,
+            "Capacitor_SMD:C_0805_2012Metric",
+            "ok",
+            "CAP-SMD_L2.0-W1.3-FD",
+            jlc_pads,
+            [SymbolPin("1", "1"), SymbolPin("2", "2")],
+            marks=marks,
+        ),
+    )
+
+
+def test_the_origin_line_names_both_offsets_and_says_the_cpl_uses_them():
+    """Spec 17.5's first wording: right and below the pad-box centre, used in the CPL."""
+    from jlcfootprint.geometry import Pad
+
+    # The drawing sits 0.30 mm left and 0.15 mm above its pads, so its origin is the
+    # other way round from the footprint's pad box.
+    detail = _origin_detail(
+        [Pad("1", -1.3, -0.15, 1.3, 1.5), Pad("2", 0.7, -0.15, 1.3, 1.5)]
+    )
+
+    assert origin_text(detail, True) == (
+        "0.30 mm right, 0.15 mm below the pad-box centre; used in the CPL"
+    )
+    assert dict(jlc_facts(detail, True))["Origin"] == origin_text(detail, True)
+
+
+def test_the_origin_line_says_when_the_setting_is_off_and_when_there_is_none():
+    """Spec 17.5's other two wordings, and the default the dialog falls back to."""
+    from jlcfootprint.geometry import Pad
+
+    detail = _origin_detail(
+        [Pad("1", -1.2, 0.0, 1.3, 1.5), Pad("2", 0.8, 0.0, 1.3, 1.5)]
+    )
+
+    assert origin_text(detail, False) == (
+        "0.20 mm right of the pad-box centre; not used: the setting is off"
+    )
+    assert dict(jlc_facts(detail))["Origin"] == origin_text(detail, False)
+    assert origin_text(part_detail(verdict=None)) == "none: no placement"
+
+
+def test_the_origin_line_reads_a_centred_drawing_as_on_the_centre():
+    """A part whose origin is its pad-box centre says so rather than printing zeroes."""
+    detail = part_detail()
+
+    assert origin_text(detail, True) == "on the pad-box centre; used in the CPL"
+
+
+def test_the_origin_line_reads_a_vertical_offset_alone():
+    """Only Y off centre keeps the spec's wording without the "of"."""
+    from jlcfootprint.geometry import Pad
+
+    detail = _origin_detail(
+        [Pad("1", -1.0, 0.25, 1.3, 1.5), Pad("2", 1.0, 0.25, 1.3, 1.5)]
+    )
+
+    assert origin_text(detail, True) == (
+        "0.25 mm above the pad-box centre; used in the CPL"
+    )
