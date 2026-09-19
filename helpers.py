@@ -62,6 +62,11 @@ JLC_CELL_COLOURS = {
 }
 
 
+def is_dark_background() -> bool:
+    """Return whether the window background is dark, as the cell styles ask it."""
+    return wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW).GetLuminance() < 0.5
+
+
 def apply_jlc_cell_style(state: str, attr: wx.dataview.DataViewItemAttr) -> bool:
     """Colour and embolden one JLC glyph cell for its state; False for no state.
 
@@ -72,8 +77,7 @@ def apply_jlc_cell_style(state: str, attr: wx.dataview.DataViewItemAttr) -> bool
     if stops is None:
         return False
     dark, light = stops
-    background = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
-    attr.SetColour(wx.Colour(*(dark if background.GetLuminance() < 0.5 else light)))
+    attr.SetColour(wx.Colour(*(dark if is_dark_background() else light)))
     if hasattr(attr, "SetBold"):
         attr.SetBold(True)
     return True
