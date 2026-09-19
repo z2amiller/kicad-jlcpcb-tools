@@ -1,219 +1,37 @@
 """Tests for the footprint check controller: scanning, the lookup and document flow, deciding."""
 
-import copy
 import logging
 import threading
 
 import pytest
 
 from jlcfootprint.cache import Cache
-from jlcfootprint.controller import Decision, FetchState, FootprintCheck
-from jlcfootprint.easyeda_client import Document, Lookup
-from jlcfootprint.easyeda_parse import (
-    DeviceHit,
-    DevicesResult,
-    FootprintRecord,
-    SymbolRecord,
-)
+from jlcfootprint.controller import Decision, FootprintCheck
 from jlcfootprint.geometry import pad_hash
-from jlcfootprint.kicad_adapter import BoardPart, verdict_key
-from jlcfootprint.presentation import cell_help, glyph_state, part_detail
+from jlcfootprint.kicad_adapter import BoardPart
 from jlcfootprint.verdicts import PENDING, VerdictStore
-from jlcfootprint.worker import FOOTPRINT, SYMBOL, Buckets, FetchWorker
+from jlcfootprint.worker import FOOTPRINT, SYMBOL, FetchWorker
 
 from .jlcfootprint_support import (
+    alias,
+    controller_setup,
     footprints_available,
-    library_pads,
+    led,
     recorded,
-    with_functions,
+    sod323,
+    sot23,
+    tantalum,
 )
-from .test_jlcfootprint_worker import Clock
 
 pytestmark = pytest.mark.skipif(
     not footprints_available(), reason="KiCad library footprints unavailable"
 )
 
 
-class FakeClient:
-    """Answer the three Pro calls from recorded classic responses; count every call.
-
-    A part's symbol uuid is ``sym-<lcsc>``; its footprint uuid is the classic
-    record's, so two parts sharing a footprint share one document.
-    """
-
-    def __init__(self, records=None):
-        self.records = records or {}
-        self.lookups = []
-        self.documents = []
-        self.fail_lookups = False
-        self.transient_symbols = set()
-        self.silent_symbols = set()
-        # Documents that answer a final error (HTTP 401, an unreadable body).
-        self.error_footprints = set()
-        self.error_symbols = set()
-
-    def search_by_codes(self, codes):
-        """Return hits for the recorded parts and misses for the rest."""
-        codes = list(codes)
-        self.lookups.append(codes)
-        if self.fail_lookups:
-            return Lookup(
-                codes, DevicesResult(error="HTTP 403 after retries"), transient=True
-            )
-        devices = DevicesResult()
-        for code in codes:
-            record = self.records.get(code)
-            if record is not None:
-                devices.hits[code] = DeviceHit(
-                    code, f"sym-{code}", record.puuid, record.package_name
-                )
-        devices.missing = [code for code in codes if code not in devices.hits]
-        return Lookup(codes, devices)
-
-    def fetch_footprint(self, puuid):
-        """Return the recorded footprint with this uuid, or none."""
-        self.documents.append((FOOTPRINT, puuid))
-        if puuid in self.error_footprints:
-            return Document(
-                FOOTPRINT, puuid, FootprintRecord(puuid=puuid, error="HTTP 401")
-            )
-        for record in self.records.values():
-            if record.puuid == puuid:
-                return Document(
-                    FOOTPRINT,
-                    puuid,
-                    FootprintRecord(
-                        puuid=puuid,
-                        status="ok",
-                        package_name=record.package_name,
-                        pads=record.pads,
-                        footprint_shapes=record.footprint_shapes,
-                    ),
-                )
-        return Document(FOOTPRINT, puuid, FootprintRecord(puuid=puuid, status="none"))
-
-    def fetch_symbol(self, uuid):
-        """Return the recorded symbol pins for ``sym-<lcsc>``; a failure or none when told to."""
-        self.documents.append((SYMBOL, uuid))
-        lcsc = uuid[len("sym-") :]
-        if uuid in self.transient_symbols:
-            return Document(
-                SYMBOL,
-                uuid,
-                SymbolRecord(uuid=uuid, error="HTTP 500 after retries"),
-                transient=True,
-            )
-        if uuid in self.error_symbols:
-            return Document(SYMBOL, uuid, SymbolRecord(uuid=uuid, error="HTTP 401"))
-        record = self.records.get(lcsc)
-        if record is None or uuid in self.silent_symbols:
-            return Document(SYMBOL, uuid, SymbolRecord(uuid=uuid, status="none"))
-        return Document(
-            SYMBOL,
-            uuid,
-            SymbolRecord(
-                uuid=uuid,
-                status="ok",
-                pins=record.symbol_pins,
-                shapes=record.symbol_shapes,
-            ),
-        )
-
-
-def sot23(reference, lcsc="C2132", is_bottom=False):
-    """Return a SOT-23 board part from KiCad's library."""
-    pads = with_functions(
-        library_pads("Package_TO_SOT_SMD", "SOT-23"), {"1": "B", "2": "E", "3": "C"}
-    )
-    return BoardPart(
-        reference,
-        lcsc,
-        "Package_TO_SOT_SMD:SOT-23",
-        is_bottom,
-        0.0,
-        pads,
-        pad_hash(pads),
-    )
-
-
-def led(reference, lcsc="C2286"):
-    """Return an 0603 LED board part with K on pad 1."""
-    pads = with_functions(
-        library_pads("LED_SMD", "LED_0603_1608Metric"), {"1": "K", "2": "A"}
-    )
-    return BoardPart(
-        reference, lcsc, "LED_SMD:LED_0603_1608Metric", False, 0.0, pads, pad_hash(pads)
-    )
-
-
-def sod323(reference, functions, lcsc="C7502694"):
-    """Return a SOD-323 diode part with the given pin functions."""
-    pads = with_functions(library_pads("Diode_SMD", "D_SOD-323"), functions)
-    return BoardPart(
-        reference, lcsc, "Diode_SMD:D_SOD-323", False, 0.0, pads, verdict_key(pads)
-    )
-
-
-def tantalum(reference, lcsc="C16133"):
-    """Return a case-B tantalum part whose JLC name carries no orientation token."""
-    pads = with_functions(
-        library_pads("Capacitor_Tantalum_SMD", "CP_EIA-3528-21_Kemet-B"),
-        {"1": "+", "2": "-"},
-    )
-    return BoardPart(
-        reference,
-        lcsc,
-        "Capacitor_Tantalum_SMD:CP_EIA-3528-21_Kemet-B",
-        False,
-        0.0,
-        pads,
-        verdict_key(pads),
-    )
-
-
-def alias(lcsc, source="C2132"):
-    """Return the recorded part under another LCSC (same footprint and symbol)."""
-    record = copy.deepcopy(recorded(source))
-    record.lcsc = lcsc
-    return record
-
-
 @pytest.fixture
 def setup(tmp_path):
     """Return a controller over a fresh cache and verdict store with a fake client."""
-    board = {
-        "parts": [sot23("Q1"), led("D1"), BoardPart("R1", "", "R", False, 0.0, [], "")]
-    }
-    events = []
-    messages = []
-    cache = Cache(str(tmp_path / "cache.db"))
-    verdicts = VerdictStore(str(tmp_path / "project.db"))
-    client = FakeClient(
-        {
-            "C2132": recorded("C2132"),
-            "C2286": recorded("C2286"),
-            "C7502694": recorded("C7502694"),
-        }
-    )
-    clock = Clock()
-    # Buckets built on the fake clock so try_take/seconds_until_token refill against
-    # clock.now instead of the real wall clock; otherwise run_pending's token wait
-    # busy-loops through real seconds while only the worker's own clock is fake.
-    buckets = Buckets.default(clock=clock, jitter=lambda: 0.0)
-    check = FootprintCheck(
-        cache,
-        verdicts,
-        read_board=lambda: list(board["parts"]),
-        post=lambda lcsc, generation: events.append((lcsc, generation)),
-        client=client,
-        worker=None,
-        message=messages.append,
-        now=clock,
-        buckets=buckets,
-    )
-    check.worker.wait = clock.wait
-    check.worker.clock = clock
-    return check, board, events, messages, client
+    return controller_setup(tmp_path)
 
 
 def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup, caplog):
@@ -625,66 +443,8 @@ def _cached(check, lcsc):
 
 
 # ---------------------------------------------------------------------------
-# The column, the hover and the queue's state (spec 16.3)
+# The package name memo (spec 16.3)
 # ---------------------------------------------------------------------------
-
-
-def test_the_queue_state_of_one_part_while_it_is_scanned_fetched_and_resolved(setup):
-    """A part reads queued, then fetching its own document, then idle once resolved."""
-    check, board, _events, _messages, _client = setup
-    assert check.fetch_state("C2132") == FetchState()
-    assert glyph_state(check, "Q1") == ""
-    check.scan_board()
-    queued = check.fetch_state("C2132")
-    assert (queued.state, queued.ahead, queued.queued_parts) == ("queued", 2, 2)
-    assert glyph_state(check, "Q1") == "pending"
-    assert "Queued for EasyEDA, 2 request(s) ahead" in cell_help(check, "Q1")
-    # The lookup in flight is this part's, so the cell says what is being fetched.
-    check.worker.in_flight = ("lookup", ["C2132", "C2286"])
-    assert check.fetch_state("C2132").state == "fetching"
-    assert cell_help(check, "Q1") == "Looking up the part at EasyEDA…"
-    check.worker.in_flight = None
-    check.worker.run_pending()
-    assert check.fetch_state("C2132") == FetchState(queued_parts=0)
-    assert glyph_state(check, "Q1") == "green"
-    assert cell_help(check, "Q1") == (
-        "Fits; rotation 180° derived from pad geometry (high). "
-        f"JLC {recorded('C2132').package_name} on Package_TO_SOT_SMD:SOT-23."
-    )
-    assert glyph_state(check, "D1") == "yellow"
-    assert "pin-1 marker will sit on the other terminal" in cell_help(check, "D1")
-    assert glyph_state(check, "R1") == ""
-    assert (
-        cell_help(check, "R1")
-        == "No LCSC number assigned. The CPL emits the raw angle."
-    )
-    assert cell_help(check, "nope") == ""
-
-
-def test_a_document_in_flight_and_a_backoff_and_the_breaker(setup):
-    """Fetching a document this part waits on, a backoff and the breaker each have their own state."""
-    check, _board, _events, _messages, _client = setup
-    check.scan_board()
-    check.worker.run_pending()
-    # The state after a lookup has landed: the part waits on its footprint document.
-    puuid = recorded("C2132").puuid
-    check.waiting[(FOOTPRINT, puuid)] = {"C2132"}
-    check.worker.in_flight = (FOOTPRINT, puuid)
-    fetching = check.fetch_state("C2132")
-    assert (fetching.state, fetching.kind) == ("fetching", FOOTPRINT)
-    assert cell_help(check, "Q1") == "Fetching the footprint…"
-    check.worker.backoff_until = check.worker.clock() + 45.0
-    paused = check.fetch_state("C2132")
-    assert (paused.state, round(paused.seconds)) == ("paused", 45)
-    assert glyph_state(check, "Q1") == "paused"
-    assert cell_help(check, "Q1") == "EasyEDA asked us to wait 45 s; 1 part(s) queued."
-    check.worker.backoff_until = None
-    check.worker.tripped = True
-    assert check.fetch_state("C2132").state == "tripped"
-    assert glyph_state(check, "Q1") == "paused"
-    assert cell_help(check, "Q1") == (
-        "Paused after three failed requests; reopen the plugin to retry."
-    )
 
 
 def test_the_package_name_is_read_from_the_cache_once_per_part(setup):
@@ -753,102 +513,8 @@ def test_the_three_actions_forget_the_memoised_package_name(setup):
 
 
 # ---------------------------------------------------------------------------
-# The detail view, the override and the re-fetch (spec 16.4, 16.5)
+# The override, the actions and the board estimate (spec 16.5)
 # ---------------------------------------------------------------------------
-
-
-def test_the_detail_of_a_resolved_part_carries_both_pad_sets_and_a_fresh_placement(
-    setup,
-):
-    """Spec 16.4: the dialog's inputs are the resolver's own, re-run, not the stored row."""
-    check, board, _events, _messages, _client = setup
-    check.scan_board()
-    check.worker.run_pending()
-    detail = part_detail(check, "Q1")
-    assert (detail.reference, detail.lcsc) == ("Q1", "C2132")
-    assert detail.kicad_footprint == "Package_TO_SOT_SMD:SOT-23"
-    assert len(detail.kicad_pads) == 3 and len(detail.jlc_pads) == 3
-    assert detail.package_name == recorded("C2132").package_name
-    assert detail.puuid == recorded("C2132").puuid
-    assert detail.source == "live" and detail.fetched_at > 0
-    assert detail.pin_functions == {"1": "B", "2": "E", "3": "C"}
-    assert detail.kicad_pitch == pytest.approx(
-        1.9, abs=0.05
-    )  # the SOT-23's nearest pads
-    assert detail.jlc_pitch is not None
-    assert detail.kicad_pin1 is not None and detail.jlc_pin1 is not None
-    # The verdict is re-resolved here and carries the placement the canvas needs.
-    assert detail.verdict is not None and detail.placement is not None
-    assert (detail.verdict.status, detail.verdict.rotation) == ("green", 180)
-    assert detail.stored is not None and detail.stored.rotation == 180
-    assert detail.emitted_rotation == 180
-    assert detail.fetch.state == "idle"
-    assert detail.decision is not None and detail.decision.status == "green"
-    assert part_detail(check, "nope") is None
-
-
-def test_the_detail_of_a_part_with_no_data_still_describes_the_footprint(setup):
-    """A pending part, and a part with no LCSC, draw their KiCad pads and nothing else."""
-    check, board, _events, _messages, _client = setup
-    check.scan_board()
-    pending = part_detail(check, "Q1")
-    assert pending.jlc_pads == [] and pending.verdict is None
-    assert pending.package_name == "" and pending.source == ""
-    assert len(pending.kicad_pads) == 3
-    assert pending.fetch.state == "queued"
-    assert pending.stored is not None and pending.stored.status == PENDING
-    bare = part_detail(check, "R1")
-    assert (bare.lcsc, bare.jlc_pads, bare.stored) == ("", [], None)
-    assert bare.kicad_pads == []
-    # A row with a puuid but no footprint fetched yet ("ok" but no pads) is not
-    # resolved either: the `detail` guard keeps it out of the resolver, unlike the
-    # "pending" case above where the cache holds no row for the part at all.
-    check.cache.store_lookup("C2132", "sym-C2132", "puuid-not-fetched", 1)
-    calls: list = []
-    original_resolve = check.resolve_part
-    check.resolve_part = lambda *args, **kwargs: (
-        calls.append(1) or original_resolve(*args, **kwargs)
-    )
-    incomplete = part_detail(check, "Q1")
-    assert incomplete.verdict is None
-    assert calls == []
-
-
-def test_the_detail_rereads_the_board_when_asked(setup):
-    """The dialog opens on what the board says now, not on the last scan."""
-    check, board, _events, _messages, _client = setup
-    check.scan_board()
-    board["parts"] = [*board["parts"], sot23("Q2")]
-    assert part_detail(check, "Q2") is None
-    assert part_detail(check, "Q2", reread=True) is not None
-
-
-def test_an_override_is_written_kept_and_cleared(setup):
-    """Spec 16.5: the override lives on the verdict row, survives a re-resolve, and clears."""
-    check, board, _events, _messages, _client = setup
-    check.scan_board()
-    check.worker.run_pending()
-    part = board["parts"][0]
-    stored = check.set_override("Q1", 270, "JLC's preview needed it")
-    assert (stored.override_rotation, stored.override_note) == (
-        270,
-        "JLC's preview needed it",
-    )
-    assert check.display_text("Q1") == "270° set"
-    assert check.decision(part).source == "override"
-    assert glyph_state(check, "Q1") == "override"
-    assert "Override 270° set by you." in cell_help(check, "Q1")
-    # A re-resolve and a re-scan keep it (save and mark_pending both do).
-    check.verdicts.mark_pending("C2132", part.footprint_hash, part.footprint_name, 9)
-    assert check.verdicts.get("C2132", part.footprint_hash).override_rotation == 270
-    check.scan_board()
-    check.worker.run_pending()
-    assert check.verdicts.get("C2132", part.footprint_hash).override_rotation == 270
-    cleared = check.set_override("Q1", None)
-    assert (cleared.override_rotation, cleared.override_note) == (None, None)
-    assert check.display_text("Q1") == "180°"
-    assert check.set_override("R1", 90) is None  # no LCSC, no row
-    assert check.set_override("nope", 90) is None
 
 
 def test_an_override_on_a_part_with_no_verdict_row_yet_creates_one(setup):
@@ -900,29 +566,6 @@ def test_two_placements_of_one_part_share_the_verdict_and_the_repaint(setup):
     assert check.references_sharing_verdict("Q3") == ["Q3"]
     assert check.references_sharing_verdict("R1") == ["R1"]
     assert check.references_sharing_verdict("nope") == []
-
-
-def test_refetching_forgets_the_cached_rows_and_queues_the_parts_again(setup):
-    """Spec 16.5: the cache row goes, the verdict is pending again, the override stays."""
-    check, board, _events, _messages, _client = setup
-    check.scan_board()
-    check.worker.run_pending()
-    part = board["parts"][0]
-    check.set_override("Q1", 270, "keep me")
-    assert check.cache.status("C2132") == "ok"
-    summary = check.refetch(["Q1"])
-    assert check.cache.status("C2132") is None
-    assert summary.enqueued == 1
-    stored = check.verdicts.get("C2132", part.footprint_hash)
-    assert (stored.status, stored.override_rotation) == (PENDING, 270)
-    assert glyph_state(check, "Q1") == "pending"
-    assert check.package_name("C2132") == ""
-    # The queued request answers and the part resolves again, override intact.
-    check.worker.run_pending()
-    assert check.cache.status("C2132") == "ok"
-    assert check.verdicts.get("C2132", part.footprint_hash).override_rotation == 270
-    assert check.package_name("C2132") == recorded("C2132").package_name
-    assert check.refetch(["nope"]).scanned == 0
 
 
 def test_the_board_estimate_counts_distinct_parts_and_their_documents(setup):
