@@ -2985,8 +2985,8 @@ class JLCPCBTools(wx.Frame):
         """Delete the whole EasyEDA cache, after a confirmation (spec 16.5)."""
         if self._active_jlc_footprint_check() is None:
             return
-        clear_jlc_footprint_cache(self)
-        self._refresh_jlc_rotation_cells()
+        if clear_jlc_footprint_cache(self):
+            self._refresh_jlc_rotation_cells()
 
     def init_logger(self):
         """Initialize logger to log into textbox."""
