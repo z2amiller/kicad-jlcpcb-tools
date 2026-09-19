@@ -35,6 +35,7 @@ from pcbnew import (  # pylint: disable=import-error
 
 from .correction_data import Correction, CorrectionMatch, match_correction
 from .footprint_helpers import get_is_dnp
+from .jlcfootprint.model import Decision
 from .jlcfootprint.report import CplRotation
 
 # JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
@@ -424,7 +425,8 @@ class Fabrication:
         The check judges the part the board names; when the project database orders a
         different LCSC the two disagree about what is being placed, so neither the
         rotation nor the origin may be used and the part keeps its raw angle and
-        upstream's pad-box centre.
+        upstream's pad-box centre.  The stand-in is a real ``Decision`` whose defaults
+        already say all of that: no rotation, ``source`` raw, no origin.
         """
         stored_lcsc = str(part["lcsc"] or "")
         if decision is None or str(decision.lcsc or "") == stored_lcsc:
@@ -434,15 +436,8 @@ class Fabrication:
             f"{stored_lcsc or 'none'}; raw angle kept"
         )
         self.logger.warning("JLC footprint check: %s: %s", part["reference"], note)
-        return SimpleNamespace(
-            rotation=None,
-            source="raw",
-            status="lcsc-mismatch",
-            polarity_light=None,
-            fit=None,
-            note=note,
-            pending=False,
-            origin=None,
+        return Decision(
+            str(part["reference"]), stored_lcsc, status="lcsc-mismatch", note=note
         )
 
     def _rotation_for_decision(
@@ -486,7 +481,7 @@ class Fabrication:
                 note=decision.note if decision is not None else "",
                 pending=bool(decision.pending) if decision is not None else False,
                 legacy_correction=None if match is None else match.correction.rotation,
-                body_excess=getattr(decision, "body_excess", None),
+                body_excess=decision.body_excess if decision is not None else None,
                 position_source=position_source,
             )
         )
@@ -561,7 +556,7 @@ class Fabrication:
             try:
                 center = self.get_position(fp)
                 source = "pad-box"
-                origin = None if decision is None else getattr(decision, "origin", None)
+                origin = None if decision is None else decision.origin
                 if exact_origin and origin is not None:
                     # Spec 17.4: JLC centres the package on Mid X/Y, so a part whose
                     # verdict knows where JLC's drawing origin sits goes there, turned

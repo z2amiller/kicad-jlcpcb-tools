@@ -49,6 +49,7 @@ def decision(
     pending=False,
     lcsc="C123",
     body_excess=None,
+    origin=None,
 ):
     """Return what the controller's decision carries for one reference."""
     return SimpleNamespace(
@@ -61,6 +62,7 @@ def decision(
         pending=pending,
         lcsc=lcsc,
         body_excess=body_excess,
+        origin=origin,
     )
 
 
