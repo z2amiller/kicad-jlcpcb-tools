@@ -167,9 +167,7 @@ def test_the_origin_is_turned_by_the_placement_and_mirrored_on_the_bottom(
 ):
     """Every snapped angle on both sides moves the position the way reposition does."""
     layer = 0 if side == "top" else 31
-    generator = fabrication(
-        modules, library, tmp_path, [footprint("U1", layer, angle)]
-    )
+    generator = fabrication(modules, library, tmp_path, [footprint("U1", layer, angle)])
 
     rows = generator.prepare_cpl(None, {"U1": decision()})
 
