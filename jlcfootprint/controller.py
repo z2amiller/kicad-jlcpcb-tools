@@ -234,7 +234,7 @@ class FootprintCheck:
             verdict,
             self.now(),
         )
-        # A clean green verdict at zero says nothing the user must act on (kicad-bpzt).
+        # A clean green verdict at zero says nothing the user must act on.
         quiet = stored.status == "green" and not stored.rotation and not stored.notes
         logger.log(
             logging.DEBUG if quiet else logging.INFO,
@@ -396,7 +396,7 @@ class FootprintCheck:
         )
 
     def decision(self, part: BoardPart) -> Decision:
-        """Return the CPL decision for one board part (spec section 8)."""
+        """Return the CPL decision for one board part (spec 8)."""
         if not part.lcsc:
             return Decision(part.reference, "", status="no-lcsc", note="no LCSC number")
         stored = self.verdicts.get(part.lcsc, part.footprint_hash)
@@ -539,8 +539,8 @@ class FootprintCheck:
     def refetch(self, references: Iterable[str]) -> ScanSummary:
         """Forget these parts' cached EasyEDA data and queue them again (spec 16.5).
 
-        The cache row goes, the verdict is marked pending by the rescan (which keeps
-        the override, spec 5.3) and the rows show the clock until the answers land.
+        The cache row goes, the verdict is marked pending by the rescan, which keeps
+        the override, and the rows show the clock until the answers land (spec 5.3).
         """
         wanted = [reference for reference in references if reference in self.parts]
         lcscs = sorted(
@@ -614,8 +614,9 @@ class FootprintCheck:
     def references_sharing_verdict(self, reference: str) -> list[str]:
         """Return every reference whose verdict row is the one this reference uses.
 
-        Two placements of one part on one footprint share a row, so an override set on
-        either repaints both (spec 5.3 keys a verdict on the LCSC and the pad hash).
+        A verdict is keyed on the part number and the pad geometry, so two placements
+        of one part on one footprint share a row and an override set on either
+        repaints both (spec 5.3).
         """
         part = self.parts.get(reference)
         if part is None or not part.lcsc:

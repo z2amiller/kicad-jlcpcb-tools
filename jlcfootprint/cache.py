@@ -1,11 +1,11 @@
-"""Global EasyEDA cache: one sqlite file beside ``corrections.db`` (spec section 5.1).
+"""Global EasyEDA cache: one sqlite file beside ``corrections.db`` (spec 5.1).
 
 Symbol data is keyed per LCSC because pin meaning is a per-part fact; footprint
 data is keyed per footprint uuid because footprints are shared.  Pads are stored
 as EasyEDA sent them and converted when read, so a change to the frame
 convention never invalidates the cache.  Rows never expire on their own: ``none``
 rows are retried after 30 days, ``error`` rows next session, ``ok`` rows only on
-an explicit refresh.  A live row is filled in steps (spec section 15): the batch
+an explicit refresh.  A live row is filled in steps (spec 15): the batch
 lookup writes the uuids, the footprint and the symbol documents follow, and
 ``needs`` says which piece is still missing.  Stdlib only; safe to use from the
 worker thread and the main thread at once (each call opens its own connection).
@@ -207,7 +207,7 @@ class Cache:
         return None if row is None else str(row["status"])
 
     def needs(self, lcsc: str, now: float | None = None) -> set[str]:
-        """Return what the part still needs from the network (spec section 15.4).
+        """Return what the part still needs from the network (spec 15.4).
 
         ``{'lookup'}`` when there is no row, an ``error`` row or a ``none`` row older
         than thirty days; otherwise the subset of ``{'footprint', 'symbol'}`` that is
@@ -432,7 +432,7 @@ class Cache:
     def store_footprint(
         self, footprint: FootprintRecord, now: float | None = None, source: str = "live"
     ) -> None:
-        """Store one footprint fetched by uuid (spec section 15.2)."""
+        """Store one footprint fetched by uuid (spec 15.2)."""
         if not footprint.pads:
             return
         fetched_at = int(time.time() if now is None else now)
@@ -499,7 +499,7 @@ class Cache:
     # ------------------------------------------------------------------
 
     def import_seed(self, seed_path: str) -> SeedImportResult:
-        """Merge a seed file (spec section 5.2) into the cache without touching live rows.
+        """Merge a seed file into the cache without touching live rows (spec 5.2).
 
         Seed rows replace older seed rows and fill gaps; a row the plugin fetched itself
         is never overwritten.  The seed must carry this cache's schema version.
