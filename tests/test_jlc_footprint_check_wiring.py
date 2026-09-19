@@ -440,7 +440,9 @@ def test_the_window_menu_handlers_call_the_actions_and_repaint(mainwindow, monke
     window = _make_window(module)
     window._start_jlc_footprint_check()
     ((_owner, _pcbnew, check),) = checks
-    monkeypatch.setattr(module, "glyph_state", lambda check, reference: "pending")
+    monkeypatch.setattr(
+        module.jlc_footprint_window, "glyph_state", lambda check, reference: "pending"
+    )
     check.display_text.return_value = "raw"
     model = window.partlist_data_model
     model.columns = {"REF_COL": 0}
@@ -461,23 +463,27 @@ def test_the_window_menu_handlers_call_the_actions_and_repaint(mainwindow, monke
     # Refresh and Clear cache only repaint when the facade reports a Yes: both are
     # confirmations, and a stubbed 0 stands in for "No" without a real dialog.
     model.reset_mock()
-    module.refresh_jlc_footprint_board_data = lambda *_args, **_kwargs: 2
+    module.jlc_footprint_window.refresh_jlc_footprint_board_data = (
+        lambda *_args, **_kwargs: 2
+    )
     window.on_jlc_footprint_refresh()
     assert model.set_jlc_state.call_args_list == [
         (("Q1", "pending"),),
         (("R1", "pending"),),
     ]
     model.reset_mock()
-    module.refresh_jlc_footprint_board_data = lambda *_args, **_kwargs: 0
+    module.jlc_footprint_window.refresh_jlc_footprint_board_data = (
+        lambda *_args, **_kwargs: 0
+    )
     window.on_jlc_footprint_refresh()
     model.set_jlc_state.assert_not_called()
 
     model.reset_mock()
-    module.clear_jlc_footprint_cache = lambda *_args, **_kwargs: 0
+    module.jlc_footprint_window.clear_jlc_footprint_cache = lambda *_args, **_kwargs: 0
     window.on_jlc_footprint_clear_cache()
     model.set_jlc_state.assert_not_called()
     model.reset_mock()
-    module.clear_jlc_footprint_cache = lambda *_args, **_kwargs: 3
+    module.jlc_footprint_window.clear_jlc_footprint_cache = lambda *_args, **_kwargs: 3
     window.on_jlc_footprint_clear_cache()
     assert model.set_jlc_state.call_count == 2
 

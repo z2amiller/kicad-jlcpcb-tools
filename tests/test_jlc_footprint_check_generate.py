@@ -223,8 +223,10 @@ def _generate_window(module, check, corrections=()):
     window.read_valid_corrections_for_generation = (
         lambda: window.library.read_correction_data().corrections
     )
-    window.read_corrections_for_summary = (
-        lambda: module.JLCPCBTools.read_corrections_for_summary(window)
+    window.read_corrections_for_summary = lambda: (
+        module.jlc_footprint_window.JlcFootprintPresenter(
+            window
+        ).read_corrections_for_summary()
     )
     window.layer_selection.GetSelection.return_value = 0
     window.layer_selection.GetString.return_value = "Auto"
@@ -327,7 +329,7 @@ def test_rotation_cells_show_the_decision_or_the_rule(mainwindow, monkeypatch):
         generation=3,
     )
     monkeypatch.setattr(
-        module,
+        module.jlc_footprint_window,
         "glyph_state",
         lambda check, reference: {"R1": "green", "R2": "unknown"}[reference],
     )
@@ -368,7 +370,9 @@ def test_result_event_repaints_the_checked_references(mainwindow, monkeypatch):
         references_for=lambda lcsc: ["R1", "R2"],
         generation=3,
     )
-    monkeypatch.setattr(module, "glyph_state", lambda check, reference: "yellow")
+    monkeypatch.setattr(
+        module.jlc_footprint_window, "glyph_state", lambda check, reference: "yellow"
+    )
     window, model = _column_window(module, check)
     module.JLCPCBTools.on_jlc_footprint_result(
         window, SimpleNamespace(lcsc="C1", generation=2)

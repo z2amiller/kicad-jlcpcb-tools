@@ -35,7 +35,9 @@ def mainwindow():
         checks.append(MagicMock())
         return checks[-1]
 
-    module.create_footprint_check = create
+    presenter = module.jlc_footprint_window
+    presenter.create_footprint_check = create
+    presenter.is_footprint_check_enabled = _enabled
     module.is_footprint_check_enabled = _enabled
     return module, checks
 
@@ -148,7 +150,7 @@ def test_a_board_replaced_before_the_first_scan_recovers_like_upstream(mainwindo
     module, _ = mainwindow
     error = module.BoardContextChanged("replaced")
     check = MagicMock(scan_board=MagicMock(side_effect=error))
-    module.create_footprint_check = MagicMock(return_value=check)
+    module.jlc_footprint_window.create_footprint_check = MagicMock(return_value=check)
     window = _window(module)
     window._set_project_storage_error = MagicMock()
 

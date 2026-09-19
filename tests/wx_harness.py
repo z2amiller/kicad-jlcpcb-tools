@@ -357,6 +357,10 @@ def mainwindow_stubs(
             **symbols["footprint_helpers"],
             **overrides["footprint_helpers"],
         }
+    if "datamodel" in overrides:
+        # ``jlc_footprint_window`` is loaded below and names the part list's model,
+        # so an override that omits it keeps the default double.
+        overrides["datamodel"] = {**symbols["datamodel"], **overrides["datamodel"]}
     symbols.update(overrides)
     stubs.update(
         {
@@ -364,6 +368,14 @@ def mainwindow_stubs(
             for suffix, values in symbols.items()
         }
     )
+    # The window's JLC footprint methods are two-line delegators onto this module,
+    # so a stub would leave the behaviour the window tests assert untested.  It is
+    # loaded under the stubs above, so it and the window see one set of doubles,
+    # and a test patches what it holds through ``mainwindow.jlc_footprint_window``.
+    if "jlc_footprint_window" not in overrides:
+        stubs[f"{package}.jlc_footprint_window"] = load(
+            package, "jlc_footprint_window", stubs
+        )
     return stubs
 
 
@@ -372,6 +384,7 @@ def load_mainwindow(package, *, wx=None, pcbnew=None, **overrides):
 
     The loaded module keeps its own reference to the fake wx, so a caller that
     needs to configure or assert on it can reach it as ``module.wx``.
+
     """
     stubs = mainwindow_stubs(package, wx=wx, pcbnew=pcbnew, **overrides)
 

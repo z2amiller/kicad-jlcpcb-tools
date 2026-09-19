@@ -733,10 +733,12 @@ def _activation(column=None, index=-1):
 def test_a_double_click_on_the_jlc_cell_opens_the_dialog(monkeypatch):
     """Spec 16.3: the activation event's column decides; any other column assigns a part."""
     main = layout.mainwindow
-    monkeypatch.setattr(main, "is_footprint_check_enabled", _enabled)
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+    )
     opened: list = []
     monkeypatch.setattr(
-        main.JLCPCBTools,
+        main.jlc_footprint_window.JlcFootprintPresenter,
         "show_jlc_footprint_detail",
         lambda self, reference=None: opened.append(reference),
     )
@@ -770,7 +772,9 @@ def test_a_double_click_on_the_jlc_cell_opens_the_dialog(monkeypatch):
 def test_the_dialog_opens_on_the_first_selected_part_with_an_lcsc(monkeypatch):
     """Spec 16.3: "Details…" takes the first selected part that has a part number."""
     main = layout.mainwindow
-    monkeypatch.setattr(main, "is_footprint_check_enabled", _enabled)
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+    )
     shown: list = []
 
     class FakeDialog:
@@ -793,10 +797,12 @@ def test_the_dialog_opens_on_the_first_selected_part_with_an_lcsc(monkeypatch):
             """Mark the dialog destroyed."""
             self.destroyed = True
 
-    monkeypatch.setattr(main, "JlcFootprintDetailDialog", FakeDialog)
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "JlcFootprintDetailDialog", FakeDialog
+    )
     check = MagicMock()
     fake_part_detail = MagicMock(return_value="the detail")
-    monkeypatch.setattr(main, "part_detail", fake_part_detail)
+    monkeypatch.setattr(main.jlc_footprint_window, "part_detail", fake_part_detail)
     window, model, control = _window(main, check, ("R9", "C1"), ("", "C7192"))
     main.JLCPCBTools.show_jlc_footprint_detail(window)
     (parent, detail, set_override, refetch, settings) = shown[0]
@@ -822,7 +828,9 @@ def test_the_window_remembers_the_size_on_every_way_out(monkeypatch):
     window asks for the size itself once ``ShowModal`` returns.
     """
     main = layout.mainwindow
-    monkeypatch.setattr(main, "is_footprint_check_enabled", _enabled)
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+    )
     order: list = []
 
     class FakeDialog:
@@ -844,8 +852,12 @@ def test_the_window_remembers_the_size_on_every_way_out(monkeypatch):
             """Record the destroy, which must come after the size."""
             order.append("destroyed")
 
-    monkeypatch.setattr(main, "JlcFootprintDetailDialog", FakeDialog)
-    monkeypatch.setattr(main, "part_detail", MagicMock(return_value="the detail"))
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "JlcFootprintDetailDialog", FakeDialog
+    )
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "part_detail", MagicMock(return_value="the detail")
+    )
     check = MagicMock()
     window, _model, _control = _window(main, check)
     main.JLCPCBTools.show_jlc_footprint_detail(window)
@@ -856,13 +868,19 @@ def test_the_window_remembers_the_size_on_every_way_out(monkeypatch):
 def test_the_override_and_refetch_callbacks_repaint_every_shared_row(monkeypatch):
     """A change repaints the Rotation text and the glyph of every row on that verdict."""
     main = layout.mainwindow
-    monkeypatch.setattr(main, "is_footprint_check_enabled", _enabled)
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+    )
     check = MagicMock()
     check.set_override.return_value = "stored"
     check.references_sharing_verdict.return_value = ["C1", "C2"]
     check.display_text.return_value = "270° set"
-    monkeypatch.setattr(main, "glyph_state", lambda check, reference: "override")
-    monkeypatch.setattr(main, "part_detail", MagicMock(return_value="fresh"))
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "glyph_state", lambda check, reference: "override"
+    )
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "part_detail", MagicMock(return_value="fresh")
+    )
     window, model, _control = _window(main, check)
     assert main.JLCPCBTools._set_jlc_override(window, "C1", 270, "note") == "fresh"
     check.set_override.assert_called_once_with("C1", 270, "note")
@@ -881,7 +899,7 @@ def test_the_override_and_refetch_callbacks_repaint_every_shared_row(monkeypatch
     # shows; calling check.refetch here directly would log nothing at all.
     refetched: list = []
     monkeypatch.setattr(
-        main,
+        main.jlc_footprint_window,
         "refetch_jlc_footprint_references",
         lambda *args: refetched.append(args) or 1,
     )
@@ -894,7 +912,9 @@ def test_the_override_and_refetch_callbacks_repaint_every_shared_row(monkeypatch
 def test_the_context_menu_carries_the_jlc_submenu(monkeypatch):
     """Spec 16.3: a "JLC footprint" submenu, its Details entry enabled only when it can open."""
     main = layout.mainwindow
-    monkeypatch.setattr(main, "is_footprint_check_enabled", _enabled)
+    monkeypatch.setattr(
+        main.jlc_footprint_window, "is_footprint_check_enabled", _enabled
+    )
     appended: list = []
 
     class FakeMenu:
@@ -952,12 +972,15 @@ def test_the_context_menu_carries_the_jlc_submenu(monkeypatch):
         "Clear cache",
     ]
     assert [item.enabled for item in submenu.items] == [True] * 5
+    # The submenu binds the presenter's own handlers; the window's same-named
+    # methods are the delegators onto them.
+    presenter = window.jlc_footprint_presenter
     assert [handler for handler, _item in submenu.bindings] == [
-        window.on_jlc_footprint_details,
-        window.on_jlc_footprint_refetch,
-        window.on_jlc_footprint_recheck,
-        window.on_jlc_footprint_refresh,
-        window.on_jlc_footprint_clear_cache,
+        presenter.on_jlc_footprint_details,
+        presenter.on_jlc_footprint_refetch,
+        presenter.on_jlc_footprint_recheck,
+        presenter.on_jlc_footprint_refresh,
+        presenter.on_jlc_footprint_clear_cache,
     ]
     # With the check off every entry is disabled.
     window.settings = {"jlcfootprint": {"enabled": False}}
