@@ -1,4 +1,4 @@
-"""Tests for the M3 resolver batch (spec 16.6): distinct pad numbers, pairing by function, the drawings' + marks, the body caveat."""
+"""Tests for the resolver beyond pad-number pairing (spec 16.6): distinct pad numbers, pairing by pin function, the drawings' + marks vote, and the body-overhang caveat."""
 
 import pytest
 
