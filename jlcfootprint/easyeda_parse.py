@@ -454,7 +454,6 @@ def parse_puuid_response(body: Any, puuid: str) -> FootprintRecord:
 # ----------------------------------------------------------------------
 
 DOCTYPE_SYMBOL = "SYMBOL"
-DOCTYPE_FOOTPRINT = "FOOTPRINT"
 
 
 @dataclass
