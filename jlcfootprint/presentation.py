@@ -194,7 +194,14 @@ def verdict_text(
         )
     verdict = decision.verdict
     if decision.pending:
-        return "Waiting for EasyEDA data; the Rotation column shows what the CPL emits."
+        sentence = (
+            "Waiting for EasyEDA data; the Rotation column shows what the CPL emits."
+        )
+        if verdict is not None and verdict.override_rotation is not None:
+            # "Re-fetch data" marks the row pending but keeps the override (spec
+            # 16.5); say so, or the user cannot tell it survived the re-fetch.
+            sentence += f" Override {verdict.override_rotation}° set by you."
+        return sentence
     if verdict is not None and verdict.override_rotation is not None:
         note = _capitalised(verdict.override_note or "")
         derived = f"Derived: {_degrees(verdict.rotation)} ({verdict.status})."
