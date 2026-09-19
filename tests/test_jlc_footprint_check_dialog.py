@@ -1001,18 +1001,21 @@ def test_a_dialog_without_settings_says_the_origin_is_not_used(dialog_module):
     assert _facts(dialog.jlc_panel)["Origin"].endswith("not used: the setting is off")
 
 
-def test_the_painter_draws_the_origin_cross_in_jlc_s_own_colour(dialog_module):
-    """Spec 17.5: the cross is not an annotation on a pad, so it keeps the pad colour."""
+def test_the_painter_draws_the_origin_cross_in_the_annotation_colour(dialog_module):
+    """The cross can land on a JLC pad, so it takes the text colour, not the pad colour."""
     module = dialog_module.module
     dialog = build(dialog_module, make_detail())
     dialog.canvas.client_size = _Size(420, 300)
     drawing = dialog.canvas.build_overlay()
 
     assert len(drawing.by_role("jlc_origin")) == 2
-    assert module.role_colour("jlc_origin", True) == module.role_colour("jlc_pad", True)
-    assert module.role_colour("jlc_origin", False) == module.role_colour(
-        "jlc_pad", False
-    )
+    for dark in (True, False):
+        assert module.role_colour("jlc_origin", dark) == module.role_colour(
+            "jlc_pin1", dark
+        )
+        assert module.role_colour("jlc_origin", dark) != module.role_colour(
+            "jlc_pad", dark
+        )
     dc = RecordingDC()
     assert module.draw_primitives(dc, drawing.by_role("jlc_origin"), dark=True) == 2
     assert len(dc.of("line")) == 2
