@@ -924,37 +924,48 @@ class Fabrication:
         """Prepare every placement before opening the output file."""
         self.write_cpl(self.prepare_cpl(corrections, decisions=decisions))
 
+    def _decision_for_part(self, decision: Any, part: dict) -> Any:
+        """Return the decision the CPL may act on, or a raw-angle stand-in (spec section 8).
+
+        The check judges the part the board names; when this row places another LCSC
+        (a variant can order another part than the board's own) the two disagree about
+        what is being placed, so neither the rotation nor the origin may be used and
+        the part keeps its raw angle and upstream's pad-box centre.
+        """
+        stored_lcsc = str(part["lcsc"] or "")
+        if decision is None or str(decision.lcsc or "") == stored_lcsc:
+            return decision
+        note = (
+            f"the check saw {decision.lcsc or 'no LCSC'} but the project has "
+            f"{stored_lcsc or 'none'}; raw angle kept"
+        )
+        self.logger.warning("JLC footprint check: %s: %s", part["reference"], note)
+        return SimpleNamespace(
+            rotation=None,
+            source="raw",
+            status="lcsc-mismatch",
+            polarity_light=None,
+            fit=None,
+            note=note,
+            pending=False,
+            origin=None,
+        )
+
     def _rotation_for_decision(
         self,
         footprint: Any,
         decision: Any,
         match: Optional[CorrectionMatch],
         part: dict,  # noqa: UP045
+        position_source: str = "pad-box",
     ) -> float:
         """Apply the footprint check's decision (spec section 8) and record the summary row.
 
         A decision without a rotation, a pending part and a part without a verdict all
         keep the raw angle.  The correction rule that would have matched is only noted.
+        ``decision`` has already passed :meth:`_decision_for_part`.
         """
         raw = self._rotation_for_match(footprint, None)
-        stored_lcsc = str(part["lcsc"] or "")
-        if decision is not None and str(decision.lcsc or "") != stored_lcsc:
-            # The check judged another part than the one this row places (a variant
-            # can order another part than the board's own); the raw angle is safe.
-            note = (
-                f"the check saw {decision.lcsc or 'no LCSC'} but the project has "
-                f"{stored_lcsc or 'none'}; raw angle kept"
-            )
-            self.logger.warning("JLC footprint check: %s: %s", part["reference"], note)
-            decision = SimpleNamespace(
-                rotation=None,
-                source="raw",
-                status="lcsc-mismatch",
-                polarity_light=None,
-                fit=None,
-                note=note,
-                pending=False,
-            )
         correction = None if decision is None else decision.rotation
         rotation = (
             raw if correction is None else self.rotate(footprint, raw, correction)
@@ -982,6 +993,7 @@ class Fabrication:
                 pending=bool(decision.pending) if decision is not None else False,
                 legacy_correction=None if match is None else match.correction.rotation,
                 body_excess=getattr(decision, "body_excess", None),
+                position_source=position_source,
             )
         )
         return rotation
@@ -1002,7 +1014,10 @@ class Fabrication:
         With ``decisions`` (the JLC footprint check's rotation per reference, spec
         section 8) each rotation is the decision's, or the raw angle when it has
         none, and no correction rule is applied; the rules are read only when
-        available, to note in ``rotation_report`` what they would have done.
+        available, to note in ``rotation_report`` what they would have done.  With
+        ``jlcfootprint.exact_origin`` on as well, a decision that carries JLC's
+        package origin also places the part there (spec 17.4); every other part keeps
+        upstream's pad-bounding-box centre, and each row says which it got.
         """
         self._require_output_snapshot()
         if self.output_snapshot is not None:
@@ -1075,8 +1090,36 @@ class Fabrication:
         ``decisions`` (spec section 8) apply to the ordinary and the variant CPL
         alike; ``lcsc`` is the part the row places, for the rotation report.
         """
+        part = {
+            "reference": identity[0],
+            "value": identity[1],
+            "footprint": identity[2],
+            "lcsc": lcsc,
+        }
+        decision = (
+            None
+            if decisions is None
+            else self._decision_for_part(decisions.get(identity[0]), part)
+        )
+        # Spec 17.4: only the resolver path can place a part at JLC's origin, because
+        # only a verdict knows where that origin is.
+        exact_origin = decisions is not None and self.parent.settings.get(
+            "jlcfootprint", {}
+        ).get("exact_origin", False)
         try:
             center = self.get_position(footprint)
+            source = "pad-box"
+            package_origin = (
+                None if decision is None else getattr(decision, "origin", None)
+            )
+            if exact_origin and package_origin is not None:
+                # Spec 17.4: JLC centres the package on Mid X/Y, so a part whose
+                # verdict knows where JLC's drawing origin sits goes there, turned
+                # and mirrored exactly as a correction rule's offset would be.
+                center = self.reposition(
+                    footprint, footprint.GetPosition(), package_origin
+                )
+                source = "origin"
             # Subtract in Python before native coordinate arithmetic can wrap.
             position = SimpleNamespace(x=center.x - origin.x, y=center.y - origin.y)
             if decisions is None:
@@ -1085,16 +1128,10 @@ class Fabrication:
             if decisions is None:
                 rotation = self._rotation_for_match(footprint, match)
             else:
-                # The footprint check owns the rotation; offsets stay upstream's
-                # pad-bounding-box centre (spec section 8).
-                part = {
-                    "reference": identity[0],
-                    "value": identity[1],
-                    "footprint": identity[2],
-                    "lcsc": lcsc,
-                }
+                # The footprint check owns the rotation, and the position too once
+                # the setting is on; no correction rule is applied either way.
                 rotation = self._rotation_for_decision(
-                    footprint, decisions.get(identity[0]), match, part
+                    footprint, decision, match, part, source
                 )
             return (
                 *identity,

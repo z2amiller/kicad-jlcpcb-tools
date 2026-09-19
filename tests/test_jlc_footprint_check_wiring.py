@@ -258,7 +258,10 @@ def test_default_settings_ship_the_switch():
     """The shipped defaults carry the setting (test_settings_defaults checks every read)."""
     from .test_settings_defaults import shipped_defaults
 
-    assert shipped_defaults()["jlcfootprint"] == {"enabled": True}
+    assert shipped_defaults()["jlcfootprint"] == {
+        "enabled": True,
+        "exact_origin": False,
+    }
 
 
 def test_pcm_keeps_the_cache_on_update():

@@ -47,6 +47,15 @@ def is_footprint_check_enabled(settings: dict) -> bool:
     return bool(settings.get("jlcfootprint", {}).get("enabled", True))
 
 
+def is_exact_origin_enabled(settings: dict) -> bool:
+    """Return whether the CPL places parts at JLC's package origin (spec 17.1).
+
+    Off by default, and only ever consulted on the resolver path: a part's origin
+    comes from its verdict, which the legacy path does not have.
+    """
+    return bool(settings.get("jlcfootprint", {}).get("exact_origin", False))
+
+
 def cache_path(datadir: str) -> str:
     """Return the global cache file beside the library's other databases."""
     return os.path.join(datadir, FILENAME)
@@ -257,8 +266,14 @@ class GenerateSummaryDialog(wx.Dialog):
 def show_generate_summary(
     window: Any, rows: list[CplRotation], legacy_available: bool
 ) -> str:
-    """Show the three-group rotation summary after the CPL is written; return its text."""
-    text = format_summary(summarise(rows, legacy_available))
+    """Show the four-group rotation summary after the CPL is written; return its text.
+
+    The window's own settings say whether the positions came from JLC's package
+    origin, so the header line can report the split (spec 17.4) without the caller
+    having to pass the setting down through the generate steps.
+    """
+    exact_origin = is_exact_origin_enabled(getattr(window, "settings", {}) or {})
+    text = format_summary(summarise(rows, legacy_available, exact_origin))
     dialog = GenerateSummaryDialog(window, text)
     try:
         dialog.ShowModal()

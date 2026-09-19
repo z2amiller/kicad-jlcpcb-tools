@@ -32,6 +32,10 @@ class CplRotation:
     pending: bool = False
     legacy_correction: int | None = None  # what the correction rules would have applied
     body_excess: float | None = None  # the body-size caveat in mm (spec 16.6 item 4)
+    # Where Mid X/Y came from: 'origin' (JLC's package origin, spec 17.4) or
+    # 'pad-box' (upstream's pad bounding-box centre, which is every part's when
+    # ``jlcfootprint.exact_origin`` is off).
+    position_source: str = "pad-box"
 
 
 @dataclass
@@ -47,6 +51,22 @@ class GenerateSummary:
     red: list[CplRotation] = field(default_factory=list)
     unresolved: list[CplRotation] = field(default_factory=list)
     legacy_available: bool = True
+    exact_origin: bool = False  # whether the setting asked for JLC's origin (17.4)
+
+    @property
+    def at_origin(self) -> list[CplRotation]:
+        """Return the rows the CPL placed at JLC's package origin."""
+        return [row for row in self.rows if row.position_source == "origin"]
+
+    @property
+    def at_pad_box(self) -> list[CplRotation]:
+        """Return the rows the CPL placed at upstream's pad-bounding-box centre."""
+        return [row for row in self.rows if row.position_source != "origin"]
+
+    @property
+    def rows(self) -> list[CplRotation]:
+        """Return every placed part, in the four groups' order."""
+        return self.red + self.applied + self.unresolved
 
     @property
     def caveated(self) -> list[CplRotation]:
@@ -64,10 +84,14 @@ class GenerateSummary:
 
 
 def summarise(
-    rows: list[CplRotation], legacy_available: bool = True
+    rows: list[CplRotation],
+    legacy_available: bool = True,
+    exact_origin: bool = False,
 ) -> GenerateSummary:
     """Sort the CPL rows into applied (with yellow), red and unresolved."""
-    summary = GenerateSummary(legacy_available=legacy_available)
+    summary = GenerateSummary(
+        legacy_available=legacy_available, exact_origin=exact_origin
+    )
     for row in rows:
         if row.source in ("override", "derived"):
             summary.applied.append(row)
@@ -96,6 +120,14 @@ def format_summary(summary: GenerateSummary) -> str:
     """Render the groups as the dialog shows them, worst first."""
     lines: list[str] = []
     differs = {id(row) for row in summary.differs_from_legacy}
+    if summary.exact_origin:
+        # Spec 17.4: with the setting on, say how the positions were split before
+        # anything else, because that is what changed about this CPL.
+        lines.append(
+            f"Positions: {len(summary.at_origin)} at JLC's package origin, "
+            f"{len(summary.at_pad_box)} at the pad-box centre"
+        )
+        lines.append("")
     lines.append(f"Does not fit ({len(summary.red)})")
     for row in summary.red:
         lines.append(
