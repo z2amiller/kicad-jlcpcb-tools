@@ -46,6 +46,7 @@ from jlcfootprint.easyeda_parse import (  # noqa: E402
     parse_devices_response,
     parse_puuid_response,
     parse_symbol_response,
+    resolve_record,
 )
 from jlcfootprint.geometry import (  # noqa: E402
     easyeda_pads_to_mm,
@@ -188,20 +189,28 @@ def evaluate_footprints(
                 courtyard = None if courtyard is None else mirror_box(courtyard)
             row["package"] = record.package_name
             row["centre"] = pad_box_centre(pads)
-            row["verdict"] = resolve(
-                pads,
-                fp.footprint_name,
-                record.status,
-                record.package_name,
-                easyeda_pads_to_mm(record.pads, flip_y=flip_y),
-                record.symbol_pins,
-                marks=drawing_marks(
-                    record.symbol_shapes,
-                    record.footprint_shapes,
-                    record.footprint_origin,
-                ),
-                kicad_courtyard=courtyard,
-            )
+            if flip_y is None:
+                row["verdict"] = resolve_record(
+                    pads, fp.footprint_name, record, kicad_courtyard=courtyard
+                )
+            else:
+                # resolve_record has no flip_y override; --flip-y is a calibration
+                # escape hatch (pinned by test_jlcfootprint_validate.py's direct
+                # flip_y=False call), so that path keeps building the call by hand.
+                row["verdict"] = resolve(
+                    pads,
+                    fp.footprint_name,
+                    record.status,
+                    record.package_name,
+                    easyeda_pads_to_mm(record.pads, flip_y=flip_y),
+                    record.symbol_pins,
+                    marks=drawing_marks(
+                        record.symbol_shapes,
+                        record.footprint_shapes,
+                        record.footprint_origin,
+                    ),
+                    kicad_courtyard=courtyard,
+                )
         rows.append(row)
     return rows
 
