@@ -11,12 +11,9 @@ no wx anywhere near them.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
 
 from .geometry import pad_box_centre
-
-if TYPE_CHECKING:  # pragma: no cover - annotations only; no runtime import cycle
-    from .controller import Decision, FetchState, PartDetail
+from .model import Decision, FetchState, PartDetail
 
 # Closer than this to the pad-box centre reads as "on" it, which is what the two
 # decimals the line prints can tell apart.
