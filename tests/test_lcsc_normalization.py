@@ -14,6 +14,7 @@ _spec.loader.exec_module(_lcsc)
 
 normalize_lcsc = _lcsc.normalize_lcsc
 is_lcsc_part = _lcsc.is_lcsc_part
+parse_lcsc_entry = _lcsc.parse_lcsc_entry
 
 
 class TestNormalizeLcsc:
@@ -63,3 +64,55 @@ class TestIsLcscPart:
     def test_invalid_values_and_unicode_digits_rejected(self, value):
         """Non-part strings and non-ASCII digits are rejected."""
         assert is_lcsc_part(value) is False
+
+
+class TestParseLcscEntry:
+    """parse_lcsc_entry reads the one part number in typed or pasted text."""
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("C2925591", "C2925591"),
+            (" c2925591 ", "C2925591"),
+            ("https://www.lcsc.com/product-detail/C2925591.html", "C2925591"),
+            (
+                "https://www.lcsc.com/product-detail/"
+                "Multilayer-Ceramic-Capacitors-MLCC-SMD-SMT_Samsung-Electro-Mechanics-"
+                "CL10A106KP8NNNC_C19702.html",
+                "C19702",
+            ),
+            (
+                "https://www.lcsc.com/product-detail/"
+                "Multilayer-Ceramic-Capacitors-MLCC-SMD-SMT_KEMET-C0603C104K5RACTU_C1590.html",
+                "C1590",
+            ),
+            (
+                "https://jlcpcb.com/partdetail/"
+                "SamsungElectro_Mechanics-CL10A106KP8NNNC/C19702",
+                "C19702",
+            ),
+            ("C19702 C19702", "C19702"),  # The same number twice is still one part
+        ],
+    )
+    def test_one_number_is_read_from_a_code_or_product_link(self, text, expected):
+        """A bare number or a product link yields the number it names."""
+        assert parse_lcsc_entry(text) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "",
+            None,
+            "   ",
+            "C0G",  # A dielectric, not a part
+            "RC0603FR-0710KL",  # A letter touches the C
+            "RC0603",  # A letter touches the C, with nothing after the digits
+            "GRM188R71C104",  # A digit touches the C
+            "CL10A106KP8NNNC",  # The C is followed by a letter
+            "C123 C456",  # Two different parts are ambiguous
+            "C１２３",  # Fullwidth digits are not part numbers
+        ],
+    )
+    def test_text_without_exactly_one_number_yields_nothing(self, text):
+        """No number, a lookalike, or two different numbers give the empty string."""
+        assert parse_lcsc_entry(text) == ""
