@@ -28,3 +28,21 @@ def is_lcsc_part(value):
     every caller gets the same answer.
     """
     return bool(re.fullmatch(r"C[0-9]+", normalize_lcsc(value)))
+
+
+# A part number only counts when no ASCII letter or digit touches it. Product
+# links put it after "_" or "/", and a lookalike such as "C0G" or the "C0603"
+# inside "RC0603FR" must never be read as a part.
+_STANDALONE_LCSC_PART = re.compile(r"(?<![A-Za-z0-9])[Cc][0-9]+(?![A-Za-z0-9])")
+
+
+def parse_lcsc_entry(text):
+    """Return the one LCSC part number in typed or pasted text, or "".
+
+    The Enter LCSC prompt accepts a bare number and also a product link copied
+    from lcsc.com or jlcpcb.com, so the number is searched for rather than
+    matched against the whole text. Text naming two different numbers is
+    ambiguous and yields nothing, so the prompt never guesses which was meant.
+    """
+    found = {match.upper() for match in _STANDALONE_LCSC_PART.findall(str(text or ""))}
+    return found.pop() if len(found) == 1 else ""
