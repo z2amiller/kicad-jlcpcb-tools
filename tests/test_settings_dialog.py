@@ -569,3 +569,39 @@ def test_the_exact_origin_setting_survives_the_main_window_and_a_reopen(
     parent.load_settings()
     assert parent.settings["jlcfootprint"]["exact_origin"] is True
     assert SettingsDialog(parent).jlcfootprint_exact_origin_setting.GetValue() is True
+
+
+def test_the_jlc_footprint_row_closes_the_grid_after_the_library_rows(monkeypatch):
+    """The fork's row keeps its place: last, right after the catalog data path."""
+
+    class Sizer(_FakeWidget):
+        """Remember the controls placed in it, so a row can be told by its content."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.children = []
+
+        def Add(self, child, *_args, **_kwargs):
+            self.children.append(child)
+
+    rows = []
+    monkeypatch.setattr(_wx, "BoxSizer", Sizer)
+    monkeypatch.setattr(
+        SettingsDialog,
+        "_add_setting_row",
+        lambda _self, _grid, _image, control, *_flags: rows.append(control),
+    )
+    dialog = _dialog(_settings(False))
+
+    def row_of(control):
+        return next(
+            index
+            for index, row in enumerate(rows)
+            if row is control or control in getattr(row, "children", ())
+        )
+
+    jlc = row_of(dialog.jlcfootprint_enabled_setting)
+    assert row_of(dialog.jlcfootprint_exact_origin_setting) == jlc
+    assert row_of(dialog.library_data_path_setting) == jlc - 1
+    assert row_of(dialog.library_selected_setting) == jlc - 2
+    assert jlc == len(rows) - 1
