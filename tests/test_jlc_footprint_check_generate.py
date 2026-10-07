@@ -293,6 +293,26 @@ def test_generate_takes_the_legacy_path_when_the_check_is_off(mainwindow):
     facade["show_generate_summary"].assert_not_called()
 
 
+def test_generate_hands_the_decisions_to_upstream_s_variant_controller(mainwindow):
+    """Upstream's variant path gets the decisions by keyword, as the ordinary path does."""
+    module, facade = mainwindow
+    check = SimpleNamespace(
+        decisions=MagicMock(return_value={"R1": "decision"}), scan_board=MagicMock()
+    )
+    window, _steps = _generate_window(module, check, corrections=("rule",))
+    controller = window._variant_controller = MagicMock()
+    window.fabrication.generation_publication = MagicMock()
+
+    module.JLCPCBTools.generate_fabrication_data(window)
+
+    controller.begin_generation.assert_called_once_with(
+        ("rule",), decisions={"R1": "decision"}
+    )
+    window.fabrication.begin_ordinary_generation.assert_not_called()
+    controller.end_generation.assert_called_once_with()
+    module.wx.MessageBox.assert_not_called()
+
+
 def _column_window(module, check, enabled=True):
     window = check_window(module, check, enabled=enabled)
     window.get_correction = MagicMock(return_value="0°, 0.0/0.0")
