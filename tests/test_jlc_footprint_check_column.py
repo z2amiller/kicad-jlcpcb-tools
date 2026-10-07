@@ -225,6 +225,20 @@ def test_the_view_column_sits_between_type_and_std_with_std_s_width(monkeypatch)
     assert standard.IsResizeable() is False
 
 
+def test_a_double_click_reaches_the_jlc_dispatch_not_select_part(monkeypatch):
+    """The JLC column's dispatch owns activation; it hands other columns to select_part."""
+    main = layout.mainwindow
+    monkeypatch.setattr(main, "TypeCellTooltip", MagicMock())
+    monkeypatch.setattr(main.wx, "ToolTip", str, raising=False)
+    window = layout._open_main(monkeypatch, {})
+    handlers = [
+        call.args[1]
+        for call in window.footprint_list.Bind.call_args_list
+        if call.args[0] == main.dv.EVT_DATAVIEW_ITEM_ACTIVATED
+    ]
+    assert handlers == [window.on_footprint_activated]
+
+
 def test_the_window_fills_and_clears_the_glyph_through_the_check(models, monkeypatch):
     """A result repaints both cells of every reference; the setting off clears the glyph."""
     main = layout.mainwindow
