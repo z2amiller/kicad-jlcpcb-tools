@@ -4,9 +4,10 @@ Pure and stdlib only.  The caller supplies KiCad pads in the footprint's own
 frame, EasyEDA pads already converted to millimetres, and the symbol pins.
 Multi-pin parts align by pad name (``fit``), or by pin function when the numbers
 do not line up; polarized two-pad parts align by terminal meaning (``polarity``)
-and never by pad number; non-polar two-pad parts align by axis.  Fit is graded
-per JLC pad after the placement, and a fitting part's body is compared with the
-KiCad courtyard (spec 16.6).
+and never by pad number; non-polar two-pad parts align by axis, or by the one
+pairing their pad shapes fit (``shape``, spec 19.4).  Fit is graded per JLC pad
+after the placement, and a fitting part's body is compared with the KiCad
+courtyard (spec 16.6).
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ from .fit import (
     align,
     assess_fit,
     courtyard_excess,
+    fits,
+    fits_clearly_better,
     package_origin,
     pair_by_function,
     pair_by_name,
@@ -62,6 +65,9 @@ YELLOW_NOTE = (
     "JLC's pin-1 marker will sit on the other terminal; numbering difference, "
     "not a rotation error; do not renumber the footprint"
 )
+# A non-polar two-pad part whose pads fit one pairing clearly better than the other
+# takes that pairing, a full turn and method ``shape`` (spec 19.4).
+SHAPE_NOTE = "pads fit one way round only"
 DRAWING_NOTES = {
     "both": "polarity from the + marks of the symbol and the footprint",
     "footprint": "polarity from the footprint's + mark",
@@ -87,12 +93,12 @@ class Verdict:
     status: str = "unknown"  # green | yellow | red | unknown
     fit: str = "no_data"  # fits | fits_larger_pads | fits_tight | count | pitch | numbering | mirror | no_data
     rotation: int | None = None
-    method: str = "none"  # geometry | polarity | axis | none
+    method: str = "none"  # geometry | polarity | axis | shape | none
     confidence: str = "none"  # high | medium | low | none
     name_rotation: int | None = None
     polarity_light: str | None = None  # green | yellow | unknown; None for non-polar
     polarity_source: str = ""  # token | label | seed | drawing | ""
-    non_polar: bool = False  # True when 180 degrees apart is the same placement
+    non_polar: bool = False  # True when nothing names a polarity (axis, shape, marked)
     pad_count_kicad: int = 0
     pad_count_jlc: int = 0
     matched_pads: int = 0
@@ -302,13 +308,24 @@ def _resolve_multi_pin(
     return _finish_multi_pin(verdict, kicad, placement)
 
 
-def _two_pad_fit(
-    kicad: dict[str, Pad], jlc: dict[str, Pad], placement: Placement, verdict: Verdict
-) -> bool:
+def _two_pad_pairing(
+    kicad: dict[str, Pad], jlc: dict[str, Pad]
+) -> tuple[Placement, FitReport]:
+    """Align two pads on two by dict key and grade the fit, without touching a verdict."""
+    placement = align(kicad, jlc)
+    return placement, assess_fit(kicad, jlc, list(kicad.values()), [], placement, 2, 2)
+
+
+def _swapped(jlc: dict[str, Pad]) -> dict[str, Pad]:
+    """Return the other pairing of a two-pad alignment: JLC's two pads trade keys."""
+    first, second = jlc
+    return {first: jlc[second], second: jlc[first]}
+
+
+def _two_pad_fit(report: FitReport, verdict: Verdict) -> bool:
     """Fill the fit for a two-pad alignment; return True when the part fits."""
-    report = assess_fit(kicad, jlc, list(kicad.values()), [], placement, 2, 2)
     verdict.take_fit(report)
-    if report.fit in ("count", "pitch"):
+    if not fits(report):
         verdict.unresolved("red", "pitch", _mismatch_note(verdict, "pitch"))
         return False
     return True
@@ -481,11 +498,13 @@ def _resolve_polarized(
     jlc_other = next(p for p in jlc_named if p is not jlc_ref)
     kicad = {"ref": kicad_ref, "other": kicad_other}
     jlc = {"ref": jlc_ref, "other": jlc_other}
-    placement = align(kicad, jlc)
+    placement, report = _two_pad_pairing(kicad, jlc)
     verdict.take_placement(placement)
     if placement.is_underdetermined:
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
-    if not _two_pad_fit(kicad, jlc, placement, verdict):
+    # The meaning's own pairing must fit: a polarized part is never turned to fit by
+    # shape, so a misfit stays red whatever the swapped pairing does (spec 19.4).
+    if not _two_pad_fit(report, verdict):
         return verdict
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "polarity"
@@ -517,27 +536,68 @@ def _resolve_polarized(
         verdict.notes.append(YELLOW_NOTE)
     if verdict.fit == "fits_tight":
         verdict.status = "yellow"
+    _, swapped = _two_pad_pairing(kicad, _swapped(jlc))
+    if fits_clearly_better(swapped, report):
+        # Polarity outranks shapes: the meaning's rotation and fit stand, in yellow
+        # (spec 19.2, decision 3; 19.4).
+        verdict.status = "yellow"
+        verdict.notes.append(
+            "pad shapes fit the other way round better (worst pad "
+            f"{swapped.overlap_min * 100:.0f} % against {report.overlap_min * 100:.0f} %); "
+            "one footprint may draw its terminals at the other end"
+        )
     return verdict
 
 
 def _resolve_axis(
     kicad_named: list[Pad], jlc_named: list[Pad], verdict: Verdict
 ) -> Verdict:
-    """Align a non-polar two-pad part by axis only; 180 degrees is irrelevant (spec 7.4)."""
+    """Align a non-polar two-pad part by axis, or by the one pairing its pads fit (spec 7.4, 19.4).
+
+    Both pairings are graded, KiCad's two pads against JLC's and against JLC's
+    swapped.  When one fits clearly better, its own placement is the alignment:
+    a full turn, method ``shape``.  Otherwise 180 degrees is irrelevant and the
+    axis alone gives the rotation, modulo 180.
+    """
     if _coincident(kicad_named) or _coincident(jlc_named):
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
     kicad = {"a": kicad_named[0], "b": kicad_named[1]}
     jlc = {"a": jlc_named[0], "b": jlc_named[1]}
-    placement = align(kicad, jlc)
-    verdict.take_placement(placement)
+    placement, report = _two_pad_pairing(kicad, jlc)
     if placement.is_underdetermined:
+        verdict.take_placement(placement)
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
-    if not _two_pad_fit(kicad, jlc, placement, verdict):
+    swapped_placement, swapped = _two_pad_pairing(kicad, _swapped(jlc))
+    if fits_clearly_better(swapped, report):
+        return _shape_alignment(verdict, swapped_placement, swapped)
+    if fits_clearly_better(report, swapped):
+        return _shape_alignment(verdict, placement, report)
+    verdict.take_placement(placement)
+    if not _two_pad_fit(report, verdict):
         return verdict
     verdict.rotation = ccw_correction(placement.rotation_deg) % 180
     verdict.method = "axis"
     verdict.non_polar = True
     verdict.confidence = "high"
+    verdict.status = "yellow" if verdict.fit == "fits_tight" else "green"
+    return verdict
+
+
+def _shape_alignment(
+    verdict: Verdict, placement: Placement, report: FitReport
+) -> Verdict:
+    """Settle a non-polar two-pad part on the one pairing its pads fit (spec 19.2, decision 2).
+
+    Nothing names a polarity, but the pads fit one way round clearly better than
+    the other, so that way is the alignment and the rotation is a full turn.
+    """
+    verdict.take_placement(placement)
+    verdict.take_fit(report)
+    verdict.rotation = ccw_correction(placement.rotation_deg)
+    verdict.method = "shape"
+    verdict.non_polar = True
+    verdict.confidence = "high"
+    verdict.notes.append(SHAPE_NOTE)
     verdict.status = "yellow" if verdict.fit == "fits_tight" else "green"
     return verdict
 

@@ -27,6 +27,11 @@ CENTRE_TOLERANCE = 0.8
 MIN_OVERLAP = 0.5
 # Pads this much bigger on one side are reported as "fits, KiCad pads larger/smaller".
 SIZE_RATIO = 1.5
+# One pairing of a two-pad part's pads fits clearly better than the swapped one when
+# its worst pad overlaps by at least this much more.  On the gate boards and the
+# fleet's 2,525 two-pad alignments both pairings overlap exactly alike, except BT1's
+# (0.947 against 0.684, a gap of 0.263); mirror-symmetric pads give 0 (spec 19.4).
+SHAPE_MARGIN = 0.1
 
 
 @dataclass
@@ -403,6 +408,24 @@ def assess_fit(
     elif any(_area(j) >= SIZE_RATIO * _area(k) for k, j in matched_pairs):
         report.notes.append("KiCad pads are smaller than JLC's land pattern")
     return report
+
+
+def fits(report: FitReport) -> bool:
+    """Return True when the graded pads fit, tight or not (any grade but count or pitch)."""
+    return report.fit not in ("count", "pitch")
+
+
+def fits_clearly_better(report: FitReport, other: FitReport) -> bool:
+    """Return True when ``report``'s pairing fits clearly better than ``other``'s (spec 19.4).
+
+    A pairing fits clearly better when it fits and the other does not, or when both
+    fit and its worst-pad overlap exceeds the other's by at least SHAPE_MARGIN.
+    """
+    if not fits(report):
+        return False
+    if not fits(other):
+        return True
+    return report.overlap_min >= other.overlap_min + SHAPE_MARGIN
 
 
 def transformed_box(

@@ -10,6 +10,7 @@ from jlcfootprint.easyeda_parse import (
     parse_puuid_response,
     parse_symbol_response,
 )
+from jlcfootprint.fit import SHAPE_MARGIN, FitReport, fits_clearly_better
 from jlcfootprint.geometry import Pad, pad_hash
 from jlcfootprint.kicad_adapter import verdict_key
 from jlcfootprint.polarity import (
@@ -18,10 +19,12 @@ from jlcfootprint.polarity import (
     part_kind,
     terminal_of,
 )
-from jlcfootprint.resolver import YELLOW_NOTE, resolve
+from jlcfootprint.presentation import verdict_text
+from jlcfootprint.resolver import SHAPE_NOTE, YELLOW_NOTE, resolve
 from jlcfootprint.resolving import resolve_record
 
 from .jlcfootprint_support import recorded_document
+from .test_jlcfootprint_presentation import decision
 
 # BT1 on Andy's ocn-LCD board: a LianXin BS-CR2032-8 coin-cell holder (C7498149) on
 # LowPower:BatteryHolder_LianXin_BS-CR2032-8_1x2032, copied from the board file with
@@ -44,6 +47,18 @@ BT1_HIT = DeviceHit(
 PLAIN_KICAD = [Pad("1", -2.0, 0.0, 1.5, 1.5), Pad("2", 2.0, 0.0, 1.5, 1.5)]
 PLAIN_JLC = [Pad("1", -2.0, 0.0, 1.5, 1.5), Pad("2", 2.0, 0.0, 1.5, 1.5)]
 NUMBERED_PINS = [SymbolPin("1", "1"), SymbolPin("2", "2")]
+# JLC's pads for C7498149 in millimetres (its Pro footprint), and BT1's KiCad pads
+# without their pin functions: paired by number the worst pad overlaps 0.684, paired
+# the other way round 0.947.
+BT1_JLC = [
+    Pad("1", -11.575034, 0.0, 6.999986, 2.7999944),
+    Pad("2", 11.575034, 0.0, 3.499993, 3.7999924),
+]
+BT1_BARE = [pad._replace(pin_function="") for pad in BT1_PADS]
+# A tall pad and a wide one: each fits its own kind and crosses the other, so of the
+# two pairings exactly one fits.
+TALL_LEFT = Pad("1", -2.0, 0.0, 0.6, 2.0)
+WIDE_RIGHT = Pad("2", 2.0, 0.0, 2.0, 0.6)
 
 
 def bt1_record():
@@ -239,3 +254,152 @@ def test_a_polarized_family_part_with_no_polarity_source_is_unknown():
         "none",
     )
     assert "polarity unknown; check in JLC preview" in verdict.notes
+
+
+@pytest.mark.parametrize(
+    ("better", "worse", "expected"),
+    [
+        (
+            FitReport("fits", overlap_min=0.947),
+            FitReport("fits", overlap_min=0.684),
+            True,
+        ),
+        (
+            FitReport("fits", overlap_min=0.6 + SHAPE_MARGIN),
+            FitReport("fits", overlap_min=0.6),
+            True,
+        ),
+        (
+            FitReport("fits", overlap_min=0.69),
+            FitReport("fits", overlap_min=0.6),
+            False,
+        ),
+        (FitReport("fits", overlap_min=0.9), FitReport("fits", overlap_min=0.9), False),
+        (
+            FitReport("fits_tight", overlap_min=0.55),
+            FitReport("pitch", overlap_min=0.49),
+            True,
+        ),
+        (
+            FitReport("count", overlap_min=0.95),
+            FitReport("fits", overlap_min=0.6),
+            False,
+        ),
+    ],
+    ids=[
+        "bt1",
+        "at_the_margin",
+        "inside_the_margin",
+        "equal",
+        "fit_against_miss",
+        "miss",
+    ],
+)
+def test_a_pairing_fits_clearly_better_by_a_fit_or_by_the_margin(
+    better, worse, expected
+):
+    """It fits and the other misses, or both fit and its worst pad leads by SHAPE_MARGIN (spec 19.4)."""
+    assert fits_clearly_better(better, worse) is expected
+
+
+@pytest.mark.parametrize(
+    "jlc", [BT1_JLC, BT1_JLC[::-1]], ids=["jlc_pads_in_order", "jlc_pads_reversed"]
+)
+def test_a_non_polar_part_takes_the_pairing_its_pad_shapes_fit_better(jlc):
+    """BT1's shapes without any polarity: the better pairing wins, whichever is tried first (decision 2)."""
+    verdict = resolve(
+        BT1_BARE,
+        "Custom:Holder",
+        "ok",
+        "CONN-SMD_2P",
+        jlc,
+        NUMBERED_PINS,
+        marks=DrawingMarks(),
+    )
+    assert (verdict.status, verdict.rotation, verdict.method) == ("green", 180, "shape")
+    assert verdict.confidence == "high"
+    assert verdict.non_polar
+    assert round(verdict.overlap_min, 3) == 0.947
+    assert verdict.notes == [SHAPE_NOTE]
+    assert verdict.origin is not None
+
+
+def test_a_non_polar_part_whose_pads_fit_one_way_only_is_turned_to_fit():
+    """Paired by number a tall pad crosses a wide one and misses; the other way round both fit."""
+    kicad = [TALL_LEFT, WIDE_RIGHT]
+    jlc = [
+        WIDE_RIGHT._replace(number="1", x=-2.0),
+        TALL_LEFT._replace(number="2", x=2.0),
+    ]
+    verdict = resolve(kicad, "Custom:Part", "ok", "CONN-SMD_2P", jlc, NUMBERED_PINS)
+    assert (verdict.status, verdict.rotation, verdict.method, verdict.fit) == (
+        "green",
+        180,
+        "shape",
+        "fits",
+    )
+
+
+def test_symmetric_pads_keep_the_axis_result_modulo_180():
+    """Mirror-symmetric pads fit both pairings alike, so 180 degrees stays irrelevant (spec 7.4)."""
+    turned = [PLAIN_JLC[0]._replace(number="2"), PLAIN_JLC[1]._replace(number="1")]
+    verdict = resolve(
+        PLAIN_KICAD, "Custom:Part", "ok", "CONN-SMD_2P", turned, NUMBERED_PINS
+    )
+    assert (verdict.status, verdict.rotation, verdict.method) == ("green", 0, "axis")
+    assert verdict.notes == []
+
+
+def test_a_meaning_aligned_part_that_fits_clearly_worse_goes_yellow_and_keeps_its_rotation():
+    """BT1 drawn with ``+`` on pad 2: the + lands on JLC's +, and the shapes say the other way (decision 3)."""
+    flipped = [
+        BT1_PADS[0]._replace(pin_function="-_1"),
+        BT1_PADS[1]._replace(pin_function="+_2"),
+    ]
+    verdict = resolve_record(
+        flipped, BT1_FOOTPRINT, bt1_record(), "symbol", BT1_COURTYARD
+    )
+    assert (verdict.status, verdict.rotation, verdict.method) == (
+        "yellow",
+        0,
+        "polarity",
+    )
+    assert verdict.polarity_light == "green"
+    assert round(verdict.overlap_min, 3) == 0.684
+    assert verdict.notes[-1] == (
+        "pad shapes fit the other way round better (worst pad 95 % against 68 %); "
+        "one footprint may draw its terminals at the other end"
+    )
+
+
+def test_a_meaning_aligned_part_whose_own_pairing_misses_stays_red():
+    """A polarized part is never turned to fit by shape: the swapped pairing fits, the verdict is red."""
+    kicad = [
+        TALL_LEFT._replace(pin_function="+_1"),
+        WIDE_RIGHT._replace(pin_function="-_2"),
+    ]
+    verdict = resolve(
+        kicad,
+        "Custom:Part",
+        "ok",
+        "CONN-SMD_2P",
+        [TALL_LEFT, WIDE_RIGHT],
+        NUMBERED_PINS,
+        marks=DrawingMarks(positive_pad="2"),
+    )
+    assert (verdict.status, verdict.fit, verdict.rotation, verdict.method) == (
+        "red",
+        "pitch",
+        None,
+        "none",
+    )
+
+
+def test_the_help_says_a_shape_rotation_comes_from_the_pad_shapes():
+    """The hover names the new method the way it names the other three (spec 16.3)."""
+    text = verdict_text(
+        decision(
+            status="green", rotation=180, method="shape", confidence="high", fit="fits"
+        )
+    )
+    assert text == "Fits; rotation 180° derived from the pad shapes (high)."
