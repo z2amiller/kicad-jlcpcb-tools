@@ -58,6 +58,7 @@ METHOD_TEXT = {
     "geometry": "pad geometry",
     "polarity": "terminal polarity",
     "axis": "the pad axis",
+    "shape": "the pad shapes",
 }
 RAW_SENTENCE = "The CPL emits the raw angle."
 YELLOW_SENTENCE = (
