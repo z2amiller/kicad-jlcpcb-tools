@@ -36,6 +36,10 @@ _NO_FUNCTION_TEXTS = frozenset({"NC", "N/C", "N.C.", "~", "DNC", "NP", "NU"})
 # (``CAP-SMD_BD5.0-L5.3``): the family whose FD/RD token the crawl found least
 # reliable (spec 16.9), read by :func:`token_is_weak`.
 _MOLDED_CHIP_NAME = re.compile(r"CAP-SMD_L[\d.]", re.IGNORECASE)
+# A sign carrying the pin number KiCad appends to a pin's name on the board (``+_1``,
+# ``-_2``), the same suffix as ``K_1``; matched whole, so ``V+_8`` is not a sign
+# (spec 19.3).
+_NUMBERED_SIGN = re.compile(r"([+-])_\d+")
 
 # The two terminal names, unified: the reference terminal of a diode is its cathode,
 # of a capacitor its positive terminal, and each name's opposite.
@@ -57,10 +61,18 @@ SAME_MEANING = {
 
 
 def normalise_function(text: str) -> str:
-    """Reduce a KiCad pin function such as ``K_1`` or ``anode`` to a bare upper-case token."""
+    """Reduce a KiCad pin function such as ``K_1``, ``+_1`` or ``anode`` to a bare upper-case token.
+
+    The letters before the first other character are the token, so ``K_1`` reads as
+    ``K`` and ``V+_8`` as ``V``.  A sign, bare or with KiCad's pin-number suffix
+    (``+_1``, ``-_2``), reads as the sign itself (spec 19.3).
+    """
     token = text.strip().upper()
     if token in ("+", "-"):
         return token
+    numbered = _NUMBERED_SIGN.fullmatch(token)
+    if numbered:
+        return numbered.group(1)
     letters = ""
     for char in token:
         if not char.isalpha():
