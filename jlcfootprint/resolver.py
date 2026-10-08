@@ -629,7 +629,7 @@ def resolve(
     # Counts compare distinct numbers: a DPAK's tab and its stub are one pad 2.
     verdict.pad_count_kicad = len({pad.number for pad in kicad_named})
     verdict.pad_count_jlc = len({pad.number for pad in jlc_named})
-    kind = part_kind(package_name, kicad_footprint_name, kicad_pads, symbol_pins)
+    kind = part_kind(package_name, kicad_footprint_name, kicad_pads, symbol_pins, marks)
     parsed = parse_package_name(package_name, True if kind == "diode" else None)
     if parsed.rotation_source == "naming_rule":
         verdict.name_rotation = crawl_to_cpl(parsed.rotation_correction)
@@ -637,6 +637,8 @@ def resolve(
         return verdict.unresolved(
             "unknown", "no_data", "fewer than two named pads on one side"
         )
+    # A polarized kind (a drawn + among its reasons) or an FD/RD token sends a two-pad
+    # part to alignment by meaning (spec 7.4, 19.3).
     marked = kind != "other" or token_reference_side(package_name, "positive") in (
         "left",
         "right",

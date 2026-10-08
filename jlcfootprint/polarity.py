@@ -41,11 +41,27 @@ _MOLDED_CHIP_NAME = re.compile(r"CAP-SMD_L[\d.]", re.IGNORECASE)
 # (spec 19.3).
 _NUMBERED_SIGN = re.compile(r"([+-])_\d+")
 
+# Polarized two-terminal parts that are neither diodes nor capacitors and take the
+# positive terminal as their reference: batteries, buzzers and microphones.  KiCad
+# names their footprints Battery... (BatteryHolder_... among them), Buzzer_... and
+# MagneticBuzzer_...; EasyEDA's families are BAT-..., BUZ... and MIC-..., where MIC-
+# keeps its hyphen so that the diode packages MICROSMP and MICRO-MELF stay diodes.
+# BATT-, BATTERY- and BEEP- are the crawl's other spellings of the same parts
+# (spec 19.3).
+POSITIVE_REFERENCE_FOOTPRINTS = ("BATTERY", "BUZZER_", "MAGNETICBUZZER_")
+POSITIVE_REFERENCE_FAMILIES = ("BAT-", "BATT-", "BATTERY-", "BUZ", "BEEP-", "MIC-")
+
 # The two terminal names, unified: the reference terminal of a diode is its cathode,
-# of a capacitor its positive terminal, and each name's opposite.
-REFERENCE_TERMINAL = {"diode": "cathode", "polar_cap": "positive", "other": "positive"}
+# of a capacitor and of the other polarized parts (``polar``) its positive terminal,
+# and each name's opposite.
+REFERENCE_TERMINAL = {
+    "diode": "cathode",
+    "polar_cap": "positive",
+    "polar": "positive",
+    "other": "positive",
+}
 # What pad 1 is assumed to be when the KiCad side says nothing, per kind, for the note.
-CONVENTION = {"diode": "K", "polar_cap": "+", "other": "JLC's pin 1"}
+CONVENTION = {"diode": "K", "polar_cap": "+", "polar": "+", "other": "JLC's pin 1"}
 OPPOSITE = {
     "cathode": "anode",
     "anode": "cathode",
@@ -139,14 +155,19 @@ def part_kind(
     kicad_footprint_name: str,
     kicad_pads: list[Pad],
     symbol_pins: list[SymbolPin],
+    marks: DrawingMarks | None = None,
 ) -> str:
-    """Return ``diode``, ``polar_cap`` or ``other`` (spec 7.1).
+    """Return ``diode``, ``polar_cap``, ``polar`` or ``other`` (spec 7.1, 19.3).
 
     Evidence is weighed from the most to the least reliable: the KiCad footprint's name
     and its pads' functions, then EasyEDA's package family, then the symbol's pin
     labels.  LED symbols labelled ``+``/``-`` are common, so labels alone never outrank
     a diode family, and ``+``/``-`` pad functions name a capacitor only when nothing
-    else says diode.
+    else says diode.  ``polar`` is a polarized part whose reference is its positive
+    terminal although it is neither a diode nor a capacitor: a battery, buzzer or
+    microphone by its footprint name or family, ranked after the diode and capacitor
+    names and families, or a part nothing else classifies whose EasyEDA symbol or
+    footprint drawing carries a ``+`` mark (``marks``).
     """
     family = extract_family(package_name).upper()
     footprint = kicad_footprint_name.rsplit(":", 1)[-1].upper()
@@ -165,10 +186,19 @@ def part_kind(
         family.startswith("CAP") and polarity_tokens
     ):
         return "polar_cap"
+    # Batteries, buzzers and microphones, after the diode and capacitor rules and
+    # before the symbol labels (spec 19.3).
+    if footprint.startswith(POSITIVE_REFERENCE_FOOTPRINTS) or family.startswith(
+        POSITIVE_REFERENCE_FAMILIES
+    ):
+        return "polar"
     if labels & _DIODE_LABELS:
         return "diode"
     if terminals & {"positive", "negative"} or labels & _CAP_LABELS:
         return "polar_cap"
+    # A drawn + marks an otherwise unclassified part as polarized (spec 19.3).
+    if marks is not None and (marks.positive_pin or marks.positive_pad):
+        return "polar"
     return "other"
 
 
