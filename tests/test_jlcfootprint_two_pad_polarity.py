@@ -26,7 +26,7 @@ from jlcfootprint.resolving import resolve_record
 from .jlcfootprint_support import recorded_document
 from .test_jlcfootprint_presentation import decision
 
-# BT1 on Andy's ocn-LCD board: a LianXin BS-CR2032-8 coin-cell holder (C7498149) on
+# BT1 on a real board: a LianXin BS-CR2032-8 coin-cell holder (C7498149) on
 # LowPower:BatteryHolder_LianXin_BS-CR2032-8_1x2032, copied from the board file with
 # the pin functions KiCad stores for Device:Battery_Cell (``+`` = 1, ``-`` = 2).
 BT1_FOOTPRINT = "LowPower:BatteryHolder_LianXin_BS-CR2032-8_1x2032"
@@ -111,6 +111,22 @@ def test_swapped_numbered_signs_are_stored_under_different_keys():
     assert verdict_key(plus_first) != pad_hash(plus_first)
 
 
+def test_only_digits_after_the_underscore_make_a_numbered_sign():
+    """``+1``, ``+_A`` and ``-_1A`` are not KiCad's ``+_N`` and name no terminal (spec 19.3)."""
+    for text in ("+1", "+_A", "-_1A"):
+        assert terminal_of(Pad("1", 0, 0, 1, 1, 0, text)) == "", text
+
+
+def test_the_verdict_key_follows_the_reading_of_a_numbered_sign():
+    """The key stores what ``+_1`` reads as, so it equals the key of a bare ``+`` (spec 5.3, 19.3)."""
+    numbered = [
+        Pad("1", -1, 0, 1, 0.5, 0, "+_1"),
+        Pad("2", 1, 0, 1, 0.5, 0, "-_2"),
+    ]
+    bare = [pad._replace(pin_function=pad.pin_function[0]) for pad in numbered]
+    assert verdict_key(numbered) == verdict_key(bare)
+
+
 def test_bt1_coin_cell_holder_resolves_yellow_at_180_from_the_footprint_mark():
     """The false green of spec 19.1: BT1 is yellow at 180 degrees, its polarity from JLC's ``+``."""
     verdict = resolve_record(
@@ -188,6 +204,20 @@ def test_the_families_rank_after_the_capacitor_names_and_before_the_symbol_label
     )
     labelled = [SymbolPin("1", "A"), SymbolPin("2", "K")]
     assert part_kind("BAT-TH_BS-2-1", "Custom:Part", PLAIN_KICAD, labelled) == "polar"
+
+
+def test_a_diode_family_outranks_a_battery_footprint_and_labels_outrank_a_drawn_plus():
+    """The families rank after the diode families, and a drawn ``+`` after the symbol labels (spec 19.3)."""
+    battery = "Battery:Battery_CR1225"
+    assert (
+        part_kind("SOD-123F_L2.8-W1.8-LS3.7-RD", battery, PLAIN_KICAD, NUMBERED_PINS)
+        == "diode"
+    )
+    labelled = [SymbolPin("1", "K"), SymbolPin("2", "A")]
+    marks = DrawingMarks(positive_pad="2")
+    assert (
+        part_kind("CONN-TH_2P", "Custom:Part", PLAIN_KICAD, labelled, marks) == "diode"
+    )
 
 
 @pytest.mark.parametrize(
@@ -340,6 +370,19 @@ def test_a_non_polar_part_whose_pads_fit_one_way_only_is_turned_to_fit():
     )
 
 
+def test_a_non_polar_part_whose_listed_pairing_alone_fits_takes_its_full_turn():
+    """Paired in list order the pads fit at 180 degrees and swapped they miss: a full turn (decision 2)."""
+    kicad = [TALL_LEFT, WIDE_RIGHT]
+    jlc = [TALL_LEFT._replace(x=2.0), WIDE_RIGHT._replace(x=-2.0)]
+    verdict = resolve(kicad, "Custom:Part", "ok", "CONN-SMD_2P", jlc, NUMBERED_PINS)
+    assert (verdict.status, verdict.rotation, verdict.method, verdict.fit) == (
+        "green",
+        180,
+        "shape",
+        "fits",
+    )
+
+
 def test_symmetric_pads_keep_the_axis_result_modulo_180():
     """Mirror-symmetric pads fit both pairings alike, so 180 degrees stays irrelevant (spec 7.4)."""
     turned = [PLAIN_JLC[0]._replace(number="2"), PLAIN_JLC[1]._replace(number="1")]
@@ -393,6 +436,30 @@ def test_a_meaning_aligned_part_whose_own_pairing_misses_stays_red():
         None,
         "none",
     )
+
+
+def test_a_meaning_aligned_part_whose_swapped_pairing_misses_stays_green():
+    """A swapped pairing that misses is not clearly better, so the meaning's green stands (spec 19.4)."""
+    kicad = [
+        TALL_LEFT._replace(pin_function="+_1"),
+        WIDE_RIGHT._replace(pin_function="-_2"),
+    ]
+    verdict = resolve(
+        kicad,
+        "Custom:Part",
+        "ok",
+        "CONN-SMD_2P",
+        [TALL_LEFT, WIDE_RIGHT],
+        NUMBERED_PINS,
+        marks=DrawingMarks(positive_pad="1"),
+    )
+    assert (verdict.status, verdict.fit, verdict.rotation, verdict.method) == (
+        "green",
+        "fits",
+        0,
+        "polarity",
+    )
+    assert verdict.notes == ["polarity from the footprint's + mark"]
 
 
 def test_the_help_says_a_shape_rotation_comes_from_the_pad_shapes():

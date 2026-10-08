@@ -28,9 +28,10 @@ MIN_OVERLAP = 0.5
 # Pads this much bigger on one side are reported as "fits, KiCad pads larger/smaller".
 SIZE_RATIO = 1.5
 # One pairing of a two-pad part's pads fits clearly better than the swapped one when
-# its worst pad overlaps by at least this much more.  On the gate boards and the
-# fleet's 2,525 two-pad alignments both pairings overlap exactly alike, except BT1's
-# (0.947 against 0.684, a gap of 0.263); mirror-symmetric pads give 0 (spec 19.4).
+# its worst pad overlaps by at least this much more (spec 19.4).  Mirror-symmetric
+# pads give exactly 0.  Measured 2026-10-07 on the gate boards and on 2,525 two-pad
+# alignments of real boards whose pairings both fit: every gap was 0 except one
+# coin-cell holder's 0.263 (0.947 against 0.684), so 0.1 sits well clear of both.
 SHAPE_MARGIN = 0.1
 
 
