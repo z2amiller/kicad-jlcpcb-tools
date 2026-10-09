@@ -8,6 +8,7 @@ from jlcfootprint.drawing import (
     footprint_bars,
     footprint_pads,
     footprint_positive_pad,
+    symbol_positive_pin,
 )
 from jlcfootprint.easyeda_parse import (
     DeviceHit,
@@ -72,6 +73,33 @@ def test_a_plus_beside_a_large_part_is_read_below_five_percent_of_the_spacing():
     """A 1.6 mm + beside pads 37.6 mm apart (4.3 % of the spacing) names its pad (spec 19.8)."""
     assert footprint_positive_pad(LARGE_PRO_PADS + plus_at(13, -740, -77, 31.5)) == "1"
     assert footprint_positive_pad(LARGE_PRO_PADS + plus_at(13, 740, -77, 31.5)) == "2"
+
+
+def test_the_floor_follows_the_pads_when_they_are_drawn_along_y():
+    """Pads 1,481.88 mil apart along Y: the 63-mil + beside either pad is read (spec 19.8)."""
+    pads = [pro_pad("1", 0, 740.94), pro_pad("2", 0, -740.94)]
+    assert footprint_positive_pad(pads + plus_at(13, -77, 740, 31.5)) == "1"
+    assert footprint_positive_pad(pads + plus_at(13, -77, -740, 31.5)) == "2"
+
+
+def test_the_symbol_reader_keeps_its_five_percent_bound_on_a_long_pin_span():
+    """The floor is the footprint's alone: a symbol's 4 % + is not read, a 6 % one is (spec 19.8)."""
+    pins = [
+        '["PIN","a",1,null,-500,0,10,0,null,0,0,1]',
+        '["ATTR","a1","a","NUMBER","1"]',
+        '["PIN","b",1,null,500,0,10,180,null,0,0,1]',
+        '["ATTR","b1","b","NUMBER","2"]',
+    ]
+
+    def plus(arm):
+        """Return a symbol + of two strokes, each ``2 * arm`` long, beside pin 1."""
+        return [
+            f'["POLY","h",[{-400 - arm},-40,{-400 + arm},-40],0,"st1",0]',
+            f'["POLY","v",[-400,{-40 - arm},-400,{-40 + arm}],0,"st1",0]',
+        ]
+
+    assert symbol_positive_pin(pins + plus(30)) == "1"
+    assert symbol_positive_pin(pins + plus(20)) is None
 
 
 def test_a_cross_well_below_the_absolute_floor_is_not_read_on_the_same_pads():
