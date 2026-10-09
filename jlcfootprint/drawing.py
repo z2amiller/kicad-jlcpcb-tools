@@ -12,8 +12,10 @@ package name's FD/RD token was wrong on three reversed-numbering tantalums.
 Both drawing formats are read.  Pro records are JSON arrays in mils with Y up;
 classic shapes are ``~``-separated strings in canvas units (10 mil) with Y down.
 Marks are located in each drawing's own frame against that drawing's own pins or
-pads, so they need no unit conversion; the body box is converted to millimetres in
-the pad frame the resolver uses (KiCad's Y-down, origin at the footprint origin).
+pads, so they need no unit conversion, except the footprint's absolute floor on a
+bar's length (spec 19.8), which is converted into each format's units; the body box
+is converted to millimetres in the pad frame the resolver uses (KiCad's Y-down,
+origin at the footprint origin).
 Stdlib only, pure functions, malformed records are skipped rather than raised.
 """
 
@@ -52,6 +54,13 @@ _LENGTH_RATIO = 2.5
 # a capacitor's plates and a footprint's outline are longer, pin stubs shorter.
 _SYMBOL_BAR_RANGE = (0.05, 0.45)
 _FOOTPRINT_BAR_RANGE = (0.05, 0.70)
+# The footprint's lower bound is never longer than this, in millimetres, so a + of
+# ordinary size beside the pads of a large part is read (spec 19.8).  Measured on
+# the crawl's 13,257 two-pad footprint drawings (2026-10-09): every + the 5 % bound
+# drops is at least 1.016 mm long (40 mil), on pads 28.8 to 86.1 mm apart, so any
+# floor up to that reads the same 26 drawings; 0.75 mm sits a quarter below it and
+# still reads the 30-mil (0.762 mm) + that parts 8 to 15 mm apart often carry.
+_FOOTPRINT_BAR_FLOOR_MM = 0.75
 # The crossing sits off the centre by at least this fraction of the pad spacing, so
 # a centre cross or a diode's silk symbol never names a pad.
 _OFF_CENTRE = 0.15
@@ -502,10 +511,29 @@ def plus_marks(
     return marks
 
 
+def footprint_bar_range(shapes: list[Any], spacing: float) -> tuple[float, float]:
+    """Return the footprint's bar lengths as fractions of the pad ``spacing``.
+
+    The lower bound is the smaller of 5 % of the spacing and
+    :data:`_FOOTPRINT_BAR_FLOOR_MM` in the drawing's own units (Pro mils, classic
+    10-mil canvas units), so the bound stops growing with the part (spec 19.8);
+    the upper bound is :data:`_FOOTPRINT_BAR_RANGE`'s.
+    """
+    if is_pro(shapes):
+        mm_per_unit = EASYEDA_UNIT_MM / PRO_MILS_PER_CANVAS_UNIT
+    else:
+        mm_per_unit = EASYEDA_UNIT_MM
+    low, high = _FOOTPRINT_BAR_RANGE
+    if spacing <= 0:
+        return (low, high)
+    return (min(low, _FOOTPRINT_BAR_FLOOR_MM / mm_per_unit / spacing), high)
+
+
 def footprint_positive_pad(shapes: list[Any]) -> str | None:
     """Return the number of the pad the footprint's ``+`` marks sit beside, or None.
 
-    Only two-pad drawings are read.  A ``+`` within :data:`_OFF_CENTRE` of the pad
+    Only two-pad drawings are read.  The bars' lengths are judged by
+    :func:`footprint_bar_range`.  A ``+`` within :data:`_OFF_CENTRE` of the pad
     spacing from the centre (an origin cross) is ignored; the others must all sit
     on the same side, else no pad is named.
     """
@@ -520,7 +548,8 @@ def footprint_positive_pad(shapes: list[Any]) -> str | None:
     cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
     bars, edges = _footprint_primitives(shapes)
     sides: set[str] = set()
-    for mx, my in plus_marks(bars, spacing, _FOOTPRINT_BAR_RANGE, edges):
+    bar_range = footprint_bar_range(shapes, spacing)
+    for mx, my in plus_marks(bars, spacing, bar_range, edges):
         along = (mx - cx) * ux + (my - cy) * uy
         if abs(along) < _OFF_CENTRE * spacing:
             continue
