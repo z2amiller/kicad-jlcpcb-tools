@@ -77,7 +77,7 @@ def test_native_body_and_both_header_tiers_fit_through_font_roundtrip(
                 view._apply_column_widths()
                 assert column_widths(view) == widths
             header = paint_header(view, wx)
-            assert sum(item.rotation != 0 for item in header.text) == 3 + 7 * len(
+            assert sum(item.rotation != 0 for item in header.text) == 4 + 7 * len(
                 model.variants
             )
             assert {item.text for item in header.text if not item.rotation} >= {
@@ -252,14 +252,14 @@ def test_manual_width_scope_survives_reopen_and_resets_to_content(
         )
         applied = column_widths(view)
         assert all(applied[index] == chosen for index in targets)
-        assert applied[5:] == [
+        assert applied[6:] == [
             chosen if index in targets else value
-            for index, value in enumerate(before[5:], 5)
+            for index, value in enumerate(before[6:], 6)
         ]
-        if not wide or col >= 5:
-            assert applied[:5] == [
+        if not wide or col >= 6:
+            assert applied[:6] == [
                 chosen if index in targets else value
-                for index, value in enumerate(before[:5])
+                for index, value in enumerate(before[:6])
             ]
         h.reopen(model=model, preferences=saved)
         # A wide fixed column may temporarily compress its fixed neighbors to

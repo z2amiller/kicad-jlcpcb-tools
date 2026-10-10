@@ -10,7 +10,9 @@ no wx anywhere near them.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import time
+from typing import Any
 
 from .drawing import drawing_marks
 from .geometry import easyeda_pads_to_mm, pad_box_centre
@@ -267,6 +269,126 @@ def cell_help(check, reference: str) -> str:
         check.fetch_state(part.lcsc),
         kicad_footprint=part.footprint_name,
         jlc_package=check.package_name(part.lcsc),
+    )
+
+
+# ---------------------------------------------------------------------------
+# The variant matrix's JLC and Corr. cells (spec 18.5)
+# ---------------------------------------------------------------------------
+
+# The matrix's correction sources, as upstream's resolver names the field a rule matched.
+RULE_SOURCES = {"lcsc": "LCSC", "ref": "reference", "val": "value", "fpt": "footprint"}
+
+
+@dataclass(frozen=True)
+class MatrixCell:
+    """What the variant matrix shows for one component while the check runs (spec 18.5).
+
+    ``state`` is the JLC column's, which picks the glyph, the colour and the sort
+    rank as on the ordinary list, and ``help`` is its hover.  The rotation fields are
+    the Corr. column's: what the CPL emits for the output variant in the Rotation
+    column's wording, the correction it applies (None for the raw angle) and a hover
+    that names where it comes from.
+    """
+
+    lcsc: str
+    state: str
+    help: str
+    rotation_text: str
+    rotation: int | None
+    rotation_help: str
+
+    @property
+    def glyph(self) -> str:
+        """Return the character the JLC column draws."""
+        return glyph(self.state)
+
+    @property
+    def rank(self) -> int:
+        """Return the JLC column's ascending sort position, worst first."""
+        return sort_rank(self.state)
+
+
+def _raw_reason(decision: Decision) -> str:
+    """Return why a part keeps its raw angle, as the Corr. hover says it."""
+    if not decision.lcsc:
+        return "no LCSC number assigned"
+    if decision.pending:
+        return "waiting for EasyEDA data"
+    if decision.status == "red":
+        reason = RED_REASONS.get(decision.fit or "", decision.fit or "no data")
+        return f"the JLC footprint does not fit ({reason})"
+    return decision.note or "no rotation derived"
+
+
+def _rule_sentence(rule: Any) -> str:
+    """Return what upstream's correction rule would have done without the check.
+
+    ``rule`` is upstream's prepared correction for the part (rotation, offsets,
+    source and status), or None when the matrix has none for it.
+    """
+    if rule is None or getattr(rule, "status", "complete") != "complete":
+        return "The correction rules are unavailable."
+    if not rule.source:
+        return "Without the check no correction rule applies."
+    sentence = (
+        f"Without the check the {RULE_SOURCES.get(rule.source, rule.source)} rule "
+        f"would apply {rule.rotation:g}°"
+    )
+    if rule.offset_x or rule.offset_y:
+        sentence += f" and move it {rule.offset_x:g}/{rule.offset_y:g} mm"
+    return f"{sentence}."
+
+
+def rotation_help(decision: Decision | None, rule: Any = None) -> str:
+    """Return the Corr. cell's hover with the check on: the emitted rotation's source (spec 18.5).
+
+    Derived, an override, or the raw angle with its reason, then what the
+    correction rule would have done, which the CPL does not apply while the check
+    runs.
+    """
+    if decision is not None and decision.source == "override":
+        note = _capitalised(decision.note)
+        source = f"Override {_degrees(decision.rotation)} set by you."
+        source = f"{source} {note}" if note else source
+    elif decision is not None and decision.source == "derived":
+        source = (
+            f"Derived {_degrees(decision.rotation)} by the JLC footprint check "
+            f"({decision.status})."
+        )
+    elif decision is None:
+        source = "Raw angle: not checked yet."
+    else:
+        source = f"Raw angle: {_raw_reason(decision)}."
+    return f"{source} {_rule_sentence(rule)}"
+
+
+def matrix_cell(check, reference: str, rule: Any = None) -> MatrixCell:
+    """Return the variant matrix's JLC and Corr. cells for one reference (spec 18.5).
+
+    The JLC cell is the ordinary list's for the part the check judges, the output
+    variant's: the same state and the same hover (``cell_help``).  A reference the
+    check has not read yet is blank and emits the raw angle.
+    """
+    part = check.parts.get(reference)
+    if part is None:
+        return MatrixCell(
+            "", BLANK, "Not checked yet.", "raw", None, rotation_help(None, rule)
+        )
+    decision = check.decision(part)
+    fetch = check.fetch_state(part.lcsc)
+    return MatrixCell(
+        lcsc=part.lcsc,
+        state=jlc_state(decision, fetch),
+        help=verdict_text(
+            decision,
+            fetch,
+            kicad_footprint=part.footprint_name,
+            jlc_package=check.package_name(part.lcsc),
+        ),
+        rotation_text=decision.display,
+        rotation=decision.rotation,
+        rotation_help=rotation_help(decision, rule),
     )
 
 

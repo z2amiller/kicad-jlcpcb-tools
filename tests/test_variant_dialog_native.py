@@ -68,7 +68,7 @@ def test_native_selector_assignment_survives_cursor_move_and_frame_reopening(
         assert frame._variant_mode
         assert frame.content_panel.GetParent() is frame
         assert controller.panel.GetParent() is frame.content_panel
-        assert grid.GetNumberFrozenCols() == 5
+        assert grid.GetNumberFrozenCols() == 6
         labels = controller.output_choice.GetStrings()
         assert len(labels) == len(set(labels)) == 4
         _cell_event(ui, frame, "A", "lcsc", double_click)

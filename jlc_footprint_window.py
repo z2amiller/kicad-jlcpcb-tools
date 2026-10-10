@@ -29,7 +29,7 @@ from .jlc_footprint_check import (
     refresh_board_data as refresh_jlc_footprint_board_data,
 )
 from .jlc_footprint_detail import JlcFootprintDetailDialog
-from .jlcfootprint.presentation import cell_help, glyph_state, part_detail
+from .jlcfootprint.presentation import cell_help, glyph_state, matrix_cell, part_detail
 
 ID_CONTEXT_MENU_JLC_DETAILS = wx.NewIdRef()
 ID_CONTEXT_MENU_JLC_REFETCH = wx.NewIdRef()
@@ -410,6 +410,24 @@ class JlcFootprintPresenter:
             scan(*args)
         except (sqlite3.Error, OSError, RuntimeError, ValueError) as error:
             self.window.logger.warning("JLC footprint check: scan failed: %s", error)
+
+    def variant_matrix_cells(
+        self, snapshot: Any, corrections: Any
+    ) -> Optional[dict[str, Any]]:
+        """Return the matrix's JLC and Corr. cells per component, None while the check is off.
+
+        ``corrections`` are upstream's prepared corrections for the output variant,
+        which the Corr. hover quotes as what the rule would have done (spec 18.5).
+        """
+        check = self._active_jlc_footprint_check()
+        if check is None:
+            return None
+        return {
+            part.component_id: matrix_cell(
+                check, part.reference, corrections.get(part.component_id)
+            )
+            for part in snapshot.for_variant("")
+        }
 
     def rescan_variant_board(self) -> None:
         """Judge the output variant afresh: a full scan, a new generation (spec 18.4).

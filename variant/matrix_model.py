@@ -14,7 +14,7 @@ from .native import BoardVariantSnapshot, ComponentVariantState, VariantEdit
 
 EDITABLE_FIELDS = ("value", "lcsc", "bom", "pos", "pop")
 FLAG_FIELDS = ("bom", "pos", "pop")
-SHARED_COLUMN_COUNT = 5
+SHARED_COLUMN_COUNT = 6
 _UNKNOWN_ASSIGNMENTS = {"invalid", "conflict", "unknown", "error", "unavailable"}
 _BAD_CELL_STATUSES = {
     "pending",
@@ -50,6 +50,15 @@ _SHARED_COLUMNS = (
         tooltip=(
             "Rotation and XY placement correction for the selected Output variant; "
             "its LCSC rule overrides shared Default reference, Value and package rules"
+        ),
+    ),
+    ColumnSpec(
+        "jlc",
+        "JLC",
+        None,
+        tooltip=(
+            "JLC footprint check of the selected Output variant's part; hover for "
+            "its verdict, double-click for details"
         ),
     ),
 )
@@ -261,9 +270,13 @@ class MatrixModel:
         board_count: int = 1,
         show_footprint_library: bool = False,
         correction_variant: str = "",
+        jlc: Optional[Mapping[str, Any]] = None,
     ) -> None:
         if type(board_count) is not int or board_count < 1:
             raise ValueError("Board count must be a positive integer")
+        # The JLC footprint check's cells per component, None while it is off; with
+        # it on, Corr. shows what the check emits (spec 18.5).
+        self._jlc = None if jlc is None else dict(jlc)
         self.board_count = board_count
         self.show_footprint_library = show_footprint_library
         self.correction_variant = correction_variant
@@ -319,6 +332,29 @@ class MatrixModel:
         if self.correction_variant not in self.variants:
             return _UNAVAILABLE_CORRECTION
         return self._corrections.get(component_id, _NO_CORRECTION)
+
+    def jlc_cell(self, component_id: str) -> Optional[Any]:
+        """Return the JLC footprint check's cells for a component, None while it is off."""
+        return None if self._jlc is None else self._jlc.get(component_id)
+
+    @property
+    def jlc_available(self) -> bool:
+        """Return whether the JLC footprint check runs for this board (spec 18.5)."""
+        return self._jlc is not None
+
+    def _jlc_owned(self, key: str) -> bool:
+        """Return whether the check, not upstream's correction, fills this column."""
+        return key == "jlc" or (key == "correction" and self._jlc is not None)
+
+    def _jlc_sort_key(self, row: ComponentVariantState, key: str) -> tuple[Any, ...]:
+        """Sort JLC worst first and Corr. by the emitted angle, ties by reference."""
+        cell = self.jlc_cell(row.component_id)
+        if key == "jlc":
+            primary = (cell is None, cell.rank if cell is not None else 0)
+        else:
+            rotation = None if cell is None else cell.rotation
+            primary = (rotation is None, rotation or 0)
+        return (primary, _natural_key(row.reference), row.component_id)
 
     def _correction_status(self, component_id: str) -> str:
         """Keep unavailable or invalid placement data visibly distinct from zero."""
@@ -482,6 +518,15 @@ class MatrixModel:
         ]
         column, descending = self._sort
         spec = self.columns[column]
+        if self._jlc_owned(spec.key):
+            self.rows = tuple(
+                sorted(
+                    selected,
+                    key=lambda row: self._jlc_sort_key(row, spec.key),
+                    reverse=descending,
+                )
+            )
+            return
 
         def sort_key(row: ComponentVariantState) -> tuple[Any, ...]:
             value = self._value(row, spec)
@@ -526,6 +571,8 @@ class MatrixModel:
 
     def _value(self, row: ComponentVariantState, column: ColumnSpec) -> object:
         """Read captured native values and independent catalog projections."""
+        if column.key == "jlc":
+            return self.jlc_cell(row.component_id)
         if column.key == "correction":
             return self._correction_for(row.component_id)
         if column.variant is None:
@@ -634,6 +681,11 @@ class MatrixModel:
     def get_display(self, row: int, column: int) -> str:
         """Format values without changing comparison precision or native data."""
         spec = self.columns[column]
+        if self._jlc_owned(spec.key):
+            cell = self.jlc_cell(self.rows[row].component_id)
+            if cell is None:
+                return "" if spec.key == "jlc" else "raw"
+            return cell.glyph if spec.key == "jlc" else cell.rotation_text
         value = self.get_value(row, column)
         if spec.key in FLAG_FIELDS:
             return "1" if value is True else "0" if value is False else "?"
@@ -677,6 +729,9 @@ class MatrixModel:
 
     def _cell_status(self, row: ComponentVariantState, column: ColumnSpec) -> str:
         """Keep unknown values neutral instead of treating placeholders as matches."""
+        if self._jlc_owned(column.key):
+            # The check always says something, blank included (spec 18.5).
+            return "known"
         if column.key == "correction":
             return self._correction_status(row.component_id)
         if column.variant is None:
@@ -744,10 +799,30 @@ class MatrixModel:
             return ""
         return self.cell_details(row, column)
 
+    def _jlc_details(self, physical: ComponentVariantState, spec: ColumnSpec) -> str:
+        """Return a JLC or checked Corr. cell's hover: the check's own text (spec 18.5)."""
+        output_label = (
+            self.variant_label(self.correction_variant)
+            if self.correction_variant in self.variants
+            else self.correction_variant
+        )
+        cell = self.jlc_cell(physical.component_id)
+        if cell is None:
+            text = (
+                "The JLC footprint check is off."
+                if self._jlc is None
+                else "Not checked yet."
+            )
+        else:
+            text = cell.help if spec.key == "jlc" else cell.rotation_help
+        return f"{physical.reference} · Output: {output_label} · {spec.label}\n{text}"
+
     def cell_details(self, row: int, column: int) -> str:
         """Provide full values, provenance, and placement details accessibly."""
         physical = self.rows[row]
         spec = self.columns[column]
+        if self._jlc_owned(spec.key):
+            return self._jlc_details(physical, spec)
         style = self.cell_style(row, column)
         value = self.get_value(row, column)
         variant = self.variant_label(spec.variant)

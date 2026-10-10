@@ -384,13 +384,15 @@ class VariantMainController:
         ):
             prepared = self._prepare(snapshot)
             self._presentation = prepared
+        corrections = prepared.corrections.get(self.session.output_variant, {})
         model = MatrixModel(
             snapshot,
             prepared.metadata,
-            prepared.corrections.get(self.session.output_variant, {}),
+            corrections,
             board_count=prepared.board_count,
             show_footprint_library=self.show_footprint_library.GetValue(),
             correction_variant=self.session.output_variant,
+            jlc=self._jlc_cells(snapshot, corrections),
         )
         model.set_filter(
             require_bom=self.dialog.hide_bom_parts,
@@ -652,6 +654,15 @@ class VariantMainController:
     def _jlc(self) -> Any:
         """Return the window's JLC footprint presenter, None for a window without one."""
         return getattr(self.dialog, "jlc_footprint_presenter", None)
+
+    def _jlc_cells(
+        self, snapshot: BoardVariantSnapshot, corrections: Mapping[str, Any]
+    ) -> Optional[Mapping[str, Any]]:
+        """Return the check's JLC and Corr. cells per component, None while it is off (spec 18.5)."""
+        presenter = self._jlc()
+        if presenter is None:
+            return None
+        return presenter.variant_matrix_cells(snapshot, corrections)
 
     def _jlc_rescan(self) -> None:
         """Have the check judge the output variant afresh before a re-render (spec 18.4)."""

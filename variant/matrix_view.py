@@ -15,7 +15,7 @@ import wx
 import wx.grid as gridlib
 
 from ..dataview_highlight import expand_footprint, expand_value, find_highlight_spans
-from ..helpers import loadBitmapScaled
+from ..helpers import JLC_CELL_COLOURS, loadBitmapScaled
 from .text_layout import (
     FittedText,
     fit_text_suffix,
@@ -23,7 +23,7 @@ from .text_layout import (
     visible_highlight_spans,
 )
 
-FIXED_COLUMNS = 5
+FIXED_COLUMNS = 6
 FLAG_FIELDS = frozenset(("bom", "pos", "pop"))
 _COMPACT_FIELDS = FLAG_FIELDS | {
     "type",
@@ -31,7 +31,10 @@ _COMPACT_FIELDS = FLAG_FIELDS | {
     "side",
     "price",
     "stock",
+    "jlc",
 }
+# The JLC footprint check's glyph column keeps the ordinary list's Std width (spec 18.5).
+_JLC_WIDTH_DIP = 36
 _VERTICAL_HEADERS = _COMPACT_FIELDS | {"pcb_angle", "correction"}
 _SIDE_HEADER_SCALE = 0.8
 _SIDE_PADDING_DIP = 6
@@ -159,6 +162,16 @@ def _cross_foreground(background: wx.Colour) -> wx.Colour:
         if contrast(adjusted) >= 3:
             return adjusted
     return adjusted
+
+
+def _jlc_foreground(background: wx.Colour, cell: Any) -> Optional[wx.Colour]:
+    """Pick the JLC glyph's colour stop for the cell's background (spec 18.5)."""
+    stops = None if cell is None else JLC_CELL_COLOURS.get(cell.state)
+    if stops is None:
+        return None
+    dark, light = stops
+    is_dark = sum(background[index] for index in range(3)) < 3 * 128
+    return wx.Colour(*(dark if is_dark else light))
 
 
 def _status_column_width(width: int, padding: int) -> int:
@@ -363,6 +376,13 @@ class MatrixCellRenderer(gridlib.GridCellRenderer):
             )
         elif column.key == "price":
             foreground = _price_foreground(background, model.price_comparison(row, col))
+        elif column.key == "jlc":
+            colour = _jlc_foreground(
+                background, model.jlc_cell(model.rows[row].component_id)
+            )
+            if colour is not None:
+                foreground = colour
+                dc.SetFont(attr.GetFont().Bold())
         margin = grid.FromDIP(
             2 if column.key in _READ_ONLY_STATUS_FIELDS | {"side"} else 4
         )
@@ -1900,6 +1920,9 @@ class VariantMatrixView(gridlib.Grid):
                 widths[_STATUS_WIDTH_KEY] = _status_column_width(
                     widths[_STATUS_WIDTH_KEY], self.FromDIP(10)
                 )
+                widths["jlc"] = max(
+                    self._minimum_widths["jlc"], self.FromDIP(_JLC_WIDTH_DIP)
+                )
                 status_minimum = _status_column_width(
                     self._minimum_widths["standard"], self.FromDIP(10)
                 )
@@ -2129,7 +2152,7 @@ class VariantMatrixView(gridlib.Grid):
             return
         budget = max(0, self.GetClientSize().width - self._scrolling_reserve)
         total = sum(self.GetColSize(col) for col in range(FIXED_COLUMNS))
-        for col in (1, 4, 3, 2, 0):
+        for col in (1, 4, 3, 2, 5, 0):
             if total <= budget:
                 break
             minimum = self.GetColMinimalWidth(col)
