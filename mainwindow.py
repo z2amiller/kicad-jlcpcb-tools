@@ -1280,6 +1280,9 @@ class JLCPCBTools(wx.Frame):
                 self.store = controller.cache
                 self._set_project_storage_error(None)
                 controller._update_enabled()
+                # The storage error stopped the check; start it again (spec 18.4).
+                self._start_jlc_footprint_check()
+                self._refresh_jlc_rotation_cells()
                 self._maybe_show_schematic_storage_notice(project_db_preexisted)
             except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
                 self._set_project_storage_error(error)
@@ -1310,6 +1313,9 @@ class JLCPCBTools(wx.Frame):
 
                 self._variant_controller = VariantMainController(self, self.store)
                 self._variant_controller.start_enrichment()
+                # The matrix is built: the check judges its output variant (spec 18.4).
+                self._start_jlc_footprint_check()
+                self._refresh_jlc_rotation_cells()
                 return
             self._initialize_catalog_parts()
         except (sqlite3.Error, OSError, ValueError, BoardContextChanged) as error:

@@ -5,7 +5,9 @@ generate steps -- and hands everything behind them to a ``JlcFootprintPresenter`
 built once per window, which reaches back through ``self.window`` for the part
 list, the settings and the store.  Keeping the feature here means a rebase onto
 upstream's ``mainwindow.py`` touches the hooks only, and an upstream reader sees
-one file per feature instead of 300 lines inside a 3,000-line frame.
+one file per feature instead of 300 lines inside a 3,000-line frame.  On a board
+with KiCad design variants upstream's variant controller keeps the same kind of
+thin hooks and calls the presenter's variant methods (spec 18).
 """
 
 from __future__ import annotations
@@ -36,6 +38,26 @@ ID_CONTEXT_MENU_JLC_REFRESH = wx.NewIdRef()
 ID_CONTEXT_MENU_JLC_CLEAR_CACHE = wx.NewIdRef()
 
 
+def changed_part_numbers(before: Any, after: Any) -> list[str]:
+    """Return the references whose part number differs between two variant snapshots.
+
+    Every variant counts: an edit to Default changes the variants that inherit it,
+    and an edit to another variant gives the check a new code to prefetch (spec 18.4).
+    """
+    previous = {
+        (part.component_id, part.variant_name): part for part in before.components
+    }
+    return sorted(
+        {
+            part.reference
+            for part in after.components
+            if (old := previous.get((part.component_id, part.variant_name))) is None
+            or old.lcsc != part.lcsc
+            or old.reference != part.reference
+        }
+    )
+
+
 class JlcFootprintPresenter:
     """Everything the main window does for the JLC footprint check.
 
@@ -49,15 +71,14 @@ class JlcFootprintPresenter:
         self.window = window
 
     def _start_jlc_footprint_check(self) -> None:
-        """Start the footprint check for the open board when the setting is on."""
+        """Start the footprint check for the open board when the setting is on.
+
+        A board with KiCad variants gets it too: it judges the output variant's
+        parts through upstream's variant session (spec 18.2).
+        """
         self._stop_jlc_footprint_check()
-        # A board with KiCad variants is edited in upstream's variant matrix, never
-        # through this part list, so the check (like the opening preferences in
-        # _initialize_catalog_parts) runs for an ordinary board only.
-        if (
-            self.window.store is None
-            or getattr(self.window, "_variant_controller", None)
-            or not is_footprint_check_enabled(self.window.settings)
+        if self.window.store is None or not is_footprint_check_enabled(
+            self.window.settings
         ):
             return
         try:
@@ -89,7 +110,11 @@ class JlcFootprintPresenter:
             check.enqueue_references(references)
 
     def on_jlc_footprint_result(self, e):
-        """Repaint the Rotation cells of one checked part; a superseded board load's results are dropped."""
+        """Repaint the Rotation cells of one checked part; a superseded board load's results are dropped.
+
+        In variant mode the hidden part list is left alone: the variant controller
+        repaints the matrix's JLC and Corr. cells (spec 18.4).
+        """
         check = getattr(self.window, "jlc_footprint_check", None)
         if check is None or getattr(e, "generation", None) != check.generation:
             return
@@ -99,6 +124,8 @@ class JlcFootprintPresenter:
             e.lcsc,
             ", ".join(references) or "no reference",
         )
+        if self._repaint_variant_matrix():
+            return
         for reference in references:
             self.window.partlist_data_model.set_rotation(
                 reference, check.display_text(reference) or "raw"
@@ -202,7 +229,7 @@ class JlcFootprintPresenter:
     def _repaint_jlc_references(self, references: Iterable[str]) -> None:
         """Repaint the Rotation text and the JLC glyph of the given references."""
         check = self._active_jlc_footprint_check()
-        if check is None:
+        if check is None or self._repaint_variant_matrix():
             return
         for reference in references:
             self.window.partlist_data_model.set_rotation(
@@ -242,7 +269,7 @@ class JlcFootprintPresenter:
     def _refresh_jlc_rotation_cells(self) -> None:
         """Repaint every Rotation and JLC cell from the footprint check's decisions."""
         check = self._active_jlc_footprint_check()
-        if check is None:
+        if check is None or self._repaint_variant_matrix():
             return
         model = self.window.partlist_data_model
         for row in model.get_all():
@@ -355,3 +382,55 @@ class JlcFootprintPresenter:
             return
         if clear_jlc_footprint_cache(self.window):
             self._refresh_jlc_rotation_cells()
+
+    # ------------------------------------------------------------------
+    # The variant matrix (spec 18): upstream's variant controller calls these
+    # ------------------------------------------------------------------
+
+    def _variant_controller(self) -> Any:
+        """Return upstream's variant controller on a board with KiCad variants, else None."""
+        return getattr(self.window, "_variant_controller", None)
+
+    def _repaint_variant_matrix(self) -> bool:
+        """Have the variant matrix repaint its JLC and Corr. cells; False on an ordinary board."""
+        controller = self._variant_controller()
+        if controller is None:
+            return False
+        controller.repaint_jlc()
+        return True
+
+    def _run_variant_scan(self, scan: Any, *args: Any) -> None:
+        """Run one scan for the variant matrix, logging a failure instead of raising.
+
+        The scan runs inside upstream's own handlers (the output switch, the edit
+        coordinator, the board poll), whose error paths would mark the whole matrix
+        unreliable; the check is advisory, so its failure is only logged.
+        """
+        try:
+            scan(*args)
+        except (sqlite3.Error, OSError, RuntimeError, ValueError) as error:
+            self.window.logger.warning("JLC footprint check: scan failed: %s", error)
+
+    def rescan_variant_board(self) -> None:
+        """Judge the output variant afresh: a full scan, a new generation (spec 18.4).
+
+        Upstream's variant controller calls this after an output switch and when
+        its board poll or a refresh sees a new source token, before it re-renders.
+        """
+        check = self._active_jlc_footprint_check()
+        if check is not None:
+            self._run_variant_scan(check.scan_board)
+
+    def variant_board_edited(self, before: Any, after: Any) -> None:
+        """Re-read the references an edit gave a new part number, in any variant (spec 18.4).
+
+        A changed output-variant number is judged again (a cleared one becomes "no
+        LCSC"), and a new number in another variant is prefetched by the same
+        reference scan.
+        """
+        check = self._active_jlc_footprint_check()
+        if check is None:
+            return
+        references = changed_part_numbers(before, after)
+        if references:
+            self._run_variant_scan(check.enqueue_references, references)

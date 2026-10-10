@@ -53,19 +53,6 @@ def _window(module, check=None, *, enabled=True):
     return window
 
 
-def test_a_board_with_variants_gets_no_check(mainwindow):
-    """Upstream edits a board with KiCad variants in its matrix, never in this list."""
-    module, checks = mainwindow
-    window = _window(module)
-    window._variant_controller = object()
-    window._start_jlc_footprint_check()
-    assert checks == []
-    assert window.jlc_footprint_check is None
-    del window._variant_controller
-    window._start_jlc_footprint_check()
-    assert window.jlc_footprint_check is checks[0]
-
-
 def test_upstream_s_cell_refresh_shows_what_the_cpl_emits(mainwindow):
     """Upstream rewrites the cell on every assignment and removal: the check's text wins."""
     module, _ = mainwindow
