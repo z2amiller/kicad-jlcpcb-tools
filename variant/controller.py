@@ -676,6 +676,47 @@ class VariantMainController:
         if presenter is not None:
             presenter.variant_board_edited(before, self.session.snapshot)
 
+    def _jlc_references(self, target: Any) -> list[str]:
+        """Return the references a JLC action names: the target's row, then the selection."""
+        components = [] if target is None else [target.component_id]
+        components.extend(self.view.selected_physical_component_ids())
+        snapshot = self.session.snapshot
+        return list(
+            dict.fromkeys(
+                snapshot.get(component, "").reference for component in components
+            )
+        )
+
+    def action_jlc_details(self, target: Any = None) -> None:
+        """Open the JLC footprint detail dialog for the target's row (spec 18.5)."""
+        presenter = self._jlc()
+        if presenter is not None:
+            presenter.show_variant_jlc_detail(self._jlc_references(target))
+
+    def action_jlc_refetch(self, target: Any = None) -> None:
+        """Re-fetch the selected rows' EasyEDA data (spec 18.5)."""
+        presenter = self._jlc()
+        if presenter is not None:
+            presenter.refetch_variant_references(self._jlc_references(target))
+
+    def action_jlc_recheck(self, target: Any = None) -> None:
+        """Re-resolve the board's cached parts, with no network (spec 18.5)."""
+        presenter = self._jlc()
+        if presenter is not None:
+            presenter.on_jlc_footprint_recheck()
+
+    def action_jlc_refresh(self, target: Any = None) -> None:
+        """Forget and re-fetch every part on the board, after a confirmation (spec 18.5)."""
+        presenter = self._jlc()
+        if presenter is not None:
+            presenter.on_jlc_footprint_refresh()
+
+    def action_jlc_clear_cache(self, target: Any = None) -> None:
+        """Delete the whole EasyEDA cache, after a confirmation (spec 18.5)."""
+        presenter = self._jlc()
+        if presenter is not None:
+            presenter.on_jlc_footprint_clear_cache()
+
     def repaint_jlc(self) -> None:
         """Repaint the JLC and Corr. cells once per burst of check results (spec 18.4).
 

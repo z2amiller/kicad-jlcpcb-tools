@@ -19,6 +19,7 @@ from .native_window_support import choose_output, focus, window_ui
 from .native_wx_support import pump
 from .variant_matrix_native_test_support import (
     MatrixHarness,
+    click_native_cell,
     matrix,
     modules,
     native_marks,
@@ -243,6 +244,132 @@ def test_a_variant_window_judges_its_output_variant_in_the_jlc_and_corr_columns(
         ui.board.parts[0].GetVariant("B").SetFieldValue("LCSC", "C2")
         ui.controller._on_timer(None)
         assert cells() == ("✗", "raw")
+        assert ui.messages == []
+
+    window_ui.run(check)
+
+
+@pytest.mark.parametrize("editable", [True, False], ids=["editable", "held"])
+def test_double_click_or_enter_on_a_jlc_cell_asks_for_its_details(
+    matrix: Any, modules: Any, editable: bool
+) -> None:
+    """Both open the detail dialog, even while upstream holds edits (spec 18.5)."""
+
+    def check(h: MatrixHarness) -> None:
+        view, wx = h.view, h.wx
+        col = view.model.column_for(None, "jlc")
+        view.set_mutations_enabled(editable)
+        click_native_cell(view, wx, 1, col, double=True)
+        h.key(wx.WXK_RETURN)
+        details = [
+            (name, target.field, target.component_id)
+            for name, target in h.actions
+            if name == "jlc_details"
+        ]
+        component = view.model.rows[1].component_id
+        assert details == [("jlc_details", "jlc", component)] * 2
+        assert h.activations == []
+
+    matrix(check, _model(modules[1]))
+
+
+def _jlc_submenu(
+    h: MatrixHarness, row: int, col: int, choose: str = ""
+) -> dict[str, Any]:
+    """Right-click a cell, return the JLC submenu's enablement by label, choose one.
+
+    The menu lives only while it is shown, so the chosen entry is sent its command
+    from inside the popup, as a user's click would be.
+    """
+    view, wx = h.view, h.wx
+    items: dict[str, Any] = {"separators": 0}
+
+    def popup(menu: Any) -> None:
+        (entry,) = [
+            item
+            for item in menu.GetMenuItems()
+            if item.GetItemLabelText() == "JLC footprint"
+        ]
+        submenu = entry.GetSubMenu()
+        for item in submenu.GetMenuItems():
+            if item.IsSeparator():
+                items["separators"] += 1
+                continue
+            items[item.GetItemLabelText()] = item.IsEnabled()
+            if item.GetItemLabelText() == choose:
+                submenu.ProcessEvent(wx.CommandEvent(wx.wxEVT_MENU, item.GetId()))
+
+    view.PopupMenu = popup
+    click_native_cell(view, wx, row, col, right=True)
+    return items
+
+
+@pytest.mark.parametrize(
+    "state,checked,enabled",
+    [
+        ("green", True, (True, True, True, True, True)),
+        ("", True, (False, False, True, True, True)),
+        ("green", False, (False,) * 5),
+    ],
+    ids=["numbered_row", "row_without_number", "check_off"],
+)
+def test_the_cell_menu_carries_the_jlc_submenu_enabled_as_on_the_list(
+    matrix: Any, modules: Any, state: str, checked: bool, enabled: tuple
+) -> None:
+    """Five entries and a separator; Details and Re-fetch need a numbered row."""
+    model_module = modules[1]
+    model = _model(model_module, (state,))
+    if not checked:
+        model = model_module.MatrixModel(
+            model.snapshot,
+            corrections={"component-1": model_module.CorrectionState()},
+            correction_variant="A",
+        )
+    elif not state:
+        model._jlc["component-1"] = MatrixCell("", "", "", "raw", None, "")
+
+    def check(h: MatrixHarness) -> None:
+        view = h.view
+        items = _jlc_submenu(
+            h, 0, view.model.column_for("A", "lcsc"), choose="Re-check board"
+        )
+        labels = (
+            "Details…",
+            "Re-fetch data",
+            "Re-check board",
+            "Refresh board data",
+            "Clear cache",
+        )
+        assert tuple(items[label] for label in labels) == enabled
+        assert items["separators"] == 1
+        if checked:
+            name, target = h.actions[-1]
+            assert (name, target.variant, target.field) == ("jlc_recheck", "A", "lcsc")
+
+    matrix(check, model)
+
+
+def test_a_variant_window_opens_the_detail_and_re_fetches_through_the_matrix(
+    window_ui: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Double-click the JLC cell, then Re-fetch data: the check's own actions run."""
+    checks = checked_window(window_ui, monkeypatch)
+
+    def check(ui: Any) -> None:
+        view, wx = ui.controller.view, ui.wx
+        shown: list[str] = []
+        presenter = ui.dialog.jlc_footprint_presenter
+        monkeypatch.setattr(presenter, "show_jlc_footprint_detail", shown.append)
+        col = view.model.column_for(None, "jlc")
+        click_native_cell(view, wx, 0, col, double=True)
+        assert shown == ["R1"]
+        h = MatrixHarness(ui.dialog, wx, ui.view, ui.module, view=view)
+        assert _jlc_submenu(h, 0, col, choose="Re-fetch data")["Re-fetch data"]
+        pump(wx)
+        assert checks[0].cache.status("C1") is None
+        assert "C1" in checks[0].worker.pending_lookups()
+        row = view.model.row_for_component("component-1")
+        assert view.model.get_display(row, col) == "◷"
         assert ui.messages == []
 
     window_ui.run(check)
