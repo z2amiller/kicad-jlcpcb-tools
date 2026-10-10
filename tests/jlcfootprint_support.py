@@ -25,7 +25,7 @@ from jlcfootprint.geometry import pad_hash
 from jlcfootprint.kicad_adapter import BoardPart, verdict_key
 from jlcfootprint.verdicts import VerdictStore
 from jlcfootprint.worker import FOOTPRINT, SYMBOL, Buckets
-from scripts.kicad_library import library_pads, with_functions
+from tools.jlcfootprint.kicad_library import library_pads, with_functions
 
 from .test_jlcfootprint_worker import Clock
 

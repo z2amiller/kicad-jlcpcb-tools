@@ -1,7 +1,7 @@
 """Validate the resolver against a board and recorded EasyEDA responses (spec 11).
 
 Usage:
-    python3 scripts/validate_board.py BOARD.kicad_pcb [--fixtures DIR] [--truth truth.csv]
+    python3 tools/jlcfootprint/validate_board.py BOARD.kicad_pcb [--fixtures DIR] [--truth truth.csv]
                                       [--flip-y] [--report out.txt] [--pro-fixtures DIR]
 
 Without --truth it prints one verdict per part that has an LCSC field.  With
@@ -29,7 +29,7 @@ from pathlib import Path
 import re
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

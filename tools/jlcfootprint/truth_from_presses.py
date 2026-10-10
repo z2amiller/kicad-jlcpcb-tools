@@ -1,7 +1,7 @@
 """Turn a placement-preview log of space-bar presses into the gate's truth.csv.
 
 Usage:
-    python3 scripts/truth_from_presses.py PRESSES.csv CPL.csv [--out tests/fixtures/jlcfootprint/truth.csv]
+    python3 tools/jlcfootprint/truth_from_presses.py PRESSES.csv CPL.csv [--out tests/fixtures/jlcfootprint/truth.csv]
 
 JLC's placement preview rotates a part 90 degrees counter-clockwise per press of the
 space bar and does not display the resulting angle, so the natural thing to write
@@ -20,7 +20,7 @@ import csv
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "tests" / "fixtures" / "jlcfootprint" / "truth.csv"
 
 

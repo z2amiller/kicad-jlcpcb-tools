@@ -1,11 +1,11 @@
 """Record EasyEDA responses as test fixtures (dev-time only; needs requests).
 
 Usage:
-    python3 scripts/fetch_easyeda_fixture.py C2132 C1978115 [...] [--out DIR] [--interval 10]
-    python3 scripts/fetch_easyeda_fixture.py --puuid b3b82869fa924bae820e3a6cfb44d689 [--pro] [--out DIR]
-    python3 scripts/fetch_easyeda_fixture.py --batch C2132 C7950 [...] --name corner_case [--interval 1]
-    python3 scripts/fetch_easyeda_fixture.py --footprint UUID [...] --symbol UUID [...] [--interval 1]
-    python3 scripts/fetch_easyeda_fixture.py --from-devices DEVICES.json [...] [--interval 1]
+    python3 tools/jlcfootprint/fetch_easyeda_fixture.py C2132 C1978115 [...] [--out DIR] [--interval 10]
+    python3 tools/jlcfootprint/fetch_easyeda_fixture.py --puuid b3b82869fa924bae820e3a6cfb44d689 [--pro] [--out DIR]
+    python3 tools/jlcfootprint/fetch_easyeda_fixture.py --batch C2132 C7950 [...] --name corner_case [--interval 1]
+    python3 tools/jlcfootprint/fetch_easyeda_fixture.py --footprint UUID [...] --symbol UUID [...] [--interval 1]
+    python3 tools/jlcfootprint/fetch_easyeda_fixture.py --from-devices DEVICES.json [...] [--interval 1]
 
 Classic per-LCSC responses land in ``tests/fixtures/jlcfootprint/easyeda/<lcsc>.json``;
 classic per-uuid footprint responses in ``tests/fixtures/jlcfootprint/easyeda_uuid/
@@ -41,7 +41,7 @@ from typing import Any
 
 import requests
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

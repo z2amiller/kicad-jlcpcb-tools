@@ -22,7 +22,7 @@ EASYEDA_UNIT_MM = 0.254
 # (EasyEDA Pro footprint text, used by the crawl and the per-uuid endpoint, is in
 # mils with Y up; its parser flips.)
 FLIP_EASYEDA_Y = False
-# Confirmed against JLC's placement preview on 2026-09-12 with scripts/corner_case (plan
+# Confirmed against JLC's placement preview on 2026-09-12 with tests/fixtures/jlcfootprint/boards/corner_case (plan
 # Task 12): no mirror findings on either side, and the bottom rows (D2, Q5, Q6, U3)
 # reproduce upstream's mirror formula, so EasyEDA's Y is read as it comes.
 
@@ -216,7 +216,7 @@ def ccw_correction(math_rotation_deg: float) -> int:
 def crawl_to_cpl(rotation: int) -> int:
     """Convert a crawl-table rotation (the (family, token) table's sense) to the CPL's.
 
-    The crawler's table and ``scripts/sweep_crawl.py`` count the turn that brings
+    The crawler's table and ``tools/jlcfootprint/sweep_crawl.py`` count the turn that brings
     JLC's drawing onto KiCad's footprint; the CPL counts the turn of KiCad's part
     onto JLC's drawing.  They are negatives of each other (SOIC-8 -BL: 90 in the
     table, 270 in the CPL, confirmed by the preview).

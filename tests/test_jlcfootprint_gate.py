@@ -6,18 +6,19 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-BOARD = ROOT / "scripts" / "corner_case" / "corner_case.kicad_pcb"
+BOARDS = ROOT / "tests" / "fixtures" / "jlcfootprint" / "boards"
+BOARD = BOARDS / "corner_case" / "corner_case.kicad_pcb"
 TRUTH = ROOT / "tests" / "fixtures" / "jlcfootprint" / "truth.csv"
-BOARD_M3 = ROOT / "scripts" / "corner_case_m3" / "corner_case_m3.kicad_pcb"
+BOARD_M3 = BOARDS / "corner_case_m3" / "corner_case_m3.kicad_pcb"
 TRUTH_M3 = ROOT / "tests" / "fixtures" / "jlcfootprint" / "truth_m3.csv"
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
 PRO_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda_pro"
 
 
 def load_validator():
-    """Import scripts/validate_board.py as a module."""
+    """Import tools/jlcfootprint/validate_board.py as a module."""
     spec = importlib.util.spec_from_file_location(
-        "validate_board", ROOT / "scripts" / "validate_board.py"
+        "validate_board", ROOT / "tools" / "jlcfootprint" / "validate_board.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

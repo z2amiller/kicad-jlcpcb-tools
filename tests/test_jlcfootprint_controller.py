@@ -11,7 +11,7 @@ from jlcfootprint.geometry import pad_hash
 from jlcfootprint.kicad_adapter import BoardPart
 from jlcfootprint.verdicts import PENDING, VerdictStore
 from jlcfootprint.worker import FOOTPRINT, SYMBOL, FetchWorker
-from scripts.kicad_library import footprints_available
+from tools.jlcfootprint.kicad_library import footprints_available
 
 from .jlcfootprint_support import (
     alias,

@@ -4,7 +4,7 @@ The resolver's library-backed tests and two dev-time scripts all need the pads a
 the courtyard of a named ``Library:Footprint``.  Where KiCad is installed they come
 from its own ``.pretty`` directories; where it is not (CI, and any machine without
 it) they come from the JSON snapshots under ``tests/fixtures/jlcfootprint/kicad``,
-recorded by ``scripts/snapshot_kicad_footprints.py``.
+recorded by ``tools/jlcfootprint/snapshot_kicad_footprints.py``.
 
 It lives beside the scripts rather than in ``tests/`` so that no script has to
 import from the test package, and not in ``jlcfootprint/`` because none of it is
@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -70,7 +70,7 @@ def library_footprint(library: str, name: str) -> tuple[list[Pad], Box | None]:
 
     The recorded snapshot under ``tests/fixtures/jlcfootprint/kicad`` is used when it
     exists, so the tests run without KiCad; otherwise the installed library is read.
-    Record a snapshot with ``python3 scripts/snapshot_kicad_footprints.py Library:Name``.
+    Record a snapshot with ``python3 tools/jlcfootprint/snapshot_kicad_footprints.py Library:Name``.
     A snapshot recorded before courtyards were kept has no box (None).
     """
     snapshot = snapshot_path(library, name)
@@ -85,7 +85,7 @@ def library_footprint(library: str, name: str) -> tuple[list[Pad], Box | None]:
         return installed_library_footprint(library, name)
     raise FileNotFoundError(
         f"no snapshot {snapshot.name} and no KiCad footprint libraries at {KICAD_FOOTPRINTS}; "
-        f"run scripts/snapshot_kicad_footprints.py {library}:{name} on a machine with KiCad"
+        f"run tools/jlcfootprint/snapshot_kicad_footprints.py {library}:{name} on a machine with KiCad"
     )
 
 

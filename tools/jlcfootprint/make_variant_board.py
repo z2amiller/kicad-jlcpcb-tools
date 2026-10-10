@@ -1,14 +1,14 @@
 r"""Generate the two-variant board for the variant read check (run with KiCad's bundled Python).
 
     /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \\
-        scripts/make_variant_board.py [--out BOARD]
+        tools/jlcfootprint/make_variant_board.py [--out BOARD]
 
 Loads five footprints from KiCad's library onto the corner-case board's blank, sets
 each one's Default LCSC field, adds the named variants A and B and gives each
 footprint the per-variant part numbers of ``PARTS``: an inherited number, an
 explicit other part, an explicit blank, and a part variant B does not place.  The
-board is written to scripts/variant_board/variant_board.kicad_pcb by default;
-``scripts/check_variant_read.py`` reads it back through the check (spec 18.6).
+board is written to tests/fixtures/jlcfootprint/boards/variant_board/variant_board.kicad_pcb by default;
+``tools/jlcfootprint/check_variant_read.py`` reads it back through the check (spec 18.6).
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ import argparse
 from pathlib import Path
 import sys
 
-HERE = Path(__file__).resolve().parent
-BLANK = HERE / "corner_case" / "blank.kicad_pcb"
-OUT = HERE / "variant_board" / "variant_board.kicad_pcb"
+BOARDS = Path(__file__).resolve().parents[2] / "tests/fixtures/jlcfootprint/boards"
+BLANK = BOARDS / "corner_case" / "blank.kicad_pcb"
+OUT = BOARDS / "variant_board" / "variant_board.kicad_pcb"
 LIBRARY_ROOT = Path("/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints")
 VARIANTS = ("A", "B")
 PITCH_MM = 12.0

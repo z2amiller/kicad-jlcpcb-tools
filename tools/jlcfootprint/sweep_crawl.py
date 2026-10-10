@@ -1,6 +1,6 @@
 """Sweep the private crawl: resolver verdicts on KiCad library twins versus the crawl's own rotations.
 
-Usage: python3 scripts/sweep_crawl.py --db ~/Downloads/parts.db --top 150 [--csv out.csv]
+Usage: python3 tools/jlcfootprint/sweep_crawl.py --db ~/Downloads/parts.db --top 150 [--csv out.csv]
 
 For each of the most-shared EasyEDA footprints (puuids) that has an obvious KiCad
 standard-library twin, run the resolver (KiCad library pads vs the crawled EasyEDA
@@ -28,14 +28,14 @@ import re
 import sqlite3
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from jlcfootprint.easyeda_parse import SymbolPin, parse_footprint_pads  # noqa: E402
 from jlcfootprint.geometry import Pad, crawl_to_cpl, easyeda_pads_to_mm  # noqa: E402
 from jlcfootprint.resolver import resolve  # noqa: E402
-from scripts.kicad_library import (  # noqa: E402
+from tools.jlcfootprint.kicad_library import (  # noqa: E402
     KICAD_FOOTPRINTS,
     library_pads,
     with_functions,

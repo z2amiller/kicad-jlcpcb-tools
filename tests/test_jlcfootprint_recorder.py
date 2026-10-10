@@ -1,4 +1,4 @@
-"""Tests for scripts/fetch_easyeda_fixture.py with the network faked: pacing, backoff, what gets kept."""
+"""Tests for tools/jlcfootprint/fetch_easyeda_fixture.py with the network faked: pacing, backoff, what gets kept."""
 
 import json
 from pathlib import Path

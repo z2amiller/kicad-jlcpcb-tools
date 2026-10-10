@@ -5,7 +5,7 @@ import json
 import pytest
 
 from jlcfootprint.geometry import Pad
-from scripts.kicad_library import (
+from tools.jlcfootprint.kicad_library import (
     KICAD_FOOTPRINTS,
     KICAD_SNAPSHOTS,
     installed_library_pads,
@@ -35,7 +35,7 @@ def test_snapshot_parses_to_pads(path):
 )
 @pytest.mark.parametrize("path", SNAPSHOTS, ids=lambda p: p.stem)
 def test_snapshot_matches_installed_library(path):
-    """A KiCad library update shows up here; re-record with scripts/snapshot_kicad_footprints.py --all."""
+    """A KiCad library update shows up here; re-record with tools/jlcfootprint/snapshot_kicad_footprints.py --all."""
     data = json.loads(path.read_text(encoding="utf-8"))
     assert library_pads(data["library"], data["name"]) == installed_library_pads(
         data["library"], data["name"]

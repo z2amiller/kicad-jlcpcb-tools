@@ -19,7 +19,7 @@ from jlcfootprint.presentation import (
     rotation_help,
 )
 from jlcfootprint.verdicts import StoredVerdict
-from scripts.kicad_library import footprints_available
+from tools.jlcfootprint.kicad_library import footprints_available
 
 from .jlcfootprint_support import controller_setup
 

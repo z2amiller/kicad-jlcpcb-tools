@@ -1,14 +1,14 @@
 """Generate a corner-case validation board (run with KiCad's bundled Python).
 
     /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \
-        scripts/make_corner_case_board.py [--cases CSV] [--blank BOARD] [--out BOARD]
+        tools/jlcfootprint/make_corner_case_board.py [--cases CSV] [--blank BOARD] [--out BOARD]
 
-Reads the cases CSV (scripts/corner_case/cases.csv by default), loads each
+Reads the cases CSV (tests/fixtures/jlcfootprint/boards/corner_case/cases.csv by default), loads each
 footprint from KiCad's library, places the parts on a grid at the requested
 rotation and side, sets the LCSC field and any pin functions, draws the outline
-and writes the board (scripts/corner_case/corner_case.kicad_pcb by default).
+and writes the board (tests/fixtures/jlcfootprint/boards/corner_case/corner_case.kicad_pcb by default).
 This board is the resolver's gate (spec 11); the second one, for the resolver
-batch, is scripts/corner_case_m3/ (spec 16.6).
+batch, is tests/fixtures/jlcfootprint/boards/corner_case_m3/ (spec 16.6).
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ import sys
 
 import pcbnew
 
-HERE = Path(__file__).resolve().parent
-CASES = HERE / "corner_case" / "cases.csv"
-BLANK = HERE / "corner_case" / "blank.kicad_pcb"
-OUT = HERE / "corner_case" / "corner_case.kicad_pcb"
+BOARDS = Path(__file__).resolve().parents[2] / "tests/fixtures/jlcfootprint/boards"
+CASES = BOARDS / "corner_case" / "cases.csv"
+BLANK = BOARDS / "corner_case" / "blank.kicad_pcb"
+OUT = BOARDS / "corner_case" / "corner_case.kicad_pcb"
 LIBRARY_ROOT = Path("/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints")
 COLUMNS = 6
 PITCH_MM = 12.0

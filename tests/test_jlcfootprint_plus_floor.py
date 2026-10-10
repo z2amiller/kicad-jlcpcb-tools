@@ -33,7 +33,7 @@ LARGE_CLASSIC_PADS = [
 
 # A CR123A holder on a real board (MYOUNG BH-123A, C5290177), placed on the bottom
 # side: its KiCad pads as the resolver receives them (mirrored the way
-# scripts/validate_board.py mirrors a bottom-side part, pin functions as KiCad
+# tools/jlcfootprint/validate_board.py mirrors a bottom-side part, pin functions as KiCad
 # stores them for Device:Battery), and the Pro host's uuids as the plugin's batch
 # lookup returned them.
 CR123A_FOOTPRINT = "LowPower:BatteryHolder_MYOUNG_BH-123A-A1CJ002_1xCR123A"

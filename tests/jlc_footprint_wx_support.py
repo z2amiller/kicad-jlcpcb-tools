@@ -5,7 +5,7 @@ the tests around the plugin root need and had each written for themselves: the
 fake-wx loaders for the facade and for the main window, the window double the
 column, dialog and generate tests build on, the storage doubles the two CPL tests
 run against, the duck-typed decision they pass through ``prepare_cpl``, and the
-importer three script tests use to load a ``scripts/`` module without its CLI.
+importer three script tests use to load a ``tools/jlcfootprint/`` module without its CLI.
 
 Everything here is a builder, not a fixture, so a test file keeps naming its own
 fixtures and pytest keeps reporting them against that file.
@@ -162,8 +162,10 @@ def correction_library(modules: SimpleNamespace, tmp_path: Any) -> Any:
 
 
 def load_script(name: str) -> ModuleType:
-    """Import one ``scripts/`` module as a module, without running its CLI."""
-    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+    """Import one ``tools/jlcfootprint/`` module as a module, without running its CLI."""
+    spec = importlib.util.spec_from_file_location(
+        name, ROOT / "tools" / "jlcfootprint" / f"{name}.py"
+    )
     assert spec is not None and spec.loader is not None
     loaded = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(loaded)

@@ -3,7 +3,7 @@ r"""Check that the JLC footprint check reads each variant's part numbers (spec 1
 Needs KiCad's bundled Python (it imports pcbnew and the plugin's wx-side facade):
 
     /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \\
-        scripts/check_variant_read.py [scripts/variant_board/variant_board.kicad_pcb]
+        tools/jlcfootprint/check_variant_read.py [tests/fixtures/jlcfootprint/boards/variant_board/variant_board.kicad_pcb]
 
 Loads the generated two-variant board with pcbnew, reads it through upstream's
 ``VariantNativeAdapter`` and, for every variant as the output variant, builds the
@@ -23,7 +23,7 @@ import sys
 import tempfile
 import types
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_variant_board import LIBRARY_ROOT, OUT, PARTS, expected_numbers  # noqa: E402
 

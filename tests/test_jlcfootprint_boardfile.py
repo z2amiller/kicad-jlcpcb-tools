@@ -102,7 +102,10 @@ def test_corner_case_board_courtyards_match_the_library():
 
     board = (
         Path(__file__).resolve().parents[1]
-        / "scripts"
+        / "tests"
+        / "fixtures"
+        / "jlcfootprint"
+        / "boards"
         / "corner_case"
         / "corner_case.kicad_pcb"
     )

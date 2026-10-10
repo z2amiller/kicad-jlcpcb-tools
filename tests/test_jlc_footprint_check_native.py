@@ -93,7 +93,7 @@ def native_detail() -> Iterator[SimpleNamespace]:
     from jlcfootprint.geometry import easyeda_pads_to_mm
     from jlcfootprint.resolver import resolve
     from jlcfootprint.verdicts import StoredVerdict
-    from scripts.kicad_library import library_footprint
+    from tools.jlcfootprint.kicad_library import library_footprint
 
     from .jlcfootprint_support import pro_record
 

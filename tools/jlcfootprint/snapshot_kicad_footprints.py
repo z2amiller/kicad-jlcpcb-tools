@@ -1,8 +1,8 @@
 """Record KiCad library footprints' pads as test fixtures (dev-time only).
 
 Usage:
-    python3 scripts/snapshot_kicad_footprints.py Package_TO_SOT_SMD:SOT-23 Diode_SMD:D_SMA [...]
-    python3 scripts/snapshot_kicad_footprints.py --all
+    python3 tools/jlcfootprint/snapshot_kicad_footprints.py Package_TO_SOT_SMD:SOT-23 Diode_SMD:D_SMA [...]
+    python3 tools/jlcfootprint/snapshot_kicad_footprints.py --all
 
 Each ``Library:Name`` is read from the KiCad footprint libraries installed on this
 machine with the plugin's own ``.kicad_pcb`` parser (pads and the courtyard box) and written to
@@ -19,10 +19,10 @@ from pathlib import Path
 import re
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from scripts.kicad_library import (  # noqa: E402
+from tools.jlcfootprint.kicad_library import (  # noqa: E402
     KICAD_FOOTPRINTS,
     KICAD_SNAPSHOTS,
     installed_library_footprint,

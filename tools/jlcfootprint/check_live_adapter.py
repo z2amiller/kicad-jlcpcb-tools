@@ -3,7 +3,7 @@ r"""Check the live pcbnew adapter against the board-file parser on one board.
 Needs KiCad's bundled Python (it imports pcbnew):
 
     /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \\
-        scripts/check_live_adapter.py scripts/corner_case/corner_case.kicad_pcb
+        tools/jlcfootprint/check_live_adapter.py tests/fixtures/jlcfootprint/boards/corner_case/corner_case.kicad_pcb
 
 For every footprint the adapter's pads (footprint frame, bottom parts un-mirrored,
 pad rotation modulo 180) and its courtyard box must equal the validator's file pads
@@ -22,7 +22,7 @@ import argparse
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

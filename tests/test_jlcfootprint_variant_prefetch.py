@@ -11,7 +11,7 @@ from dataclasses import replace
 import pytest
 
 from jlcfootprint.verdicts import PENDING
-from scripts.kicad_library import footprints_available
+from tools.jlcfootprint.kicad_library import footprints_available
 
 from .jlcfootprint_support import alias, controller_setup
 

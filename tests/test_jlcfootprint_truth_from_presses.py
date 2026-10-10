@@ -1,4 +1,4 @@
-"""Tests for scripts/truth_from_presses.py: preview presses plus the uploaded CPL give JLC's angle."""
+"""Tests for tools/jlcfootprint/truth_from_presses.py: preview presses plus the uploaded CPL give JLC's angle."""
 
 import pytest
 

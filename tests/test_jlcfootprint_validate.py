@@ -1,4 +1,4 @@
-"""Tests for scripts/validate_board.py: the gate's evaluate and compare plumbing."""
+"""Tests for tools/jlcfootprint/validate_board.py: the gate's evaluate and compare plumbing."""
 
 import importlib
 from pathlib import Path
@@ -255,7 +255,7 @@ def test_pro_fixtures_assemble_a_part_like_the_cache_would(tmp_path):
     shutil.copy(PRO_FIXTURES / f"symbol_{hit.symbol_uuid}.json", partial)
     assert validator.load_pro_record(partial, index, "C2132").status == "ok"
     rows = validator.evaluate(
-        ROOT / "scripts" / "corner_case" / "corner_case.kicad_pcb",
+        ROOT / "tests/fixtures/jlcfootprint/boards/corner_case/corner_case.kicad_pcb",
         FIXTURES,
         pro_fixtures=partial,
     )
