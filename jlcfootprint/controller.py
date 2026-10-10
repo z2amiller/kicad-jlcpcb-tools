@@ -10,14 +10,18 @@ one event posted to the main thread with the session generation so a stale board
 reload can drop it.  One lock keeps each scan step and each result handler whole
 with respect to the other, so a scan never sees a half-handled result and never
 queues a part behind a request that has just answered.  The CPL path asks
-:meth:`FootprintCheck.decisions` for one rotation decision per reference.  Stdlib
-only; wx and pcbnew stay in the caller.
+:meth:`FootprintCheck.decisions` for one rotation decision per reference.  On a
+board with KiCad design variants the judged parts are the output variant's, and each
+scan also prefetches the other variants' part numbers on the same footprints: those
+are scanned, queued and resolved exactly like judged parts, one at a time under the
+same lock, but kept apart from them (spec 18.3).  Stdlib only; wx and pcbnew stay
+in the caller.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field, replace
 import logging
 import threading
 import time
@@ -54,6 +58,10 @@ class ScanSummary:
     pending: int = 0
     queued: dict = field(default_factory=dict)  # lookups, footprints, symbols
     estimate_s: float = 0.0
+    # Other variants' parts on the same footprints, walked after the judged ones
+    # (spec 18.3); zero on a board without variants.
+    prefetched: int = 0
+    prefetch_enqueued: int = 0
 
     def __str__(self) -> str:
         """Render the summary for the log window."""
@@ -62,6 +70,11 @@ class ScanSummary:
             f"{self.already_resolved} already resolved, {self.resolved_from_cache} resolved "
             f"from the cache, {self.enqueued} enqueued, {self.pending} pending"
         )
+        if self.prefetched:
+            text += (
+                f"; prefetched {self.prefetched} other-variant part(s), "
+                f"{self.prefetch_enqueued} enqueued"
+            )
         if self.pending:
             text += (
                 f"; queued: {self.queued.get('lookups', 0)} lookup(s), "
@@ -85,6 +98,7 @@ class FootprintCheck:
         message: Callable[[str], None] | None = None,
         now: Callable[[], float] = time.time,
         buckets: Buckets | None = None,
+        other_lcscs: Callable[[], Mapping[str, Iterable[str]]] | None = None,
     ) -> None:
         self.cache = cache
         self.verdicts = verdicts
@@ -92,8 +106,14 @@ class FootprintCheck:
         self.post = post
         self.message = message
         self.now = now
+        # Reference -> the part numbers the board's other variants order there; None
+        # on a board without variants (spec 18.3).
+        self.other_lcscs = other_lcscs
         self.generation = 0
         self.parts: dict[str, BoardPart] = {}
+        # (reference, LCSC) -> another variant's part on that reference's footprint:
+        # resolved and stored like a judged part, never judged (spec 18.3).
+        self.prefetched: dict[tuple[str, str], BoardPart] = {}
         # LCSC -> EasyEDA package name, read from the cache on demand (see package_name).
         self._package_names: dict[str, str] = {}
         # Which parts wait on which request: ('lookup', lcsc) or (kind, uuid) -> LCSCs.
@@ -135,16 +155,21 @@ class FootprintCheck:
 
         ``references`` limits the work to those parts (after an assignment); a full
         scan starts a new generation so events from an earlier board state are dropped.
+        On a board with variants the other variants' parts on the scanned footprints
+        are prefetched after them, so the judged parts are queued first (spec 18.3).
         """
         if references is None:
             self.generation += 1
             self.parts = {}
+            self.prefetched = {}
         wanted = None if references is None else set(references)
         summary = ScanSummary()
+        scanned = []
         for part in self.read_board():
             if wanted is not None and part.reference not in wanted:
                 continue
             self.parts[part.reference] = part
+            scanned.append(part)
             summary.scanned += 1
             if not part.lcsc:
                 summary.without_lcsc += 1
@@ -153,11 +178,51 @@ class FootprintCheck:
             # result landing mid-scan is seen whole: still pending, or complete.
             with self.lock:
                 self._scan_part(part, summary)
+        self._prefetch(scanned, summary)
         summary.pending = len(self.pending_lcscs())
         summary.queued = self.worker.counts()
         summary.estimate_s = self.worker.estimate_seconds()
         logger.info("jlcfootprint: %s", summary)
         return summary
+
+    def _other_variant_parts(self, parts: Iterable[BoardPart]) -> list[BoardPart]:
+        """Return the other variants' parts on these footprints (spec 18.3).
+
+        Each is the judged part with another variant's part number: the pads never
+        vary by variant, so the copy is exactly what that variant would judge.  A code
+        the judged part already carries is not repeated.
+        """
+        if self.other_lcscs is None:
+            return []
+        codes = self.other_lcscs()
+        others = []
+        for part in parts:
+            for lcsc in sorted(set(codes.get(part.reference, ())) - {"", part.lcsc}):
+                others.append(replace(part, lcsc=lcsc))
+        return others
+
+    def _prefetch(self, parts: list[BoardPart], summary: ScanSummary) -> None:
+        """Resolve or queue the other variants' parts on the scanned footprints (spec 18.3).
+
+        They go through the judged parts' own scan step, under the same lock, but
+        their counts are kept apart: the summary's judged numbers stay the board's.
+        """
+        if self.other_lcscs is None:
+            return
+        references = {part.reference for part in parts}
+        self.prefetched = {
+            key: part
+            for key, part in self.prefetched.items()
+            if key[0] not in references
+        }
+        walked = ScanSummary()
+        for other in self._other_variant_parts(parts):
+            self.prefetched[(other.reference, other.lcsc)] = other
+            walked.scanned += 1
+            with self.lock:
+                self._scan_part(other, walked)
+        summary.prefetched = walked.scanned
+        summary.prefetch_enqueued = walked.enqueued
 
     def enqueue_references(self, references: Iterable[str]) -> ScanSummary:
         """Re-read the given references after an LCSC assignment and resolve or queue them."""
@@ -251,10 +316,14 @@ class FootprintCheck:
         return stored
 
     def _finish(self, lcsc: str) -> None:
-        """Resolve every board part with this LCSC from the cache and post the event (lock held)."""
+        """Resolve every board part with this LCSC from the cache and post the event (lock held).
+
+        The other variants' prefetched parts with this LCSC are resolved too, so an
+        output switch finds their verdicts stored (spec 18.3).
+        """
         cached = self.cache.part(lcsc)
         if cached is not None:
-            for part in list(self.parts.values()):
+            for part in [*self.parts.values(), *self.prefetched.values()]:
                 if part.lcsc == lcsc:
                     self._resolve_and_store(part, cached)
         self.post(lcsc, self.generation)
@@ -563,8 +632,12 @@ class FootprintCheck:
         hash orphans the old verdict) or a plugin update that changes the resolver.
         """
         checked = 0
-        for part in self.read_board():
+        parts = self.read_board()
+        for part in parts:
             self.parts[part.reference] = part
+        # The other variants' parts are re-resolved too, so a switch shows the
+        # re-checked verdict, and counted with the board's (spec 18.3).
+        for part in [*parts, *self._other_variant_parts(parts)]:
             if not part.lcsc:
                 continue
             with self.lock:
@@ -581,9 +654,14 @@ class FootprintCheck:
         """Forget the cached rows of every LCSC on the board and fetch them again (spec 16.5).
 
         The rescan marks every verdict pending and keeps every override, exactly as
-        one part's re-fetch does.
+        one part's re-fetch does.  The other variants' part numbers are forgotten and
+        fetched again with them (spec 18.3).
         """
-        lcscs = sorted({part.lcsc for part in self.read_board() if part.lcsc})
+        parts = self.read_board()
+        lcscs = sorted(
+            {part.lcsc for part in parts if part.lcsc}
+            | self._other_variant_codes(parts)
+        )
         for lcsc in lcscs:
             self.cache.forget(lcsc)
             self._package_names.pop(lcsc, None)
@@ -606,10 +684,28 @@ class FootprintCheck:
         The confirmation quotes this before anything is forgotten, and it is the number
         the queue itself would quote for those codes once they are queued:
         :func:`estimate_seconds` already counts one lookup per 200 codes *plus* the two
-        documents each code may need, so no document count is added here.
+        documents each code may need, so no document count is added here.  On a board
+        with variants the count stays the board's own parts, the output variant's, and
+        the time covers the other variants' codes too, which the same queue fetches
+        after them (spec 18.3); :meth:`other_variant_codes` says how many those are.
         """
-        count = len({part.lcsc for part in self.read_board() if part.lcsc})
-        return count, estimate_seconds(count, 0)
+        parts = self.read_board()
+        codes = {part.lcsc for part in parts if part.lcsc}
+        others = self._other_variant_codes(parts) - codes
+        return len(codes), estimate_seconds(len(codes) + len(others), 0)
+
+    def _other_variant_codes(self, parts: Iterable[BoardPart]) -> set[str]:
+        """Return the part numbers only the other variants order on these footprints."""
+        return {part.lcsc for part in self._other_variant_parts(parts)}
+
+    def other_variant_codes(self) -> int:
+        """Return how many part numbers a board-wide fetch adds for the other variants (spec 18.3).
+
+        Codes the output variant orders anywhere on the board are not counted again.
+        """
+        parts = self.read_board()
+        codes = {part.lcsc for part in parts if part.lcsc}
+        return len(self._other_variant_codes(parts) - codes)
 
     def references_sharing_verdict(self, reference: str) -> list[str]:
         """Return every reference whose verdict row is the one this reference uses.

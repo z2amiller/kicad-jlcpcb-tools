@@ -2,15 +2,17 @@
 
 The pure package under ``jlcfootprint/`` knows nothing of wx, pcbnew or the main
 window; this module builds one :class:`FootprintCheck` for an open board from the
-window's library, store and pcbnew, and posts its results as wx events.
+window's library, store and pcbnew, and posts its results as wx events.  On a board
+with KiCad design variants the part numbers come from upstream's variant session
+instead of the store (spec 18.2).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 import wx  # pylint: disable=import-error
 
@@ -61,6 +63,66 @@ def cache_path(datadir: str) -> str:
     return os.path.join(datadir, FILENAME)
 
 
+def judged_variant(snapshot: Any, output_variant: str) -> str:
+    """Return the variant the check judges: the output variant, else Default (spec 18.2).
+
+    A remembered output variant the board no longer has is what upstream's own
+    ``output_rows`` falls back from, to Default; the check reads the same parts.
+    """
+    names = {variant.name for variant in snapshot.variants}
+    return output_variant if output_variant in names else ""
+
+
+def _component_id(footprint: Any) -> str:
+    """Return a footprint's KiCad UUID, or "" for one that has none to read."""
+    uuid = getattr(footprint, "m_Uuid", None)
+    return str(uuid.AsString()) if uuid is not None else ""
+
+
+def variant_lcsc_reader(snapshot: Any, variant_name: str) -> Callable[[Any], str]:
+    """Return ``lcsc_of`` for one variant of a variant snapshot (spec 18.2).
+
+    A footprint is matched to the snapshot's component by its UUID, which is how
+    upstream identifies it, or by its reference when the UUID is not in the
+    snapshot; a footprint in neither carries no part number until the next read.
+    """
+    parts = snapshot.for_variant(variant_name)
+    by_id = {part.component_id: part.lcsc for part in parts}
+    by_reference = {part.reference: part.lcsc for part in parts}
+
+    def lcsc_of(footprint: Any) -> str:
+        component_id = _component_id(footprint)
+        if component_id in by_id:
+            return by_id[component_id]
+        return by_reference.get(str(footprint.GetReference()), "")
+
+    return lcsc_of
+
+
+def other_variant_lcscs(snapshot: Any, variant_name: str) -> dict[str, set[str]]:
+    """Return reference -> the part numbers the other variants order there (spec 18.3).
+
+    Empty numbers and the judged variant's own number are left out, so a reference
+    every variant orders alike prefetches nothing.
+    """
+    judged = {part.reference: part.lcsc for part in snapshot.for_variant(variant_name)}
+    others: dict[str, set[str]] = {}
+    for part in snapshot.components:
+        if (
+            part.variant_name != variant_name
+            and part.lcsc
+            and part.lcsc != judged.get(part.reference)
+        ):
+            others.setdefault(part.reference, set()).add(part.lcsc)
+    return others
+
+
+def _variant_session(window: Any) -> Optional[Any]:
+    """Return upstream's variant session on a board with KiCad variants, else None."""
+    controller = getattr(window, "_variant_controller", None)
+    return None if controller is None else controller.session
+
+
 def create_footprint_check(window: Any, pcbnew: Any) -> FootprintCheck:
     """Build the check for the window's open board; call ``start`` and ``scan_board`` next."""
     cache = Cache(cache_path(window.library.datadir))
@@ -74,8 +136,26 @@ def create_footprint_check(window: Any, pcbnew: Any) -> FootprintCheck:
         return stored or get_lcsc_value(footprint)
 
     def read_board():
+        session = _variant_session(window)
+        reader = lcsc_of
+        if session is not None:
+            # A variant board has no ordinary store: the part numbers are the output
+            # variant's, from the session's current snapshot (spec 18.2).
+            snapshot = session.snapshot
+            reader = variant_lcsc_reader(
+                snapshot, judged_variant(snapshot, session.output_variant)
+            )
         return board_parts(
-            pcbnew.GetBoard(), pcbnew=pcbnew, counts=count_pad, lcsc_of=lcsc_of
+            pcbnew.GetBoard(), pcbnew=pcbnew, counts=count_pad, lcsc_of=reader
+        )
+
+    def other_lcscs():
+        session = _variant_session(window)
+        if session is None:
+            return {}
+        snapshot = session.snapshot
+        return other_variant_lcscs(
+            snapshot, judged_variant(snapshot, session.output_variant)
         )
 
     def post(lcsc: str, generation: int) -> None:
@@ -87,7 +167,13 @@ def create_footprint_check(window: Any, pcbnew: Any) -> FootprintCheck:
         )
 
     return FootprintCheck(
-        cache, verdicts, read_board, post, message=message, buckets=shared_buckets()
+        cache,
+        verdicts,
+        read_board,
+        post,
+        message=message,
+        buckets=shared_buckets(),
+        other_lcscs=other_lcscs if _variant_session(window) is not None else None,
     )
 
 
@@ -196,13 +282,14 @@ def refresh_board_data(window: Any, check: Any = None) -> int:
     if check is None:
         return 0
     parts, seconds = check.board_estimate()
-    if not parts:
+    others = check.other_variant_codes()
+    if not parts and not others:
         logger.info("JLC footprint check: no part on the board carries an LCSC number")
         return 0
     if not confirm(
         window,
         "Re-fetch the EasyEDA data for every part on the board?\n\n"
-        f"{describe_board_estimate(parts, seconds)}. Rotation overrides are kept.",
+        f"{describe_board_estimate(parts, seconds, others)}. Rotation overrides are kept.",
     ):
         return 0
     summary = check.refresh_board()
@@ -221,11 +308,12 @@ def clear_cache(window: Any, check: Any = None) -> int:
         return 0
     counts = check.cache.counts()
     parts, seconds = check.board_estimate()
+    others = check.other_variant_codes()
     if not confirm(
         window,
         f"Delete the whole EasyEDA cache ({counts['parts']} part(s), "
         f"{counts['packages']} footprint(s))?\n\nThis board's parts are fetched again: "
-        f"{describe_board_estimate(parts, seconds)}. Rotation overrides are kept, and "
+        f"{describe_board_estimate(parts, seconds, others)}. Rotation overrides are kept, and "
         "a seed file can be imported again from Settings.",
     ):
         return 0
