@@ -63,7 +63,7 @@
     "ssh_key": ""
   },
   "meta": {
-    "filename": "corner_case_m3.kicad_prl",
+    "filename": "pin_functions_and_marks.kicad_prl",
     "version": 5
   },
   "net_inspector_panel": {

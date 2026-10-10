@@ -33,7 +33,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from jlcfootprint.easyeda_parse import SymbolPin, parse_footprint_pads  # noqa: E402
-from jlcfootprint.geometry import Pad, crawl_to_cpl, easyeda_pads_to_mm  # noqa: E402
+from jlcfootprint.geometry import (  # noqa: E402
+    Pad,
+    easyeda_pads_to_mm,
+    naming_rule_to_cpl,
+)
 from jlcfootprint.resolver import resolve  # noqa: E402
 from tools.jlcfootprint.kicad_library import (  # noqa: E402
     KICAD_FOOTPRINTS,
@@ -272,8 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         kicad = with_functions(library_pads(lib, fp), functions)
         v = resolve(kicad, f"{lib}:{fp}", "ok", name, jlc, pins)
         stats["parts_total"] += count
-        # The crawl's table counts the turn the other way round (geometry.crawl_to_cpl).
-        crawl_cpl = None if crawl_rot is None else crawl_to_cpl(int(crawl_rot))
+        # The crawl's table counts the turn the other way round (geometry.naming_rule_to_cpl).
+        crawl_cpl = None if crawl_rot is None else naming_rule_to_cpl(int(crawl_rot))
         agree = (
             v.rotation is not None and crawl_cpl is not None and v.rotation == crawl_cpl
         )

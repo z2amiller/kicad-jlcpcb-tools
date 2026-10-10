@@ -8,7 +8,7 @@ footprint from KiCad's library, places the parts on a grid at the requested
 rotation and side, sets the LCSC field and any pin functions, draws the outline
 and writes the board (tests/fixtures/jlcfootprint/boards/corner_case/corner_case.kicad_pcb by default).
 This board is the resolver's gate (spec 11); the second one, for the resolver
-batch, is tests/fixtures/jlcfootprint/boards/corner_case_m3/ (spec 16.6).
+batch, is tests/fixtures/jlcfootprint/boards/pin_functions_and_marks/ (spec 16.6).
 """
 
 from __future__ import annotations

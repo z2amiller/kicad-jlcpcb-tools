@@ -7,11 +7,11 @@ from jlcfootprint.geometry import (
     Pad,
     ccw_correction,
     centroid,
-    crawl_to_cpl,
     easyeda_pads_to_mm,
     mirror_box,
     mirror_y,
     named_pads,
+    naming_rule_to_cpl,
     pad_geom,
     pad_hash,
 )
@@ -124,9 +124,9 @@ def test_ccw_correction_snaps_and_wraps():
     assert ccw_correction(450.0) == 90
 
 
-def test_crawl_to_cpl_negates():
+def test_naming_rule_to_cpl_negates():
     """The crawl table's 90 is the CPL's 270; 0 and 180 are their own negatives."""
-    assert [crawl_to_cpl(a) for a in (0, 90, 180, 270)] == [0, 270, 180, 90]
+    assert [naming_rule_to_cpl(a) for a in (0, 90, 180, 270)] == [0, 270, 180, 90]
 
 
 def test_mirror_box_flips_y():

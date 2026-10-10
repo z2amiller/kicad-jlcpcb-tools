@@ -213,7 +213,7 @@ def ccw_correction(math_rotation_deg: float) -> int:
     return (round(math_rotation_deg / 90.0) * 90) % 360
 
 
-def crawl_to_cpl(rotation: int) -> int:
+def naming_rule_to_cpl(rotation: int) -> int:
     """Convert a crawl-table rotation (the (family, token) table's sense) to the CPL's.
 
     The crawler's table and ``tools/jlcfootprint/sweep_crawl.py`` count the turn that brings

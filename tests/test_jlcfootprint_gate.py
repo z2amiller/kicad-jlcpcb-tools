@@ -9,8 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 BOARDS = ROOT / "tests" / "fixtures" / "jlcfootprint" / "boards"
 BOARD = BOARDS / "corner_case" / "corner_case.kicad_pcb"
 TRUTH = ROOT / "tests" / "fixtures" / "jlcfootprint" / "truth.csv"
-BOARD_M3 = BOARDS / "corner_case_m3" / "corner_case_m3.kicad_pcb"
-TRUTH_M3 = ROOT / "tests" / "fixtures" / "jlcfootprint" / "truth_m3.csv"
+BOARD_FUNCTIONS_AND_MARKS = (
+    BOARDS / "pin_functions_and_marks" / "pin_functions_and_marks.kicad_pcb"
+)
+TRUTH_FUNCTIONS_AND_MARKS = (
+    ROOT / "tests" / "fixtures" / "jlcfootprint" / "truth_pin_functions_and_marks.csv"
+)
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
 PRO_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda_pro"
 
@@ -67,13 +71,20 @@ def test_corner_case_board_matches_jlc_from_the_pro_fixtures():
     }
 
 
-def test_m3_board_matches_jlc_from_the_pro_fixtures():
+def test_pin_functions_and_marks_board_matches_jlc_from_the_pro_fixtures():
     """The M3 board (spec 16.6) reproduces its truth: function pairing, the drawings' marks, the body caveat."""
     validator = load_validator()
-    rows = validator.evaluate(BOARD_M3, FIXTURES, pro_fixtures=PRO_FIXTURES)
-    truth = validator.load_truth(TRUTH_M3)
+    rows = validator.evaluate(
+        BOARD_FUNCTIONS_AND_MARKS, FIXTURES, pro_fixtures=PRO_FIXTURES
+    )
+    truth = validator.load_truth(TRUTH_FUNCTIONS_AND_MARKS)
     assert len(truth) == 16  # C8 (C1969735) settled by JLC's preview on 2026-09-17
-    assert validator.compare(rows, truth, validator.load_truth_origins(TRUTH_M3)) == []
+    assert (
+        validator.compare(
+            rows, truth, validator.load_truth_origins(TRUTH_FUNCTIONS_AND_MARKS)
+        )
+        == []
+    )
     by_reference = {row["reference"]: row["verdict"] for row in rows}
     assert all(verdict is not None for verdict in by_reference.values())
     assert (

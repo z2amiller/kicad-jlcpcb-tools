@@ -28,7 +28,7 @@ from .fit import (
     pair_by_name,
     shape_alignment,
 )
-from .geometry import Pad, ccw_correction, crawl_to_cpl, named_pads
+from .geometry import Pad, ccw_correction, named_pads, naming_rule_to_cpl
 from .naming import parse_package_name
 from .polarity import (
     CONVENTION,
@@ -667,7 +667,7 @@ def resolve(
     kind = part_kind(package_name, kicad_footprint_name, kicad_pads, symbol_pins, marks)
     parsed = parse_package_name(package_name, True if kind == "diode" else None)
     if parsed.rotation_source == "naming_rule":
-        verdict.name_rotation = crawl_to_cpl(parsed.rotation_correction)
+        verdict.name_rotation = naming_rule_to_cpl(parsed.rotation_correction)
     if min(len(kicad_named), len(jlc_named)) < 2:
         return verdict.unresolved("unknown", "no_data", SINGLE_PAD_NOTE)
     # A polarized kind (a drawn + among its reasons) or an FD/RD token sends a two-pad
