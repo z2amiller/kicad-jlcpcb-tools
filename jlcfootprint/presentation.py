@@ -562,6 +562,15 @@ def banner(detail: PartDetail) -> tuple:
     return (state, text, cpl_sentence(detail))
 
 
-def describe_board_estimate(parts: int, seconds: float) -> str:
-    """Render a board-wide fetch as the confirmation quotes it: "66 parts, about 90 s"."""
+def describe_board_estimate(parts: int, seconds: float, other_variants: int = 0) -> str:
+    """Render a board-wide fetch as the confirmation quotes it: "66 parts, about 90 s".
+
+    On a board with variants the other variants' part numbers are fetched too, and the
+    line says how many (spec 18.3): "66 part(s) and 12 more for other variants, about 2 min".
+    """
+    if other_variants:
+        return (
+            f"{parts} part(s) and {other_variants} more for other variants, "
+            f"about {describe_seconds(seconds)}"
+        )
     return f"{parts} part(s), about {describe_seconds(seconds)}"
