@@ -2,13 +2,15 @@
 
 "Does not fit" first, then the applied rotations with caveated fits marked, then
 the pin-1 marker warnings, then the unresolved parts.  Pure formatting over what
-the CPL path recorded for each placed part, so the dialog in the plugin only
-shows text.
+the CPL path recorded for each placed part, so the plugin only logs the lines and
+asks before writing when :func:`raw_angle_reason` names a part.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from .resolver import SINGLE_PAD_NOTE
 
 
 @dataclass
@@ -41,7 +43,7 @@ class CplRotation:
 
 @dataclass
 class GenerateSummary:
-    """The groups of the summary dialog.
+    """The groups of the rotation summary.
 
     ``red`` holds the parts the check found not to fit (the raw angle emitted);
     ``unresolved`` the parts it could not judge: unknown, pending, no LCSC.
@@ -117,38 +119,81 @@ def _reason(row: CplRotation) -> str:
     )
 
 
-def format_summary(summary: GenerateSummary) -> str:
-    """Render the groups as the dialog shows them, worst first."""
-    lines: list[str] = []
+def raw_angle_reason(row: CplRotation) -> str | None:
+    """Return why the CPL emits this part at KiCad's raw angle against the check, or None.
+
+    A part counts when it has an LCSC number and keeps the raw angle because the
+    check refused it (it does not fit, or EasyEDA's data contradicts itself), could
+    not decide it (no data, polarity unknown, never checked), was still being
+    fetched when generation went on, or now places another part than the one the
+    check judged.  An explicit override replaces the raw angle, so a part carrying
+    one never counts; a part whose LCSC changed is emitted raw whatever the old
+    part's override says, so it still does.  Parts without an LCSC and parts the
+    check placed are never named, and neither is an unknown part the resolver
+    left undecided because a side has fewer than two named pads
+    (``SINGLE_PAD_NOTE``): a one-pad part's angle rarely matters, and the log
+    still lists it.  The resolver records that reason only as its note, so the
+    note is matched whole.
+    """
+    if not row.lcsc or row.correction is not None:
+        return None
+    if row.status == "lcsc-mismatch":
+        return "part number changed since it was checked"
+    if row.pending:
+        return "still fetching"
+    if row.status == "red":
+        return "EasyEDA data inconsistent" if row.fit == "no_data" else "does not fit"
+    if row.status == "unknown":
+        return None if SINGLE_PAD_NOTE in row.note.split("; ") else "unknown"
+    if row.status == "no-verdict":
+        return "not checked"
+    return None
+
+
+def summary_lines(summary: GenerateSummary) -> list[tuple[CplRotation | None, str]]:
+    """Return the summary's lines worst first, each with the row it lists (None for headers)."""
+    lines: list[tuple[CplRotation | None, str]] = []
     differs = {id(row) for row in summary.differs_from_legacy}
     if summary.exact_origin:
         # With the setting on, say how the positions were split before anything
         # else, because that is what changed about this CPL (spec 17.4).
         lines.append(
-            f"Positions: {len(summary.at_origin)} at JLC's package origin, "
-            f"{len(summary.at_pad_box)} at the pad-box centre"
+            (
+                None,
+                f"Positions: {len(summary.at_origin)} at JLC's package origin, "
+                f"{len(summary.at_pad_box)} at the pad-box centre",
+            )
         )
-        lines.append("")
-    lines.append(f"Does not fit ({len(summary.red)})")
+        lines.append((None, ""))
+    lines.append((None, f"Does not fit ({len(summary.red)})"))
     for row in summary.red:
         lines.append(
-            f"  {row.reference:<8} {row.lcsc:<10} {row.footprint}: "
-            f"{row.emitted:g}° raw ({_reason(row)})"
+            (
+                row,
+                f"  {row.reference:<8} {row.lcsc:<10} {row.footprint}: "
+                f"{row.emitted:g}° raw ({_reason(row)})",
+            )
         )
-    lines.append("")
-    lines.append(f"Applied rotations ({len(summary.applied)})")
+    lines.append((None, ""))
+    lines.append((None, f"Applied rotations ({len(summary.applied)})"))
     if summary.applied:
         if summary.legacy_available:
             lines.append(
-                "  * marks a value the correction rules would have set differently"
-                " (the migration triage)"
+                (
+                    None,
+                    "  * marks a value the correction rules would have set differently"
+                    " (the migration triage)",
+                )
             )
         else:
-            lines.append("  (correction rules unavailable; no comparison)")
+            lines.append((None, "  (correction rules unavailable; no comparison)"))
         if summary.caveated:
             lines.append(
-                "  ! marks a part whose JLC body is larger than the KiCad courtyard;"
-                " check the preview"
+                (
+                    None,
+                    "  ! marks a part whose JLC body is larger than the KiCad courtyard;"
+                    " check the preview",
+                )
             )
     for row in summary.applied:
         mark = "*" if summary.legacy_available and id(row) in differs else " "
@@ -164,21 +209,35 @@ def format_summary(summary: GenerateSummary) -> str:
             else ""
         )
         lines.append(
-            f"{mark} {row.reference:<8} {row.lcsc:<10} {row.footprint}: "
-            f"{row.raw:g}° -> {row.emitted:g}° ({source} {int(row.correction):+d}°{legacy}){caveat}"
+            (
+                row,
+                f"{mark} {row.reference:<8} {row.lcsc:<10} {row.footprint}: "
+                f"{row.raw:g}° -> {row.emitted:g}° ({source} {int(row.correction):+d}°{legacy}){caveat}",
+            )
         )
-    lines.append("")
-    lines.append(f"JLC pin-1 marker will look wrong ({len(summary.yellow)})")
+    lines.append((None, ""))
+    lines.append((None, f"JLC pin-1 marker will look wrong ({len(summary.yellow)})"))
     for row in summary.yellow:
         lines.append(
-            f"  {row.reference:<8} {row.lcsc:<10} {row.footprint}: numbering difference, "
-            "not a rotation error; do not renumber the footprint"
+            (
+                row,
+                f"  {row.reference:<8} {row.lcsc:<10} {row.footprint}: numbering difference, "
+                "not a rotation error; do not renumber the footprint",
+            )
         )
-    lines.append("")
-    lines.append(f"Unresolved, raw angle emitted ({len(summary.unresolved)})")
+    lines.append((None, ""))
+    lines.append((None, f"Unresolved, raw angle emitted ({len(summary.unresolved)})"))
     for row in summary.unresolved:
         lines.append(
-            f"  {row.reference:<8} {row.lcsc or '-':<10} {row.footprint}: "
-            f"{row.emitted:g}° ({_reason(row)})"
+            (
+                row,
+                f"  {row.reference:<8} {row.lcsc or '-':<10} {row.footprint}: "
+                f"{row.emitted:g}° ({_reason(row)})",
+            )
         )
-    return "\n".join(lines)
+    return lines
+
+
+def format_summary(summary: GenerateSummary) -> str:
+    """Render the summary as text, worst first: the lines the plugin logs."""
+    return "\n".join(text for _row, text in summary_lines(summary))

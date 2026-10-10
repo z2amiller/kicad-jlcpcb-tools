@@ -3,7 +3,7 @@
 The check reads the output variant through upstream's session, the window hands
 its decisions to upstream's variant ``begin_generation``, every CPL row takes the
 decision for the part that variant orders (its rotation and, with the setting on,
-JLC's package origin), and the rotation summary that follows is built from the
+JLC's package origin), and the rotation summary and its prompt are built from the
 same rows.  The facade and the exporter run for real; only the board and the
 window are doubles.
 """
@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from jlcfootprint.report import format_summary, summarise
+from jlcfootprint.report import format_summary, raw_angle_reason, summarise
 
 from .fabrication_test_support import Point, make_footprint, modules
 from .jlc_footprint_wx_support import facade_symbols, load_facade, load_window
@@ -119,6 +119,7 @@ def test_each_output_variant_generates_with_the_check_s_decisions_for_its_part(
     (row,) = report
     assert (row.lcsc, row.source, row.pending) == ("C9", "raw", True)
     assert "Unresolved, raw angle emitted (1)" in format_summary(summarise(report))
+    assert raw_angle_reason(row) == "still fetching"
 
 
 def test_the_package_origin_reaches_a_variant_cpl_from_the_check(
@@ -144,8 +145,8 @@ def test_the_package_origin_reaches_a_variant_cpl_from_the_check(
     assert placed[0][3:5] != plain[0][3:5]
 
 
-def test_a_variant_generation_shows_the_rotation_summary():
-    """The summary dialog follows a variant generation too (spec 18.4)."""
+def test_a_variant_generation_asks_before_writing():
+    """The summary and its prompt come before a variant generation writes, too (spec 18.4)."""
     facade = facade_symbols()
     module = load_window(
         _PACKAGE,
@@ -166,6 +167,6 @@ def test_a_variant_generation_shows_the_rotation_summary():
     module.JLCPCBTools.generate_fabrication_data(window)
 
     check.scan_board.assert_called_once_with()
-    facade["show_generate_summary"].assert_called_once_with(
+    facade["confirm_cpl_rotations"].assert_called_once_with(
         window, window.fabrication.rotation_report, True
     )

@@ -1,9 +1,13 @@
-"""Generate-time behaviour of the JLC footprint check: the wait, the summary and the Rotation column."""
+"""Generate-time behaviour of the JLC footprint check: the wait, the summary and its prompt, the Rotation column."""
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+from jlcfootprint.report import format_summary, summarise
+from jlcfootprint.resolver import SINGLE_PAD_NOTE
 
 from .jlc_footprint_wx_support import (
     check_window,
@@ -48,16 +52,50 @@ class FakeProgressDialog:
         self.destroyed = True
 
 
+class FakeMessageDialog:
+    """Records the question and its button labels; answers from ``answer``."""
+
+    instances: list = []
+    answer = None
+
+    def __init__(self, parent, message, caption, style):
+        self.parent, self.message, self.caption, self.style = (
+            parent,
+            message,
+            caption,
+            style,
+        )
+        self.labels = None
+        self.destroyed = False
+        FakeMessageDialog.instances.append(self)
+
+    def SetYesNoLabels(self, yes, no):
+        """Record the two button labels."""
+        self.labels = (yes, no)
+        return True
+
+    def ShowModal(self):
+        """Return the scripted answer."""
+        return FakeMessageDialog.answer
+
+    def Destroy(self):
+        """Note the dialog was destroyed."""
+        self.destroyed = True
+
+
 @pytest.fixture
 def facade():
     """Load the real facade with fake dialogs."""
     FakeProgressDialog.instances = []
     FakeProgressDialog.script = []
+    FakeMessageDialog.instances = []
     with load_facade(
         f"{_PACKAGE}_facade",
         ProgressDialog=FakeProgressDialog,
+        MessageDialog=FakeMessageDialog,
         MilliSleep=MagicMock(),
     ) as loaded:
+        FakeMessageDialog.answer = loaded.wx.ID_YES
         yield loaded.module, loaded.wx
 
 
@@ -106,44 +144,118 @@ def test_wait_stops_on_cancel_or_a_tripped_breaker(facade):
     assert FakeProgressDialog.instances[-1].updates == []
 
 
-def test_summary_dialog_shows_the_formatted_text(facade, monkeypatch):
-    """The summary text is built from the report rows and shown modally."""
-    module, _ = facade
-    shown = []
+def _row(module, reference, status, correction=None, **fields):
+    """Return one CPL rotation row: derived when ``correction`` is set, else raw."""
+    source = fields.pop("source", "derived" if correction is not None else "raw")
+    return module.CplRotation(
+        reference,
+        fields.pop("lcsc", "C1"),
+        "SOT-23",
+        "v",
+        0,
+        0 if correction is None else correction,
+        correction,
+        source,
+        status,
+        None,
+        fields.pop("fit", "fits" if status in ("green", "yellow") else "count"),
+        **fields,
+    )
 
-    class Dialog:
-        def __init__(self, parent, text):
-            shown.append((parent, text))
 
-        def ShowModal(self):
-            return 0
-
-        def Destroy(self):
-            shown.append("destroyed")
-
-    monkeypatch.setattr(module, "GenerateSummaryDialog", Dialog)
-    rows = [
-        module.CplRotation(
-            "Q1",
-            "C1",
-            "SOT-23",
-            "v",
-            0,
-            180,
-            180,
-            "derived",
-            "green",
-            None,
-            "fits",
-            legacy_correction=0,
-        )
+def _records(caplog, level):
+    """Return the facade's messages logged at exactly ``level``."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == level and record.name.endswith("jlc_footprint_check")
     ]
-    text = module.show_generate_summary("window", rows, True)
-    assert shown[0][0] == "window"
-    assert shown[0][1] == text
-    assert shown[-1] == "destroyed"
-    assert text.startswith("Does not fit (0)\n\nApplied rotations (1)")
-    assert "* Q1" in text
+
+
+def test_a_clean_cpl_logs_the_summary_and_asks_nothing(facade, caplog):
+    """Every part placed by the check: the summary goes to the log at info, no prompt."""
+    module, _ = facade
+    rows = [
+        _row(module, "Q1", "green", 180, legacy_correction=0),
+        _row(module, "R1", "no-lcsc", lcsc="", fit=None),
+    ]
+    with caplog.at_level(logging.INFO):
+        assert module.confirm_cpl_rotations(object(), rows, True) is True
+    assert FakeMessageDialog.instances == []
+    assert _records(caplog, logging.WARNING) == []
+    info = _records(caplog, logging.INFO)
+    assert info[0] == "JLC footprint check: rotations in the CPL"
+    assert info[1:] == [
+        line for line in format_summary(summarise(rows, True)).splitlines() if line
+    ]
+    assert any(line.startswith("* Q1") for line in info)
+
+
+def test_parts_emitted_raw_against_the_check_are_warned_about_and_asked_for(
+    facade, caplog
+):
+    """Red, unknown, still fetching and part-number-changed parts prompt; overrides, one-pad and no-LCSC rows do not."""
+    module, wx = facade
+    rows = [
+        _row(module, "Q1", "green", 180),
+        _row(module, "U3", "red", lcsc="C3"),
+        _row(module, "U4", "red", lcsc="C4", fit="no_data"),
+        _row(module, "U5", "unknown", lcsc="C5", fit="no_data"),
+        _row(module, "TP1", "unknown", lcsc="C6", fit="no_data", note=SINGLE_PAD_NOTE),
+        _row(module, "Q7", "pending", lcsc="C7", fit=None, pending=True),
+        _row(module, "D2", "lcsc-mismatch", lcsc="C9", fit=None),
+        _row(module, "U9", "red", 90, source="override", lcsc="C10"),
+        _row(module, "R1", "no-lcsc", lcsc="", fit=None),
+    ]
+    with caplog.at_level(logging.INFO):
+        assert module.confirm_cpl_rotations(object(), rows, True) is True
+    warned = _records(caplog, logging.WARNING)
+    assert [line.split()[0] for line in warned[:-1]] == ["U3", "U4", "U5", "Q7", "D2"]
+    assert any(
+        line.lstrip().startswith("TP1") for line in _records(caplog, logging.INFO)
+    )
+    assert warned[-1] == (
+        "JLC footprint check: 5 part(s) at KiCad's raw angle, user chose to continue export"
+    )
+    (dialog,) = FakeMessageDialog.instances
+    assert dialog.caption == "JLC footprint check"
+    assert dialog.message == (
+        "5 part(s) would be placed at KiCad's raw angle because the JLC footprint "
+        "check did not accept their rotation:\n\n"
+        "  U3  C3  does not fit\n"
+        "  U4  C4  EasyEDA data inconsistent\n"
+        "  U5  C5  unknown\n"
+        "  Q7  C7  still fetching\n"
+        "  D2  C9  part number changed since it was checked\n\n"
+        "Details are in the log. Continue?"
+    )
+    assert dialog.labels == ("Continue Anyway", "Cancel Export")
+    assert dialog.style & wx.NO_DEFAULT and dialog.style & wx.ICON_WARNING
+    assert dialog.destroyed
+
+
+def test_cancel_at_the_prompt_returns_false(facade, caplog):
+    """Cancel Export answers False, so the window stops before writing; the choice is logged."""
+    module, wx = facade
+    FakeMessageDialog.answer = wx.ID_NO
+    with caplog.at_level(logging.INFO):
+        assert (
+            module.confirm_cpl_rotations(object(), [_row(module, "U3", "red")], True)
+            is False
+        )
+    assert _records(caplog, logging.WARNING)[-1].endswith("user chose to stop export")
+    assert FakeMessageDialog.instances[0].destroyed
+
+
+def test_the_prompt_names_ten_parts_and_counts_the_rest(facade):
+    """A long list is cut at ten references; the log carries every one."""
+    module, _ = facade
+    rows = [_row(module, f"U{index}", "red") for index in range(1, 13)]
+    module.confirm_cpl_rotations(object(), rows, True)
+    listed = FakeMessageDialog.instances[0].message.split("\n\n")[1].splitlines()
+    assert listed[0] == "  U1  C1  does not fit"
+    assert listed[9] == "  U10  C1  does not fit"
+    assert listed[10:] == ["  and 2 more"]
 
 
 # ---------------------------------------------------------------------------
@@ -228,8 +340,8 @@ def _generate_window(module, check, corrections=()):
     return window, steps
 
 
-def test_generate_waits_collects_decisions_and_shows_the_summary(mainwindow):
-    """With the check on, the CPL takes the decisions and the summary follows the CPL write."""
+def test_generate_waits_collects_decisions_and_asks_before_writing(mainwindow):
+    """With the check on, the CPL takes the decisions and the summary comes before any write."""
     module, facade = mainwindow
     check = SimpleNamespace(
         decisions=MagicMock(return_value={"R1": "decision"}), scan_board=MagicMock()
@@ -246,11 +358,11 @@ def test_generate_waits_collects_decisions_and_shows_the_summary(mainwindow):
     window.fabrication.begin_ordinary_generation.assert_called_once_with(
         ("rule",), decisions={"R1": "decision"}
     )
-    facade["show_generate_summary"].assert_called_once_with(window, ["row"], True)
-    assert steps.index("Summarising JLC footprint rotations") > steps.index(
-        "Generating BOM"
-    )
-    assert steps[-1] == "Summarising JLC footprint rotations"
+    facade["confirm_cpl_rotations"].assert_called_once_with(window, ["row"], True)
+    summary = steps.index("Summarising JLC footprint rotations")
+    assert steps[summary - 1] == "Preparing placement data"
+    assert steps[summary + 1] == "Checking part consistency"
+    assert steps[-1] == "Generating BOM"
     assert "Validating corrections" not in steps
     window.update_correction_status.assert_called_once()
     window.generate_button.Enable.assert_any_call(True)
@@ -273,7 +385,7 @@ def test_generate_continues_raw_after_a_cancelled_wait_and_without_rules(mainwin
     window.fabrication.begin_ordinary_generation.assert_called_once_with(
         (), decisions={}
     )
-    facade["show_generate_summary"].assert_called_once_with(window, ["row"], False)
+    facade["confirm_cpl_rotations"].assert_called_once_with(window, ["row"], False)
     module.wx.MessageBox.assert_not_called()
 
 
@@ -290,7 +402,9 @@ def test_generate_takes_the_legacy_path_when_the_check_is_off(mainwindow):
         ("rule",), decisions=None
     )
     facade["wait_for_pending_fetches"].assert_not_called()
-    facade["show_generate_summary"].assert_not_called()
+    facade["confirm_cpl_rotations"].assert_not_called()
+    assert "Summarising JLC footprint rotations" not in steps
+    window.fabrication.write_cpl.assert_called_once()
 
 
 def test_generate_hands_the_decisions_to_upstream_s_variant_controller(mainwindow):
@@ -311,6 +425,44 @@ def test_generate_hands_the_decisions_to_upstream_s_variant_controller(mainwindo
     window.fabrication.begin_ordinary_generation.assert_not_called()
     controller.end_generation.assert_called_once_with()
     module.wx.MessageBox.assert_not_called()
+
+
+@pytest.mark.parametrize("variant", [False, True], ids=["ordinary", "variant"])
+def test_cancel_at_the_rotation_prompt_writes_no_file(mainwindow, variant):
+    """Cancel Export stops both generation paths before anything is filled, saved or written."""
+    module, facade = mainwindow
+    facade["confirm_cpl_rotations"].return_value = False
+    check = SimpleNamespace(
+        decisions=MagicMock(return_value={"R1": "decision"}), scan_board=MagicMock()
+    )
+    window, steps = _generate_window(module, check, corrections=("rule",))
+    if variant:
+        controller = window._variant_controller = MagicMock()
+
+    module.JLCPCBTools.generate_fabrication_data(window)
+
+    facade["confirm_cpl_rotations"].assert_called_once_with(window, ["row"], True)
+    assert steps[-1] == "Summarising JLC footprint rotations"
+    window.report_generation_step.assert_any_call(
+        "Export stopped by the JLC footprint check"
+    )
+    fabrication = window.fabrication
+    for written in (
+        fabrication.fill_zones,
+        fabrication.generate_geber,
+        fabrication.generate_excellon,
+        fabrication.zip_gerber_excellon,
+        fabrication.write_cpl,
+        fabrication.generate_bom,
+        window.run_drc_before_gerber_export,
+        window.run_generate_hook,
+        window.store.increment_generation_count,
+    ):
+        written.assert_not_called()
+    if variant:
+        controller.end_generation.assert_called_once_with()
+    else:
+        fabrication.end_ordinary_generation.assert_called_once_with()
 
 
 def _column_window(module, check, enabled=True):
@@ -391,17 +543,10 @@ def test_result_event_repaints_the_checked_references(mainwindow, monkeypatch):
 
 
 def test_the_summary_reports_the_position_split_from_the_window_s_settings(
-    facade, monkeypatch
+    facade, caplog
 ):
     """Spec 17.4: the window carries the setting, so no generate step has to pass it."""
     module, _ = facade
-    monkeypatch.setattr(
-        module,
-        "GenerateSummaryDialog",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            ShowModal=lambda: 0, Destroy=lambda: None
-        ),
-    )
     rows = [
         module.CplRotation(
             "Q1", "C1", "SOT-23", "v", 0, 180, 180, "derived", "green", None, "fits"
@@ -411,25 +556,19 @@ def test_the_summary_reports_the_position_split_from_the_window_s_settings(
     rows[0].position_source = "origin"
     window = SimpleNamespace(settings={"jlcfootprint": {"exact_origin": True}})
 
-    text = module.show_generate_summary(window, rows, True)
+    with caplog.at_level(logging.INFO):
+        module.confirm_cpl_rotations(window, rows, True)
 
-    assert text.startswith(
-        "Positions: 1 at JLC's package origin, 1 at the pad-box centre\n\n"
+    assert _records(caplog, logging.INFO)[1] == (
+        "Positions: 1 at JLC's package origin, 1 at the pad-box centre"
     )
     assert module.is_exact_origin_enabled(window.settings) is True
     assert module.is_exact_origin_enabled({}) is False
 
 
-def test_a_window_carrying_no_settings_gets_m3_s_summary(facade, monkeypatch):
+def test_a_window_carrying_no_settings_logs_no_position_split(facade, caplog):
     """A window object without the attribute reads the setting off, not on."""
     module, _ = facade
-    monkeypatch.setattr(
-        module,
-        "GenerateSummaryDialog",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            ShowModal=lambda: 0, Destroy=lambda: None
-        ),
-    )
     rows = [
         module.CplRotation(
             "Q1", "C1", "SOT-23", "v", 0, 180, 180, "derived", "green", None, "fits"
@@ -437,6 +576,7 @@ def test_a_window_carrying_no_settings_gets_m3_s_summary(facade, monkeypatch):
     ]
     rows[0].position_source = "origin"
 
-    assert module.show_generate_summary(object(), rows, True).startswith(
-        "Does not fit (0)"
-    )
+    with caplog.at_level(logging.INFO):
+        module.confirm_cpl_rotations(object(), rows, True)
+
+    assert _records(caplog, logging.INFO)[1] == "Does not fit (0)"

@@ -1,6 +1,16 @@
 """Tests for the generate-time rotation summary."""
 
-from jlcfootprint.report import CplRotation, format_summary, summarise
+import pytest
+
+from jlcfootprint.geometry import Pad
+from jlcfootprint.report import (
+    CplRotation,
+    format_summary,
+    raw_angle_reason,
+    summarise,
+    summary_lines,
+)
+from jlcfootprint.resolver import CHECKERBOARD_NOTE, SINGLE_PAD_NOTE, resolve
 
 
 def _rows():
@@ -212,3 +222,150 @@ def test_the_position_counts_cover_every_placed_part_once():
 
     assert len(summary.at_origin) + len(summary.at_pad_box) == len(rows)
     assert len(summary.at_pad_box) == 1
+
+
+def test_raw_angle_reasons_name_what_the_check_refused_or_could_not_decide():
+    """Red, pending and never-checked parts emitted raw are named; overrides, derived and no-LCSC rows are not."""
+    assert {row.reference: raw_angle_reason(row) for row in _rows()} == {
+        "Q1": None,
+        "D1": None,
+        "U1": None,
+        "D2": "does not fit",
+        "R1": None,
+        "C1": "still fetching",
+        "C2": "not checked",
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "fit", "pending", "reason"),
+    [
+        ("red", "pitch", False, "does not fit"),
+        ("red", "numbering", False, "does not fit"),
+        ("red", "no_data", False, "EasyEDA data inconsistent"),
+        ("unknown", "no_data", False, "unknown"),
+        ("pending", None, True, "still fetching"),
+        ("unknown", "no_data", True, "still fetching"),
+        ("lcsc-mismatch", None, False, "part number changed since it was checked"),
+        ("green", "fits", False, None),
+    ],
+)
+def test_a_raw_row_s_reason_follows_its_status(status, fit, pending, reason):
+    """Each way the CPL keeps the raw angle against the check reads as one short reason."""
+    row = CplRotation(
+        "U1", "C1", "SOT-23", "v", 0, 0, None, "raw", status, None, fit, pending=pending
+    )
+    assert raw_angle_reason(row) == reason
+
+
+@pytest.mark.parametrize(
+    ("note", "reason"),
+    [
+        (SINGLE_PAD_NOTE, None),
+        (f"an earlier note; {SINGLE_PAD_NOTE}", None),
+        ("polarity unknown; check in JLC preview", "unknown"),
+        (CHECKERBOARD_NOTE, "unknown"),
+        ("EasyEDA fetch failed; will retry", "unknown"),
+        ("two-terminal part on a footprint whose pads do not pair with it", "unknown"),
+        ("fewer than two matching pad names", "unknown"),
+        ("", "unknown"),
+    ],
+    ids=[
+        "single_pad",
+        "single_pad_among_notes",
+        "polarity_unknown",
+        "no_easyeda_data",
+        "fetch_failed",
+        "pads_do_not_pair",
+        "names_do_not_match",
+        "no_note",
+    ],
+)
+def test_an_unknown_part_is_asked_about_unless_a_side_has_fewer_than_two_named_pads(
+    note, reason
+):
+    """A one-pad part's angle rarely matters, so it is left to the log; every other undecided part is named."""
+    row = CplRotation(
+        "U1",
+        "C1",
+        "SOT-23",
+        "v",
+        0,
+        0,
+        None,
+        "raw",
+        "unknown",
+        None,
+        "no_data",
+        note=note,
+    )
+    assert raw_angle_reason(row) == reason
+
+
+def test_the_question_reads_the_single_pad_reason_the_resolver_records():
+    """A one-pad part's verdict carries the note the question leaves out; a part EasyEDA has no data for is named."""
+    pad = [Pad("1", 0.0, 0.0, 1.0, 1.0)]
+    single = resolve(pad, "TestPoint:TestPoint_Pad_D1.0mm", "ok", "TP-SMD", pad, [])
+    missing = resolve(pad * 2, "Package:Device", "none", "", [], [])
+    rows = [
+        CplRotation(
+            reference,
+            "C1",
+            "fp",
+            "v",
+            0,
+            0,
+            None,
+            "raw",
+            verdict.status,
+            None,
+            verdict.fit,
+            note=verdict.note_text,
+        )
+        for reference, verdict in (("TP1", single), ("U1", missing))
+    ]
+    assert (single.status, single.notes) == ("unknown", [SINGLE_PAD_NOTE])
+    assert [raw_angle_reason(row) for row in rows] == [None, "unknown"]
+
+
+@pytest.mark.parametrize("status", ["no-lcsc", "no-verdict", "lcsc-mismatch"])
+def test_a_part_without_an_lcsc_is_never_named(status):
+    """A part with no LCSC number is placed raw on purpose, never on the check's account."""
+    row = CplRotation("R1", "", "R_0603", "10k", 0, 0, None, "raw", status, None, None)
+    assert raw_angle_reason(row) is None
+
+
+def test_a_row_the_check_turned_is_never_named_whatever_its_status():
+    """An override on a red, unknown or pending part replaces the raw angle, so it is not asked about."""
+    for status, pending in (("red", False), ("unknown", False), ("pending", True)):
+        row = CplRotation(
+            "U1",
+            "C1",
+            "SOT-23",
+            "v",
+            0,
+            90,
+            90,
+            "override",
+            status,
+            None,
+            "count",
+            pending=pending,
+        )
+        assert raw_angle_reason(row) is None
+
+
+def test_every_part_line_carries_its_row_and_headers_carry_none():
+    """The log picks each line's level from its row, so a part's line must point at it."""
+    rows = _rows()
+    lines = summary_lines(summarise(rows))
+    assert "\n".join(text for _row, text in lines) == format_summary(summarise(rows))
+    by_row = {}
+    for row, text in lines:
+        if row is None:
+            assert not text.startswith(("  D2", "  C1", "  C2"))
+        else:
+            assert row.reference in text
+            by_row.setdefault(row.reference, []).append(text)
+    assert sorted(by_row) == sorted(row.reference for row in rows)
+    assert len(by_row["D1"]) == 2  # applied and the pin-1 warning

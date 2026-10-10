@@ -43,9 +43,9 @@ def load_facade(package: str, **wx_symbols: Any) -> Iterator[SimpleNamespace]:
     """Load the real facade under a fake wx, with the real events module beside it.
 
     The events module is loaded rather than stubbed so its event names cannot drift
-    out of step with a copy; ``wx_symbols`` adds to the two every caller needs.
+    out of step with a copy; ``wx_symbols`` adds to the ``PostEvent`` every caller needs.
     """
-    stubs = wx_stubs(PostEvent=MagicMock(), Dialog=type("Dialog", (), {}), **wx_symbols)
+    stubs = wx_stubs(PostEvent=MagicMock(), **wx_symbols)
     stubs.update(package_stubs(package))
     stubs[f"{package}.events"] = load(package, "events", stubs)
     with load_siblings(package, ("jlc_footprint_check",), stubs) as loaded:
@@ -64,12 +64,12 @@ def facade_symbols(**overrides: Any) -> dict:
     """
     symbols = {
         "clear_cache": MagicMock(return_value=0),
+        "confirm_cpl_rotations": MagicMock(return_value=True),
         "create_footprint_check": MagicMock(),
         "is_footprint_check_enabled": jlcfootprint_enabled,
         "recheck_board": MagicMock(return_value=0),
         "refetch_references": MagicMock(return_value=0),
         "refresh_board_data": MagicMock(return_value=0),
-        "show_generate_summary": MagicMock(return_value="summary"),
         "wait_for_pending_fetches": MagicMock(return_value=True),
     }
     symbols.update(overrides)

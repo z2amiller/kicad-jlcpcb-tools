@@ -107,8 +107,8 @@ from .helpers import (
 )
 from . import jlc_footprint_window
 from .jlc_footprint_check import (
+    confirm_cpl_rotations,
     is_footprint_check_enabled,
-    show_generate_summary,
     wait_for_pending_fetches,
 )
 from .kicad_drc import DRCViolationCounter
@@ -3222,6 +3222,15 @@ class JLCPCBTools(wx.Frame):
                     corrections,
                 )
                 placements = output.cpl_rows
+            if check is not None and not self.run_generation_step(
+                "Summarising JLC footprint rotations",
+                confirm_cpl_rotations,
+                self,
+                self.fabrication.rotation_report,
+                rules_available,
+            ):
+                self.report_generation_step("Export stopped by the JLC footprint check")
+                return
             layer_selection = self.layer_selection.GetSelection()
             number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
             layer_count = int(number.group(0)) if number else None
@@ -3375,16 +3384,6 @@ class JLCPCBTools(wx.Frame):
                 generation_count=generation_count,
             )
             self.run_generate_hook("post", post_hook_env, allow_continue=False)
-
-            if check is not None:
-                # Last, so a problem showing the summary leaves every file written.
-                self.run_generation_step(
-                    "Summarising JLC footprint rotations",
-                    show_generate_summary,
-                    self,
-                    self.fabrication.rotation_report,
-                    rules_available,
-                )
 
             self.report_generation_step("Fabrication data generation complete")
             self.reset_gauge()

@@ -68,6 +68,9 @@ YELLOW_NOTE = (
 # A non-polar two-pad part whose pads fit one pairing clearly better than the other
 # takes that pairing, a full turn and method ``shape`` (spec 19.4).
 SHAPE_NOTE = "pads fit one way round only"
+# A side with fewer than two named pads (a test point, a one-pad shield or spring)
+# gives no alignment; the generate-time question leaves these parts to the log.
+SINGLE_PAD_NOTE = "fewer than two named pads on one side"
 DRAWING_NOTES = {
     "both": "polarity from the + marks of the symbol and the footprint",
     "footprint": "polarity from the footprint's + mark",
@@ -666,9 +669,7 @@ def resolve(
     if parsed.rotation_source == "naming_rule":
         verdict.name_rotation = crawl_to_cpl(parsed.rotation_correction)
     if min(len(kicad_named), len(jlc_named)) < 2:
-        return verdict.unresolved(
-            "unknown", "no_data", "fewer than two named pads on one side"
-        )
+        return verdict.unresolved("unknown", "no_data", SINGLE_PAD_NOTE)
     # A polarized kind (a drawn + among its reasons) or an FD/RD token sends a two-pad
     # part to alignment by meaning (spec 7.4, 19.3).
     marked = kind != "other" or token_reference_side(package_name, "positive") in (

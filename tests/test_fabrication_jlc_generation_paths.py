@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from jlcfootprint.report import raw_angle_reason
 from tests.fabrication_test_support import (
     Point,
     make_footprint,
@@ -71,6 +72,7 @@ def ordinary(modules: SimpleNamespace, tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(
         exporter=modules.fabrication.Fabrication(parent, board),
         corrections=(modules.data.LcscCorrection("C111", 90, (0, 0)),),
+        parts=parts,
     )
 
 
@@ -94,6 +96,48 @@ def test_the_ordinary_generation_hands_the_decisions_to_its_rows(ordinary):
     assert rows == [("R1", 180.0), ("R2", 0.0)]
     assert (report["R1"].source, report["R1"].legacy_correction) == ("derived", 90)
     assert (report["R2"].source, report["R2"].status) == ("raw", "red")
+
+
+def test_the_ordinary_generation_asks_about_a_refused_part_but_not_an_override(
+    ordinary,
+):
+    """A red part emitted raw is named for the prompt; a red part under an override is not."""
+    exporter = ordinary.exporter
+    decisions = {
+        "R1": cpl_decision(270, source="override", status="red", lcsc="C111"),
+        "R2": cpl_decision(None, source="raw", status="red", lcsc="C111"),
+    }
+
+    exporter.begin_ordinary_generation(ordinary.corrections, decisions=decisions)
+    try:
+        report = {row.reference: row for row in exporter.rotation_report}
+    finally:
+        exporter.end_ordinary_generation()
+
+    assert raw_angle_reason(report["R1"]) is None
+    assert raw_angle_reason(report["R2"]) == "does not fit"
+
+
+@pytest.mark.parametrize(("flag", "value"), [("exclude_from_pos", 1), ("is_dnp", True)])
+def test_a_refused_part_the_ordinary_cpl_leaves_out_is_never_asked_about(
+    ordinary, flag, value
+):
+    """An excluded or DNP part gets no CPL row, so it has no report row to name."""
+    ordinary.parts[1][flag] = value
+    exporter = ordinary.exporter
+    refused = {"source": "raw", "status": "red", "lcsc": "C111"}
+    decisions = {
+        "R1": cpl_decision(None, **refused),
+        "R2": cpl_decision(None, **refused),
+    }
+
+    exporter.begin_ordinary_generation(ordinary.corrections, decisions=decisions)
+    try:
+        report = list(exporter.rotation_report)
+    finally:
+        exporter.end_ordinary_generation()
+
+    assert [row.reference for row in report if raw_angle_reason(row)] == ["R1"]
 
 
 def test_the_ordinary_generation_without_decisions_is_upstream_s(ordinary):
@@ -128,6 +172,7 @@ def _variant_rows(
     *,
     lcsc: str = "C999",
     corrections: tuple = (),
+    **changes: Any,
 ) -> tuple[Any, dict[str, Any]]:
     """Run upstream's variant generation of output "A" and return its rows and report."""
     state = State(
@@ -137,6 +182,7 @@ def _variant_rows(
         value="Variant device",
         lcsc=lcsc,
         footprint="Package:Device",
+        **changes,
     )
     snapshot = Snapshot(
         tuple(replace(state, variant_name=name) for name in ("", "A", "B"))
@@ -172,6 +218,39 @@ def test_a_variant_ordering_another_part_keeps_the_raw_angle(variant):
     assert [(row[0], row[5]) for row in rows] == [("R1", 0.0)]
     assert (report["R1"].status, report["R1"].source) == ("lcsc-mismatch", "raw")
     assert "the check saw C123 but the project has C999" in report["R1"].note
+
+
+@pytest.mark.parametrize("source", ["override", "derived"])
+def test_a_variant_ordering_another_part_is_asked_about_even_under_an_override(
+    variant, source
+):
+    """The old part's override or rotation is not this part's: emitted raw, named for the prompt."""
+    rows, report = _variant_rows(
+        variant, {"R1": cpl_decision(90, source=source, lcsc="C123")}
+    )
+
+    assert [(row[0], row[5]) for row in rows] == [("R1", 0.0)]
+    assert raw_angle_reason(report["R1"]) == "part number changed since it was checked"
+    _rows, own = _variant_rows(
+        variant,
+        {"R1": cpl_decision(90, source="override", status="red", lcsc="C999")},
+    )
+    assert raw_angle_reason(own["R1"]) is None
+
+
+@pytest.mark.parametrize(
+    "left_out", [{"pos": False}, {"pop": False}], ids=["pos", "pop"]
+)
+def test_a_refused_part_the_variant_cpl_leaves_out_is_never_asked_about(
+    variant, left_out
+):
+    """A variant part outside the CPL gets no report row, so it has none to name."""
+    refused = cpl_decision(None, source="raw", status="red", lcsc="C999")
+    _rows, placed = _variant_rows(variant, {"R1": refused})
+    rows, report = _variant_rows(variant, {"R1": refused}, **left_out)
+
+    assert raw_angle_reason(placed["R1"]) == "does not fit"
+    assert (rows, report) == ((), {})
 
 
 def test_without_decisions_the_variant_rows_are_upstream_s(variant):

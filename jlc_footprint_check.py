@@ -23,7 +23,13 @@ from .jlcfootprint.cache import FILENAME, Cache
 from .jlcfootprint.controller import FootprintCheck, describe_seconds
 from .jlcfootprint.kicad_adapter import board_parts
 from .jlcfootprint.presentation import describe_board_estimate
-from .jlcfootprint.report import CplRotation, format_summary, summarise
+from .jlcfootprint.report import (
+    CplRotation,
+    GenerateSummary,
+    raw_angle_reason,
+    summarise,
+    summary_lines,
+)
 from .jlcfootprint.verdicts import VerdictStore
 from .jlcfootprint.worker import Buckets
 
@@ -314,45 +320,66 @@ def clear_cache(window: Any, check: Any = None) -> int:
     return counts["parts"]
 
 
-class GenerateSummaryDialog(wx.Dialog):
-    """A scrolled, read-only view of the rotation summary."""
-
-    def __init__(self, parent: Any, text: str) -> None:
-        wx.Dialog.__init__(
-            self,
-            parent,
-            id=wx.ID_ANY,
-            title="JLC footprint check: rotations in the CPL",
-            size=wx.Size(900, 600),
-            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
-        )
-        view = wx.TextCtrl(
-            self,
-            wx.ID_ANY,
-            text,
-            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP,
-        )
-        view.SetFont(wx.Font(wx.FontInfo(10).Family(wx.FONTFAMILY_TELETYPE)))
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(view, 1, wx.ALL | wx.EXPAND, 5)
-        sizer.Add(self.CreateStdDialogButtonSizer(wx.OK), 0, wx.ALL | wx.EXPAND, 5)
-        self.SetSizer(sizer)
+# At most this many parts are named in the prompt before generation writes any
+# file; the log carries every one.
+PROMPT_LIMIT = 10
 
 
-def show_generate_summary(
+def log_rotation_summary(summary: GenerateSummary) -> None:
+    """Log the rotation summary line by line, worst first (spec 8).
+
+    A part the CPL emits at the raw angle against the check
+    (:func:`raw_angle_reason`) is logged as a warning, everything else at info.
+    """
+    logger.info("JLC footprint check: rotations in the CPL")
+    for row, text in summary_lines(summary):
+        if not text:
+            continue
+        warn = row is not None and raw_angle_reason(row) is not None
+        logger.log(logging.WARNING if warn else logging.INFO, "%s", text)
+
+
+def confirm_cpl_rotations(
     window: Any, rows: list[CplRotation], legacy_available: bool
-) -> str:
-    """Show the four-group rotation summary after the CPL is written; return its text.
+) -> bool:
+    """Log the CPL's rotations, then ask before writing if any part goes out raw (spec 8).
 
-    The window's own settings say whether the positions came from JLC's package
-    origin, so the header line can report the split (spec 17.4) without the caller
-    having to pass the setting down through the generate steps.
+    Called once the placements are prepared and before any file is written.  The
+    question comes only when the CPL would place at least one part at KiCad's raw
+    angle because the check refused it or could not decide it; Cancel returns
+    False and the caller stops.  The window's own settings say whether the
+    positions came from JLC's package origin, so the summary can report the split
+    (spec 17.4) without the caller passing the setting down.
     """
     exact_origin = is_exact_origin_enabled(getattr(window, "settings", {}) or {})
-    text = format_summary(summarise(rows, legacy_available, exact_origin))
-    dialog = GenerateSummaryDialog(window, text)
+    log_rotation_summary(summarise(rows, legacy_available, exact_origin))
+    named = [(row, raw_angle_reason(row)) for row in rows]
+    named = [(row, reason) for row, reason in named if reason is not None]
+    if not named:
+        return True
+    listed = [
+        f"  {row.reference}  {row.lcsc}  {reason}"
+        for row, reason in named[:PROMPT_LIMIT]
+    ]
+    if len(named) > PROMPT_LIMIT:
+        listed.append(f"  and {len(named) - PROMPT_LIMIT} more")
+    dialog = wx.MessageDialog(
+        window,
+        f"{len(named)} part(s) would be placed at KiCad's raw angle because the "
+        "JLC footprint check did not accept their rotation:\n\n"
+        + "\n".join(listed)
+        + "\n\nDetails are in the log. Continue?",
+        MESSAGE_TITLE,
+        wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING | wx.CENTER,
+    )
     try:
-        dialog.ShowModal()
+        dialog.SetYesNoLabels("Continue Anyway", "Cancel Export")
+        result = dialog.ShowModal()
     finally:
         dialog.Destroy()
-    return text
+    logger.warning(
+        "JLC footprint check: %d part(s) at KiCad's raw angle, user chose to %s export",
+        len(named),
+        "continue" if result == wx.ID_YES else "stop",
+    )
+    return result == wx.ID_YES
