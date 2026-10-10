@@ -29,7 +29,13 @@ from .jlc_footprint_check import (
     refresh_board_data as refresh_jlc_footprint_board_data,
 )
 from .jlc_footprint_detail import JlcFootprintDetailDialog
-from .jlcfootprint.presentation import cell_help, glyph_state, matrix_cell, part_detail
+from .jlcfootprint.presentation import (
+    cell_help,
+    glyph_state,
+    matrix_cell,
+    override_scope,
+    part_detail,
+)
 
 ID_CONTEXT_MENU_JLC_DETAILS = wx.NewIdRef()
 ID_CONTEXT_MENU_JLC_REFETCH = wx.NewIdRef()
@@ -192,6 +198,7 @@ class JlcFootprintPresenter:
             ),
             refetch=lambda: self._refetch_jlc_references([reference]),
             settings=self.window.settings,
+            override_scope=lambda: self._override_scope(reference),
         )
         try:
             dialog.ShowModal()
@@ -202,6 +209,18 @@ class JlcFootprintPresenter:
             dialog.remember_size()
             dialog.Destroy()
         self.window.save_settings()
+
+    def _override_scope(self, reference: str) -> str:
+        """Return the override dialog's sentence on the references an override reaches (spec 18.2)."""
+        check = self._active_jlc_footprint_check()
+        part = None if check is None else check.parts.get(reference)
+        if part is None:
+            return ""
+        return override_scope(
+            check.references_sharing_verdict(reference),
+            part.lcsc,
+            variants=self._variant_controller() is not None,
+        )
 
     def _set_jlc_override(
         self,

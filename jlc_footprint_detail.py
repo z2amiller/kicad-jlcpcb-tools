@@ -34,6 +34,8 @@ MIN_SIZE = (960, 560)  # the smallest the dialog may be drawn (spec 16.4)
 # What the dialog opens at when nothing is remembered: the canvas at its own minimum
 # beside both fact columns in full, which eighteen lines of facts need.
 DEFAULT_SIZE = (1180, 760)
+# The override dialog wraps its sentence on what an override reaches at this width.
+SCOPE_WRAP_DIP = 360
 CANVAS_MIN = (420, 300)
 # Wide enough for "Capacitor_THT:C_Rect_L7.2mm_W3.0mm_P5.00mm_FKS2_FKP2_MKS2_MKP2"
 # beside its label without wrapping, which is what the dialog's minimum is for; the
@@ -186,6 +188,7 @@ class OverrideDialog(wx.Dialog):
         parent: Any,
         rotation: Optional[int] = None,  # noqa: UP045
         note: str = "",
+        scope: str = "",
     ) -> None:
         wx.Dialog.__init__(
             self,
@@ -199,6 +202,13 @@ class OverrideDialog(wx.Dialog):
             choices=[str(angle) for angle in OVERRIDE_ANGLES],
         )
         self.note = wx.TextCtrl(self, value=note)
+        # Which references, and on a variant board which variants, the override
+        # reaches: every one sharing the verdict row (spec 18.2).
+        self.scope = wx.StaticText(self, label=scope) if scope else None
+        if self.scope is not None:
+            self.scope.Wrap(
+                HighResWxSize(parent, wx.Size(SCOPE_WRAP_DIP, -1)).GetWidth()
+            )
         self.message = wx.StaticText(self, label="")
         grid = wx.FlexGridSizer(0, 2, 5, 5)
         grid.AddGrowableCol(1)
@@ -212,6 +222,8 @@ class OverrideDialog(wx.Dialog):
         grid.Add(self.note, 1, wx.EXPAND)
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(grid, 0, wx.ALL | wx.EXPAND, 8)
+        if self.scope is not None:
+            sizer.Add(self.scope, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 8)
         sizer.Add(self.message, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 8)
         sizer.Add(
             self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0, wx.ALL | wx.EXPAND, 8
@@ -241,10 +253,13 @@ class JlcFootprintDetailDialog(wx.Dialog):
         set_override: Optional[Callable[[Optional[int], str], Any]] = None,  # noqa: UP045
         refetch: Optional[Callable[[], Any]] = None,  # noqa: UP045
         settings: Optional[dict] = None,  # noqa: UP045
+        override_scope: Optional[Callable[[], str]] = None,  # noqa: UP045
     ) -> None:
         self.detail = detail
         self._set_override = set_override
         self._refetch = refetch
+        # Asked each time "Set override…" opens, so it names today's references.
+        self._override_scope = override_scope
         self.settings = settings if settings is not None else {}
         wx.Dialog.__init__(
             self,
@@ -382,6 +397,7 @@ class JlcFootprintDetailDialog(wx.Dialog):
             self,
             rotation=None if stored is None else stored.override_rotation,
             note="" if stored is None else (stored.override_note or ""),
+            scope="" if self._override_scope is None else self._override_scope(),
         )
         try:
             if dialog.ShowModal() != wx.ID_OK:

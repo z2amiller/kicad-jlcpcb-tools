@@ -536,7 +536,7 @@ def test_setting_an_override_passes_the_angle_and_the_note_and_redraws(
     class FakeOverrideDialog(_Window):
         """Stand in for the modal override prompt."""
 
-        def __init__(self, _parent, rotation=None, note=""):
+        def __init__(self, _parent, rotation=None, note="", scope=""):
             super().__init__()
             self.given = (rotation, note)
             self.note = _Window(value="the preview needed it")
@@ -567,7 +567,7 @@ def test_a_cancelled_override_changes_nothing(dialog_module, monkeypatch):
     class CancelledDialog(_Window):
         """A prompt the user cancels."""
 
-        def __init__(self, _parent, rotation=None, note=""):
+        def __init__(self, _parent, rotation=None, note="", scope=""):
             super().__init__()
             self.note = _Window()
             self.modal_result = dialog_module.wx.ID_CANCEL
@@ -774,7 +774,13 @@ def test_the_dialog_opens_on_the_first_selected_part_with_an_lcsc(monkeypatch):
         """Record what the window handed the dialog."""
 
         def __init__(
-            self, parent, detail, set_override=None, refetch=None, settings=None
+            self,
+            parent,
+            detail,
+            set_override=None,
+            refetch=None,
+            settings=None,
+            override_scope=None,
         ):
             shown.append((parent, detail, set_override, refetch, settings))
             self.destroyed = False
