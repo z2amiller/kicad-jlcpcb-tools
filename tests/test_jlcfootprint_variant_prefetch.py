@@ -110,6 +110,9 @@ def test_rechecking_resolves_the_prefetched_parts_too(setup):
     assert check.recheck_board() == 1
     stored = check.verdicts.get("C9999", board["parts"][0].footprint_hash)
     assert stored.status == "green"
+    # Re-resolved, never judged: Q1 is still the output variant's part.
+    assert check.parts["Q1"].lcsc == "C2132"
+    assert check.decisions(reread=False)["Q1"].lcsc == "C2132"
 
 
 def test_refreshing_the_board_forgets_the_other_variants_codes_too(setup):

@@ -35,8 +35,8 @@ def _window(main, sharing, *, variants):
     check.references_sharing_verdict.side_effect = lambda reference: list(sharing)
     window = check_window(main, check)
     window.save_settings = MagicMock()
-    if variants:
-        window._variant_controller = MagicMock()
+    # The real window always carries the attribute: None on an ordinary board.
+    window._variant_controller = MagicMock() if variants else None
     return window
 
 
