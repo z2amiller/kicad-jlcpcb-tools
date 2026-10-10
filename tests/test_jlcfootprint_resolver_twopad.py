@@ -412,21 +412,6 @@ def test_three_pad_footprint_pitch_failure_is_reported_as_pitch():
     assert "does not fit: pitch" in verdict.note_text
 
 
-def test_seeded_label_deciding_alone_is_medium_confidence():
-    """No token and a seeded per-footprint polarity: the seed decides, and says so, at medium."""
-    verdict = resolve(
-        KICAD_SMF,
-        "Diode_SMD:D_SMF",
-        "ok",
-        "DIO-SMD_L2.8-W1.8",
-        JLC_SMF,
-        D2_PINS,
-        "seed-puuid",
-    )
-    assert (verdict.rotation, verdict.confidence) == (180, "medium")
-    assert "seeded per-footprint polarity" in verdict.note_text
-
-
 def test_polarized_result_contradicting_the_name_is_medium_with_a_note():
     """Anode on KiCad pad 1 gives 180 where the name says 0: right, but flagged."""
     wired_backwards = [
@@ -503,6 +488,30 @@ def test_token_places_the_band_which_is_the_cathode_or_the_negative_end():
     assert token_reference_side("CAP-SMD_BD6.3-L6.6-W6.6-FD", "negative") == "right"
     assert token_reference_side("SMF_L2.8-W1.8-LS3.7-FD-1", "cathode") == "right"
     assert token_reference_side("SMF_L2.8-W1.8-LS3.7-FD-1", "anode") == "left"
+
+
+def test_a_symbol_label_deciding_alone_is_high_confidence():
+    """No token and no marks: the part's own symbol label decides the reference pad, at full strength."""
+    verdict = resolve(
+        KICAD_SMF, "Diode_SMD:D_SMF", "ok", "DIO-SMD_L2.8-W1.8", JLC_SMF, D2_PINS
+    )
+    assert (verdict.rotation, verdict.polarity_source, verdict.confidence) == (
+        180,
+        "label",
+        "high",
+    )
+
+
+def test_a_symbol_label_against_the_name_token_is_a_tie():
+    """A label is a full vote: against a token naming the other pad, with nothing else voting, the data is inconsistent."""
+    verdict = resolve(
+        KICAD_SMF, "Diode_SMD:D_SMF", "ok", "SMF_L2.8-W1.8-LS3.7-RD", JLC_SMF, D2_PINS
+    )
+    assert (verdict.status, verdict.rotation) == ("red", None)
+    assert (
+        "EasyEDA data inconsistent: name token and symbol pin-1 label disagree"
+        in verdict.notes
+    )
 
 
 def test_c7171_marks_outvote_its_token_and_a_can_reads_the_same_token_plainly():

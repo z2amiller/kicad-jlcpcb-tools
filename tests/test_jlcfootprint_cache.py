@@ -1,19 +1,11 @@
-"""Tests for the global EasyEDA cache: round trips, retry rules, stored pad formats, seeding."""
+"""Tests for the global EasyEDA cache: round trips, retry rules, the layout version."""
 
 from contextlib import closing
-import json
 import sqlite3
 
 import pytest
 
-from jlcfootprint.cache import (
-    NONE_RETRY_S,
-    PADS_CLASSIC_SHAPES,
-    PADS_PRO,
-    SCHEMA_VERSION,
-    Cache,
-    pads_from_stored,
-)
+from jlcfootprint.cache import NONE_RETRY_S, SCHEMA_VERSION, Cache
 from jlcfootprint.easyeda_parse import (
     ComponentRecord,
     FootprintRecord,
@@ -21,8 +13,7 @@ from jlcfootprint.easyeda_parse import (
     SymbolRecord,
 )
 
-from .jlcfootprint_support import FIXTURES, recorded
-from .test_jlcfootprint_pro_format import PRO_SOT23
+from .jlcfootprint_support import recorded
 
 
 def _rounded(pads):
@@ -66,9 +57,7 @@ def test_live_record_round_trip(cache):
     cache.store(record, now=1000)
     part = cache.part("C2132")
     assert part is not None
-    assert part.source == "live"
     assert part.fetched_at == 1000
-    assert part.polarity_source == "symbol"
     got = part.record
     assert got.status == "ok"
     assert got.puuid == record.puuid
@@ -104,47 +93,6 @@ def test_error_and_none_rows_carry_no_footprint(cache):
     assert part.record.status == "none"
     assert part.record.pads == []
     assert part.record.symbol_pins == []
-    assert part.polarity_source == "none"
-
-
-def test_seeded_pin1_polarity_becomes_a_one_pin_symbol(cache):
-    """A seed row with only the crawl's pin-1 polarity resolves at seed strength."""
-    with closing(cache.connect()) as con, con:
-        con.execute(
-            "INSERT INTO lcsc_map (lcsc, puuid, status, pin1_polarity, polarity_source, source, fetched_at)"
-            " VALUES ('C9', 'p9', 'ok', 'A', 'seed-puuid', 'seed', 1)"
-        )
-        con.execute(
-            "INSERT INTO package (puuid, package_name, pads_json, pads_format, source, fetched_at)"
-            " VALUES ('p9', 'LED0603-RD', ?, ?, 'seed', 1)",
-            (json.dumps(PRO_SOT23), PADS_PRO),
-        )
-    part = cache.part("C9")
-    assert part.source == "seed"
-    assert part.polarity_source == "seed-puuid"
-    assert part.record.symbol_pins == [SymbolPin(number="1", label="A")]
-    assert part.record.package_name == "LED0603-RD"
-    assert _rounded(part.record.pads) == _rounded(recorded("C2132").pads)
-    assert not cache.needs("C9", now=10**9)
-
-
-def test_stored_pad_formats_read_back_as_raw_pads():
-    """Pro record lines and classic shape strings both yield the classic raw pad form."""
-    record = recorded("C2132")
-    body = json.loads((FIXTURES / "C2132.json").read_text())
-    package = body["result"]["packageDetail"]["dataStr"]
-    stored = {
-        "x": package["head"]["x"],
-        "y": package["head"]["y"],
-        "shapes": package["shape"],
-    }
-    assert _rounded(
-        pads_from_stored(json.dumps(stored), PADS_CLASSIC_SHAPES)
-    ) == _rounded(record.pads)
-    assert _rounded(pads_from_stored(json.dumps(PRO_SOT23), PADS_PRO)) == _rounded(
-        record.pads
-    )
-    assert pads_from_stored(json.dumps(record.pads), "classic") == record.pads
 
 
 def test_store_footprint_from_the_uuid_endpoint(cache):
@@ -180,69 +128,6 @@ def test_forget_and_clear(cache):
     assert cache.counts() == {"parts": 0, "packages": 0}
 
 
-def _seed(path, parts, packages):
-    """Write a seed file in the cache's own schema."""
-    seed = Cache(str(path))
-    with closing(seed.connect()) as con, con:
-        con.executemany(
-            "INSERT INTO lcsc_map (lcsc, puuid, status, pin1_polarity, polarity_source, source, fetched_at)"
-            " VALUES (?, ?, 'ok', ?, 'seed-puuid', 'seed', 7)",
-            parts,
-        )
-        con.executemany(
-            "INSERT INTO package (puuid, package_name, pads_json, pads_format, source, fetched_at)"
-            " VALUES (?, ?, ?, 'pro', 'seed', 7)",
-            packages,
-        )
-    return seed
-
-
-def test_import_seed_fills_gaps_and_never_touches_live_rows(cache, tmp_path):
-    """Seed rows are added or refreshed; rows the plugin fetched itself stay as they are."""
-    live = recorded("C2132")
-    cache.store(live, now=1000)
-    seed = _seed(
-        tmp_path / "seed.db",
-        [("C2132", "pro-uuid", "K"), ("C9", "p9", "A")],
-        [
-            ("pro-uuid", "SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR", json.dumps(PRO_SOT23)),
-            (live.puuid, "IGNORED", "[]"),
-            ("p9", "LED0603-RD", json.dumps(PRO_SOT23)),
-        ],
-    )
-    result = cache.import_seed(seed.path)
-    assert (result.parts, result.packages) == (1, 2)
-    assert (result.kept_live_parts, result.kept_live_packages) == (1, 1)
-    kept = cache.part("C2132")
-    assert kept.source == "live"
-    assert kept.record.puuid == live.puuid
-    assert kept.record.package_name == live.package_name
-    added = cache.part("C9")
-    assert added.source == "seed"
-    assert added.record.symbol_pins == [SymbolPin(number="1", label="A")]
-    assert cache.counts() == {"parts": 2, "packages": 3}
-
-    newer = _seed(
-        tmp_path / "seed2.db",
-        [("C9", "p9", "K")],
-        [("p9", "LED0603-FD", json.dumps(PRO_SOT23))],
-    )
-    cache.import_seed(newer.path)
-    refreshed = cache.part("C9")
-    assert refreshed.record.symbol_pins == [SymbolPin(number="1", label="K")]
-    assert refreshed.record.package_name == "LED0603-FD"
-
-
-def test_import_seed_rejects_another_schema_version(cache, tmp_path):
-    """A seed written for a different cache layout is refused before any row moves."""
-    seed = _seed(tmp_path / "seed.db", [("C9", "p9", "A")], [("p9", "X", "[]")])
-    with closing(seed.connect()) as con, con:
-        con.execute("UPDATE meta SET value = '0' WHERE key = 'schema_version'")
-    with pytest.raises(ValueError, match="schema version"):
-        cache.import_seed(seed.path)
-    assert cache.counts() == {"parts": 0, "packages": 0}
-
-
 def test_needs_follows_a_live_row_through_its_pieces(cache):
     """No row asks for a lookup; the uuids ask for their documents; a complete row asks for nothing."""
     assert cache.needs("C1") == {"lookup"}
@@ -255,7 +140,7 @@ def test_needs_follows_a_live_row_through_its_pieces(cache):
         "fp-1",
         "sym-1",
     )
-    assert part.record.symbol_pins == [] and part.polarity_source == "none"
+    assert part.record.symbol_pins == []
     record = recorded("C2132")
     cache.store_footprint(
         FootprintRecord(
@@ -276,7 +161,6 @@ def test_needs_follows_a_live_row_through_its_pieces(cache):
     assert cache.store_symbol("C1", symbol, now=12)
     assert cache.needs("C1") == set()
     part = cache.part("C1")
-    assert part.polarity_source == "symbol"
     assert part.record.symbol_pins == symbol.pins
     assert part.record.symbol_shapes == symbol.shapes
     assert part.record.package_name == record.package_name
@@ -301,34 +185,29 @@ def test_lookup_misses_and_empty_symbols(cache):
     assert cache.store_symbol("C6", SymbolRecord(uuid="sym-6", status="none"), now=2)
     assert cache.needs("C6") == {"footprint"}
     part = cache.part("C6")
-    assert part.record.symbol_pins == [] and part.polarity_source == "none"
+    assert part.record.symbol_pins == []
     assert part.record.symbol_uuid == "sym-6"
 
 
-def test_seed_rows_never_need_a_symbol(cache):
-    """A seed row with a symbol uuid but no pins is complete: its meaning came with the seed or not at all."""
-    with closing(cache.connect()) as con, con:
-        con.execute(
-            "INSERT INTO lcsc_map (lcsc, puuid, status, symbol_uuid, source, fetched_at)"
-            " VALUES ('C9', 'p9', 'ok', 'sym-9', 'seed', 1)"
+@pytest.mark.parametrize("version", ["1", "99"], ids=["older", "newer"])
+def test_a_file_from_another_layout_is_dropped_and_refilled(tmp_path, version):
+    """The cache is only fetched data, so a file of another layout starts over instead of failing on its columns."""
+    path = str(tmp_path / "jlcfootprint-cache.db")
+    with closing(sqlite3.connect(path)) as con, con:
+        con.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            f"INSERT INTO meta VALUES ('schema_version', '{version}');"
+            "CREATE TABLE lcsc_map (lcsc TEXT PRIMARY KEY, status TEXT NOT NULL,"
+            " source TEXT NOT NULL, fetched_at INTEGER NOT NULL);"
+            "INSERT INTO lcsc_map VALUES ('C9', 'ok', 'live', 1);"
         )
-        con.execute(
-            "INSERT INTO package (puuid, package_name, pads_json, pads_format, source, fetched_at)"
-            " VALUES ('p9', 'LED0603-RD', ?, ?, 'seed', 1)",
-            (json.dumps(PRO_SOT23), PADS_PRO),
-        )
-    assert cache.needs("C9") == set()
-    assert not cache.needs("C9")
-
-
-def test_stored_origin_reads_the_classic_head_and_is_zero_otherwise():
-    """A classic_shapes row keeps its drawing's head x/y; Pro and classic pad rows have none."""
-    from jlcfootprint.cache import stored_origin
-
-    assert stored_origin('{"x": 4000, "y": 3000, "shapes": []}', "classic_shapes") == (
-        4000.0,
-        3000.0,
-    )
-    assert stored_origin("[]", "pro") == (0.0, 0.0)
-    assert stored_origin("[]", "classic") == (0.0, 0.0)
-    assert stored_origin('{"x": "bad"}', "classic_shapes") == (0.0, 0.0)
+    cache = Cache(path)
+    assert cache.counts() == {"parts": 0, "packages": 0}
+    cache.store(recorded("C2132"), now=1)
+    assert cache.part("C2132").record.status == "ok"
+    with closing(sqlite3.connect(path)) as con:
+        assert con.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone() == (SCHEMA_VERSION,)
+    # Reopened at its own layout, the file keeps what it holds.
+    assert Cache(path).counts()["parts"] == 1

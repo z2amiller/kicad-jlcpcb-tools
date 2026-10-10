@@ -19,14 +19,13 @@ def resolve_record(
     kicad_pads: list[Pad],
     kicad_footprint_name: str,
     record: ComponentRecord,
-    polarity_source: str = "symbol",
     kicad_courtyard: tuple[float, float, float, float] | None = None,
 ) -> Verdict:
     """Resolve one footprint against a cached record (spec 7).
 
     Builds the two arguments every caller assembled from a ``ComponentRecord`` by
     hand: the raw pads converted to millimetres and the drawings' polarity marks
-    and body box, then calls :func:`jlcfootprint.resolver.resolve` with all nine.
+    and body box, then calls :func:`jlcfootprint.resolver.resolve` with all eight.
     """
     return resolve(
         kicad_pads,
@@ -35,7 +34,6 @@ def resolve_record(
         record.package_name,
         easyeda_pads_to_mm(record.pads),
         record.symbol_pins,
-        polarity_source,
         drawing_marks(
             record.symbol_shapes, record.footprint_shapes, record.footprint_origin
         ),

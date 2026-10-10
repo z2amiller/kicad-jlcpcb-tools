@@ -129,9 +129,7 @@ def test_the_verdict_key_follows_the_reading_of_a_numbered_sign():
 
 def test_bt1_coin_cell_holder_resolves_yellow_at_180_from_the_footprint_mark():
     """The false green of spec 19.1: BT1 is yellow at 180 degrees, its polarity from JLC's ``+``."""
-    verdict = resolve_record(
-        BT1_PADS, BT1_FOOTPRINT, bt1_record(), "symbol", BT1_COURTYARD
-    )
+    verdict = resolve_record(BT1_PADS, BT1_FOOTPRINT, bt1_record(), BT1_COURTYARD)
     assert (verdict.status, verdict.rotation, verdict.method) == (
         "yellow",
         180,
@@ -399,9 +397,7 @@ def test_a_meaning_aligned_part_that_fits_clearly_worse_goes_yellow_and_keeps_it
         BT1_PADS[0]._replace(pin_function="-_1"),
         BT1_PADS[1]._replace(pin_function="+_2"),
     ]
-    verdict = resolve_record(
-        flipped, BT1_FOOTPRINT, bt1_record(), "symbol", BT1_COURTYARD
-    )
+    verdict = resolve_record(flipped, BT1_FOOTPRINT, bt1_record(), BT1_COURTYARD)
     assert (verdict.status, verdict.rotation, verdict.method) == (
         "yellow",
         0,

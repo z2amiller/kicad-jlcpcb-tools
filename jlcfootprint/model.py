@@ -92,7 +92,6 @@ class PartDetail:
     jlc_pads: list[Pad] = field(default_factory=list)
     symbol_pins: list = field(default_factory=list)
     marks: DrawingMarks | None = None
-    source: str = ""  # 'live' | 'seed' | '' when nothing is cached
     fetched_at: int = 0
     verdict: Verdict | None = None  # re-resolved, carries the placement
     stored: StoredVerdict | None = None

@@ -19,7 +19,7 @@ import wx  # pylint: disable=import-error
 from .events import JlcFootprintResultEvent, MessageEvent
 from .footprint_helpers import get_lcsc_value
 from .footprint_metadata import count_pad
-from .jlcfootprint.cache import FILENAME, Cache, SeedImportResult
+from .jlcfootprint.cache import FILENAME, Cache
 from .jlcfootprint.controller import FootprintCheck, describe_seconds
 from .jlcfootprint.kicad_adapter import board_parts
 from .jlcfootprint.presentation import describe_board_estimate
@@ -177,18 +177,6 @@ def create_footprint_check(window: Any, pcbnew: Any) -> FootprintCheck:
     )
 
 
-def import_seed(window: Any, path: str) -> SeedImportResult:
-    """Merge a seed file into the cache and let a running check resolve from it."""
-    check = getattr(window, "jlc_footprint_check", None)
-    cache = (
-        check.cache if check is not None else Cache(cache_path(window.library.datadir))
-    )
-    result = cache.import_seed(path)
-    if check is not None:
-        check.scan_board()
-    return result
-
-
 def wait_for_pending_fetches(window: Any, check: FootprintCheck) -> bool:
     """Wait with a cancellable dialog until no part is pending (spec 8).
 
@@ -313,8 +301,7 @@ def clear_cache(window: Any, check: Any = None) -> int:
         window,
         f"Delete the whole EasyEDA cache ({counts['parts']} part(s), "
         f"{counts['packages']} footprint(s))?\n\nThis board's parts are fetched again: "
-        f"{describe_board_estimate(parts, seconds, others)}. Rotation overrides are kept, and "
-        "a seed file can be imported again from Settings.",
+        f"{describe_board_estimate(parts, seconds, others)}. Rotation overrides are kept.",
     ):
         return 0
     summary = check.clear_cache()

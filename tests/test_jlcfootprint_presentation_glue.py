@@ -92,7 +92,7 @@ def test_the_detail_of_a_resolved_part_carries_both_pad_sets_and_a_fresh_placeme
     assert len(detail.kicad_pads) == 3 and len(detail.jlc_pads) == 3
     assert detail.package_name == recorded("C2132").package_name
     assert detail.puuid == recorded("C2132").puuid
-    assert detail.source == "live" and detail.fetched_at > 0
+    assert detail.fetched_at > 0
     assert detail.pin_functions == {"1": "B", "2": "E", "3": "C"}
     assert detail.kicad_pitch == pytest.approx(
         1.9, abs=0.05
@@ -115,7 +115,7 @@ def test_the_detail_of_a_part_with_no_data_still_describes_the_footprint(setup):
     check.scan_board()
     pending = part_detail(check, "Q1")
     assert pending.jlc_pads == [] and pending.verdict is None
-    assert pending.package_name == "" and pending.source == ""
+    assert pending.package_name == "" and pending.fetched_at == 0
     assert len(pending.kicad_pads) == 3
     assert pending.fetch.state == "queued"
     assert pending.stored is not None and pending.stored.status == PENDING

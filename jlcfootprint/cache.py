@@ -5,10 +5,11 @@ data is keyed per footprint uuid because footprints are shared.  Pads are stored
 as EasyEDA sent them and converted when read, so a change to the frame
 convention never invalidates the cache.  Rows never expire on their own: ``none``
 rows are retried after 30 days, ``error`` rows next session, ``ok`` rows only on
-an explicit refresh.  A live row is filled in steps (spec 15): the batch
-lookup writes the uuids, the footprint and the symbol documents follow, and
-``needs`` says which piece is still missing.  Stdlib only; safe to use from the
-worker thread and the main thread at once (each call opens its own connection).
+an explicit refresh.  A row is filled in steps (spec 15): the batch lookup writes
+the uuids, the footprint and the symbol documents follow, and ``needs`` says which
+piece is still missing.  A file written by another layout is dropped and refilled:
+every row can be fetched again.  Stdlib only; safe to use from the worker thread
+and the main thread at once (each call opens its own connection).
 """
 
 from __future__ import annotations
@@ -21,30 +22,13 @@ import time
 from typing import Any
 import zlib
 
-from .easyeda_parse import (
-    ComponentRecord,
-    FootprintRecord,
-    SymbolPin,
-    SymbolRecord,
-    parse_footprint_pads,
-    parse_pro_pads,
-)
+from .easyeda_parse import ComponentRecord, FootprintRecord, SymbolPin, SymbolRecord
 from .naming import parse_package_name
-from .records import pin1_polarity
 
 FILENAME = "jlcfootprint-cache.db"
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 NONE_RETRY_S = 30 * 24 * 3600
 CONNECT_TIMEOUT_S = 5.0
-
-# ``pads_json`` holds the pads as their source produced them; ``pads_format`` says how
-# to read them: ``classic`` is the list of raw pad dicts a per-LCSC response gives,
-# ``pro`` the ``["PAD", ...]`` record lines of EasyEDA Pro footprint text (the per-uuid
-# endpoint and the crawl), ``classic_shapes`` the ``PAD~`` strings of a classic
-# footprint drawing with its origin (``{"x": .., "y": .., "shapes": [..]}``).
-PADS_CLASSIC = "classic"
-PADS_PRO = "pro"
-PADS_CLASSIC_SHAPES = "classic_shapes"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -55,10 +39,7 @@ CREATE TABLE IF NOT EXISTS lcsc_map (
   error            TEXT,
   symbol_uuid      TEXT,
   symbol_pins_json TEXT,
-  pin1_polarity    TEXT,
-  polarity_source  TEXT,
   symbol_blob      BLOB,
-  source           TEXT NOT NULL,
   fetched_at       INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS package (
@@ -69,10 +50,8 @@ CREATE TABLE IF NOT EXISTS package (
   name_source      TEXT,
   name_confidence  TEXT,
   pads_json        TEXT NOT NULL,
-  pads_format      TEXT NOT NULL DEFAULT 'classic',
   footprint_blob   BLOB,
   footprint_source TEXT,
-  source           TEXT NOT NULL,
   fetched_at       INTEGER NOT NULL
 );
 """
@@ -84,10 +63,7 @@ _LCSC_COLUMNS = (
     "error",
     "symbol_uuid",
     "symbol_pins_json",
-    "pin1_polarity",
-    "polarity_source",
     "symbol_blob",
-    "source",
     "fetched_at",
 )
 _PACKAGE_COLUMNS = (
@@ -98,10 +74,8 @@ _PACKAGE_COLUMNS = (
     "name_source",
     "name_confidence",
     "pads_json",
-    "pads_format",
     "footprint_blob",
     "footprint_source",
-    "source",
     "fetched_at",
 )
 
@@ -111,19 +85,7 @@ class CachedPart:
     """One part as the cache knows it, ready for the resolver."""
 
     record: ComponentRecord
-    polarity_source: str  # 'symbol' | 'seed-puuid' | 'none'
-    source: str  # 'live' | 'seed'
     fetched_at: int
-
-
-@dataclass
-class SeedImportResult:
-    """What a seed import did."""
-
-    parts: int = 0
-    packages: int = 0
-    kept_live_parts: int = 0
-    kept_live_packages: int = 0
 
 
 def compress(shapes: list[str]) -> bytes | None:
@@ -138,33 +100,6 @@ def decompress(blob: bytes | None) -> list[str]:
     if not blob:
         return []
     return json.loads(zlib.decompress(blob).decode("utf-8"))
-
-
-def pads_from_stored(pads_json: str, pads_format: str) -> list[dict]:
-    """Return raw pads (classic canvas units, Y down) from a stored ``pads_json``."""
-    stored = json.loads(pads_json)
-    if pads_format == PADS_PRO:
-        pads, _ = parse_pro_pads(stored)
-        return pads
-    if pads_format == PADS_CLASSIC_SHAPES:
-        pads, _ = parse_footprint_pads(
-            stored.get("shapes") or [],
-            float(stored.get("x") or 0.0),
-            float(stored.get("y") or 0.0),
-        )
-        return pads
-    return list(stored)
-
-
-def stored_origin(pads_json: str, pads_format: str) -> tuple[float, float]:
-    """Return the classic drawing's head x/y from a stored ``pads_json``; (0, 0) otherwise."""
-    if pads_format != PADS_CLASSIC_SHAPES:
-        return (0.0, 0.0)
-    stored = json.loads(pads_json)
-    try:
-        return (float(stored.get("x") or 0.0), float(stored.get("y") or 0.0))
-    except (AttributeError, TypeError, ValueError):
-        return (0.0, 0.0)
 
 
 def _upsert(con: sqlite3.Connection, table: str, columns: tuple, row: dict) -> None:
@@ -183,6 +118,18 @@ class Cache:
         self.path = str(path)
         with closing(self.connect()) as con, con:
             con.executescript(SCHEMA)
+            row = con.execute(
+                "SELECT value FROM meta WHERE key = 'schema_version'"
+            ).fetchone()
+            if row is not None and row[0] != SCHEMA_VERSION:
+                # A file written under another layout, older or newer, is rebuilt
+                # rather than migrated: every row in it was fetched and can be
+                # fetched again, so a later change to these tables only has to
+                # raise SCHEMA_VERSION.
+                con.executescript(
+                    "DROP TABLE lcsc_map; DROP TABLE package; DELETE FROM meta;"
+                )
+                con.executescript(SCHEMA)
             con.execute(
                 "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
                 (SCHEMA_VERSION,),
@@ -211,14 +158,13 @@ class Cache:
 
         ``{'lookup'}`` when there is no row, an ``error`` row or a ``none`` row older
         than thirty days; otherwise the subset of ``{'footprint', 'symbol'}`` that is
-        missing: a ``puuid`` without a package row, or a live row whose symbol uuid
-        is known but whose symbol has not been fetched.  Seed rows never ask for a
-        symbol: their pin meaning came with the seed or is absent for good.
+        missing: a ``puuid`` without a package row, or a row whose symbol uuid
+        is known but whose symbol has not been fetched.
         """
         with closing(self.connect()) as con:
             row = con.execute(
-                "SELECT status, fetched_at, puuid, symbol_uuid, symbol_pins_json,"
-                " pin1_polarity, source FROM lcsc_map WHERE lcsc = ?",
+                "SELECT status, fetched_at, puuid, symbol_uuid, symbol_pins_json"
+                " FROM lcsc_map WHERE lcsc = ?",
                 (lcsc,),
             ).fetchone()
             if row is None or row["status"] == "error":
@@ -231,12 +177,7 @@ class Cache:
             needed: set[str] = set()
             if row["puuid"] and not self._has_package(con, str(row["puuid"])):
                 needed.add("footprint")
-            if (
-                row["source"] == "live"
-                and row["symbol_uuid"]
-                and row["symbol_pins_json"] is None
-                and row["pin1_polarity"] is None
-            ):
+            if row["symbol_uuid"] and row["symbol_pins_json"] is None:
                 needed.add("symbol")
         return needed
 
@@ -268,35 +209,17 @@ class Cache:
             symbol_shapes=decompress(row["symbol_blob"]),
             puuid=str(row["puuid"] or ""),
         )
-        polarity_source = "none"
-        pins = json.loads(row["symbol_pins_json"]) if row["symbol_pins_json"] else []
-        if pins:
+        if row["symbol_pins_json"]:
             record.symbol_pins = [
                 SymbolPin(number=str(pin["number"]), label=str(pin.get("label", "")))
-                for pin in pins
+                for pin in json.loads(row["symbol_pins_json"])
             ]
-            polarity_source = str(row["polarity_source"] or "symbol")
-        elif row["pin1_polarity"]:
-            # The crawl read pin 1's meaning from one representative part per footprint;
-            # a one-pin symbol carries that label to the resolver at seed strength.
-            record.symbol_pins = [
-                SymbolPin(number="1", label=str(row["pin1_polarity"]))
-            ]
-            polarity_source = str(row["polarity_source"] or "seed-puuid")
         if package is not None:
             record.package_name = str(package["package_name"])
-            record.pads = pads_from_stored(package["pads_json"], package["pads_format"])
+            record.pads = json.loads(package["pads_json"])
             record.footprint_shapes = decompress(package["footprint_blob"])
             record.footprint_source = str(package["footprint_source"] or "")
-            record.footprint_origin = stored_origin(
-                package["pads_json"], package["pads_format"]
-            )
-        return CachedPart(
-            record=record,
-            polarity_source=polarity_source,
-            source=str(row["source"]),
-            fetched_at=int(row["fetched_at"]),
-        )
+        return CachedPart(record=record, fetched_at=int(row["fetched_at"]))
 
     def has_package(self, puuid: str) -> bool:
         """Return True when a footprint with this uuid is stored."""
@@ -319,12 +242,9 @@ class Cache:
     # Writing
     # ------------------------------------------------------------------
 
-    def store(
-        self, record: ComponentRecord, now: float | None = None, source: str = "live"
-    ) -> None:
+    def store(self, record: ComponentRecord, now: float | None = None) -> None:
         """Store one fetched part: its symbol row and, when it carries pads, its footprint row."""
         fetched_at = int(time.time() if now is None else now)
-        polarity = pin1_polarity(record.symbol_pins) if record.symbol_pins else None
         row = {
             "lcsc": record.lcsc,
             "puuid": record.puuid or None,
@@ -342,10 +262,7 @@ class Cache:
                 if record.symbol_pins
                 else None
             ),
-            "pin1_polarity": polarity,
-            "polarity_source": "symbol" if record.symbol_pins else None,
             "symbol_blob": compress(record.symbol_shapes),
-            "source": source,
             "fetched_at": fetched_at,
         }
         with closing(self.connect()) as con, con:
@@ -361,7 +278,6 @@ class Cache:
                         record.pads,
                         record.footprint_shapes,
                         record.footprint_source or "component",
-                        source,
                         fetched_at,
                     ),
                 )
@@ -386,10 +302,7 @@ class Cache:
             "error": None,
             "symbol_uuid": symbol_uuid or None,
             "symbol_pins_json": None if symbol_uuid else "[]",
-            "pin1_polarity": None,
-            "polarity_source": None,
             "symbol_blob": None,
-            "source": "live",
             "fetched_at": fetched_at,
         }
         with closing(self.connect()) as con, con:
@@ -412,16 +325,13 @@ class Cache:
         with closing(self.connect()) as con, con:
             cursor = con.execute(
                 "UPDATE lcsc_map SET symbol_uuid = ?, symbol_pins_json = ?,"
-                " pin1_polarity = ?, polarity_source = ?, symbol_blob = ?,"
-                " fetched_at = ? WHERE lcsc = ?",
+                " symbol_blob = ?, fetched_at = ? WHERE lcsc = ?",
                 (
                     symbol.uuid or None,
                     json.dumps(
                         [{"number": pin.number, "label": pin.label} for pin in pins],
                         separators=(",", ":"),
                     ),
-                    pin1_polarity(pins) if pins else None,
-                    "symbol" if pins else None,
                     compress(symbol.shapes) if pins else None,
                     fetched_at,
                     lcsc,
@@ -430,7 +340,7 @@ class Cache:
             return cursor.rowcount > 0
 
     def store_footprint(
-        self, footprint: FootprintRecord, now: float | None = None, source: str = "live"
+        self, footprint: FootprintRecord, now: float | None = None
     ) -> None:
         """Store one footprint fetched by uuid (spec 15.2)."""
         if not footprint.pads:
@@ -447,7 +357,6 @@ class Cache:
                     footprint.pads,
                     footprint.footprint_shapes,
                     footprint.footprint_source,
-                    source,
                     fetched_at,
                 ),
             )
@@ -459,7 +368,6 @@ class Cache:
         pads: list[dict],
         shapes: list[str],
         footprint_source: str,
-        source: str,
         fetched_at: int,
     ) -> dict[str, Any]:
         """Build a package row; the name-derived rotation is the naming parser's, crawl sense."""
@@ -476,10 +384,8 @@ class Cache:
             "name_source": parsed.rotation_source,
             "name_confidence": parsed.parser_confidence,
             "pads_json": json.dumps(pads, separators=(",", ":")),
-            "pads_format": PADS_CLASSIC,
             "footprint_blob": compress(shapes),
             "footprint_source": footprint_source,
-            "source": source,
             "fetched_at": fetched_at,
         }
 
@@ -493,64 +399,3 @@ class Cache:
         with closing(self.connect()) as con, con:
             con.execute("DELETE FROM lcsc_map")
             con.execute("DELETE FROM package")
-
-    # ------------------------------------------------------------------
-    # Seeding
-    # ------------------------------------------------------------------
-
-    def import_seed(self, seed_path: str) -> SeedImportResult:
-        """Merge a seed file into the cache without touching live rows (spec 5.2).
-
-        Seed rows replace older seed rows and fill gaps; a row the plugin fetched itself
-        is never overwritten.  The seed must carry this cache's schema version.
-        """
-        result = SeedImportResult()
-        with closing(self.connect()) as con, con:
-            con.execute("ATTACH DATABASE ? AS seed", (str(seed_path),))
-            try:
-                version = con.execute(
-                    "SELECT value FROM seed.meta WHERE key = 'schema_version'"
-                ).fetchone()
-                if version is None or str(version[0]) != SCHEMA_VERSION:
-                    raise ValueError(
-                        f"seed schema version {None if version is None else version[0]!r}"
-                        f" does not match the cache's {SCHEMA_VERSION!r}"
-                    )
-                result.kept_live_parts = con.execute(
-                    "SELECT COUNT(*) FROM seed.lcsc_map s JOIN lcsc_map m ON m.lcsc = s.lcsc"
-                    " WHERE m.source = 'live'"
-                ).fetchone()[0]
-                result.kept_live_packages = con.execute(
-                    "SELECT COUNT(*) FROM seed.package s JOIN package p ON p.puuid = s.puuid"
-                    " WHERE p.source = 'live'"
-                ).fetchone()[0]
-                columns = ",".join(_LCSC_COLUMNS)
-                updates = ",".join(
-                    f"{column} = excluded.{column}" for column in _LCSC_COLUMNS[1:]
-                )
-                con.execute(
-                    f"INSERT INTO lcsc_map ({columns}) SELECT {columns} FROM seed.lcsc_map"
-                    f" WHERE 1 ON CONFLICT(lcsc) DO UPDATE SET {updates}"
-                    " WHERE lcsc_map.source != 'live'"
-                )
-                result.parts = (
-                    con.execute("SELECT COUNT(*) FROM seed.lcsc_map").fetchone()[0]
-                    - result.kept_live_parts
-                )
-                columns = ",".join(_PACKAGE_COLUMNS)
-                updates = ",".join(
-                    f"{column} = excluded.{column}" for column in _PACKAGE_COLUMNS[1:]
-                )
-                con.execute(
-                    f"INSERT INTO package ({columns}) SELECT {columns} FROM seed.package"
-                    f" WHERE 1 ON CONFLICT(puuid) DO UPDATE SET {updates}"
-                    " WHERE package.source != 'live'"
-                )
-                result.packages = (
-                    con.execute("SELECT COUNT(*) FROM seed.package").fetchone()[0]
-                    - result.kept_live_packages
-                )
-            finally:
-                con.commit()
-                con.execute("DETACH DATABASE seed")
-        return result

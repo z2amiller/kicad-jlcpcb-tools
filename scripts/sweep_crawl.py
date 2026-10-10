@@ -270,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
             jlc = pro_pads(text)
         pins = [SymbolPin("1", polarity)] if polarity else []
         kicad = with_functions(library_pads(lib, fp), functions)
-        v = resolve(kicad, f"{lib}:{fp}", "ok", name, jlc, pins, "seed-puuid")
+        v = resolve(kicad, f"{lib}:{fp}", "ok", name, jlc, pins)
         stats["parts_total"] += count
         # The crawl's table counts the turn the other way round (geometry.crawl_to_cpl).
         crawl_cpl = None if crawl_rot is None else crawl_to_cpl(int(crawl_rot))

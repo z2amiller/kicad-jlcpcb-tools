@@ -348,7 +348,6 @@ def part_detail(**fields):
     fields.setdefault("kicad_footprint", "Capacitor_SMD:C_0805_2012Metric")
     fields.setdefault("package_name", "CAP-SMD_L2.0-W1.3-FD")
     fields.setdefault("puuid", "b3b82869fa924bae820e3a6cfb44d689")
-    fields.setdefault("source", "live")
     fields.setdefault("fetched_at", 1_757_000_000)
     fields.setdefault("courtyard", (-1.7, -0.95, 1.7, 0.95))
     return PartDetail("C1", fields.pop("lcsc", "C7192"), **fields)
@@ -422,7 +421,7 @@ def test_the_jlc_column_describes_the_drawing_and_the_symbol():
     assert facts["Polarity"] == "token"
     assert facts["Marks"] == "symbol + on pin 1, footprint + on pad 1, body box"
     assert facts["Symbol pins"] == "1 = 1, 2 = 2"
-    assert facts["Fetched"].endswith("(live)")
+    assert facts["Fetched"].startswith("2025-09-0")
     empty = dict(
         jlc_facts(
             part_detail(
@@ -431,7 +430,6 @@ def test_the_jlc_column_describes_the_drawing_and_the_symbol():
                 jlc_pads=[],
                 marks=None,
                 symbol_pins=[],
-                source="",
                 fetched_at=0,
                 verdict=None,
             )

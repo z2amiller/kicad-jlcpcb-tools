@@ -104,25 +104,6 @@ def test_create_footprint_check_uses_the_library_directory_and_the_project_db(
     assert not check.worker.is_running()
 
 
-def test_import_seed_merges_and_rescans(facade, tmp_path):
-    """A seed file is merged into the running check's cache, which then rescans the board."""
-    module, _, _ = facade
-    window, pcbnew = _window(tmp_path)
-    seed = module.Cache(str(tmp_path / "seed.db"))
-    with closing(seed.connect()) as con, con:
-        con.execute(
-            "INSERT INTO lcsc_map (lcsc, puuid, status, source, fetched_at) VALUES ('C5', 'p5', 'ok', 'seed', 1)"
-        )
-    result = module.import_seed(window, seed.path)
-    assert (result.parts, result.packages) == (1, 0)
-    assert module.Cache(module.cache_path(str(tmp_path))).status("C5") == "ok"
-    check = module.create_footprint_check(window, pcbnew)
-    check.scan_board = MagicMock()
-    window.jlc_footprint_check = check
-    module.import_seed(window, seed.path)
-    check.scan_board.assert_called_once_with()
-
-
 # ---------------------------------------------------------------------------
 # The main window
 # ---------------------------------------------------------------------------
@@ -372,13 +353,11 @@ def test_clearing_the_cache_confirms_and_deletes_every_row(actions, caplog):
         "Delete the whole EasyEDA cache (1 part(s), 1 footprint(s))?"
         in (actions.answers["asked"][0])
     )
-    assert "seed file" in actions.answers["asked"][0]
     parts, _seconds = actions.check.board_estimate()
     assert parts == 2  # the confirmation's own count matches the board: C2132 and C77
     assert (
         "This board's parts are fetched again: 2 part(s), about 6 s. Rotation "
-        "overrides are kept, and a seed file can be imported again from Settings."
-        in actions.answers["asked"][0]
+        "overrides are kept." in actions.answers["asked"][0]
     )
     assert actions.check.cache.counts() == {"parts": 1, "packages": 1}
     actions.answers["yes"] = True

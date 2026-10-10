@@ -126,7 +126,6 @@ def native_detail() -> Iterator[SimpleNamespace]:
             jlc_pads=easyeda_pads_to_mm(record.pads),
             symbol_pins=record.symbol_pins,
             marks=marks,
-            source="live",
             fetched_at=1_757_000_000,
             verdict=verdict,
             stored=StoredVerdict(

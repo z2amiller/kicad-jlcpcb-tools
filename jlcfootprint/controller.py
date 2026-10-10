@@ -285,7 +285,6 @@ class FootprintCheck:
             part.pads,
             part.footprint_name,
             record,
-            cached.polarity_source,
             part.courtyard,
         )
 
@@ -670,9 +669,9 @@ class FootprintCheck:
     def clear_cache(self) -> ScanSummary:
         """Delete every cached part and footprint, then rescan the board (spec 16.5).
 
-        The schema stays, so a seed import or the next scan refills it; the verdicts
-        and their overrides are the project's and are not touched here beyond the
-        rescan's pending marks.
+        The schema stays, so the next scan refills it; the verdicts and their
+        overrides are the project's and are not touched here beyond the rescan's
+        pending marks.
         """
         self.cache.clear()
         self._package_names.clear()

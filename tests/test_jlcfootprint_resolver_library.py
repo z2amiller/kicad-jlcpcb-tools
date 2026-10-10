@@ -3,7 +3,6 @@
 import pytest
 
 from jlcfootprint.drawing import drawing_marks
-from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
 from jlcfootprint.naming import parse_package_name
 from jlcfootprint.resolver import pair_by_name, resolve
@@ -224,35 +223,6 @@ def test_wider_lead_span_sod323_is_tight_not_wrong():
         "fits_tight",
         0,
     )
-
-
-def test_seeded_polarity_defers_to_the_name_token():
-    """A per-footprint seeded label that contradicts the token is set aside; a real symbol label is not."""
-    kicad = with_functions(library_pads("Diode_SMD", "D_SMA"), {"1": "K", "2": "A"})
-    jlc = [Pad("1", -2.1, 0.0, 1.6, 1.8), Pad("2", 2.1, 0.0, 1.6, 1.8)]
-    pins = [SymbolPin("1", "A")]
-    seeded = resolve(
-        kicad,
-        "Diode_SMD:D_SMA",
-        "ok",
-        "DO-214AC_L4.3-W2.7-LS5.0-RD",
-        jlc,
-        pins,
-        "seed-puuid",
-    )
-    assert (seeded.status, seeded.rotation, seeded.polarity_light) == (
-        "green",
-        0,
-        "green",  # the token settles pad 1 as the cathode, like KiCad's pad 1
-    )
-    assert (
-        "seeded pin-1 polarity (per footprint) disagrees with the name token; not counted"
-        in seeded.notes
-    )
-    real = resolve(
-        kicad, "Diode_SMD:D_SMA", "ok", "DO-214AC_L4.3-W2.7-LS5.0-RD", jlc, pins
-    )
-    assert real.status == "red"
 
 
 def test_custom_shaped_kicad_pad_is_not_judged_for_fit():

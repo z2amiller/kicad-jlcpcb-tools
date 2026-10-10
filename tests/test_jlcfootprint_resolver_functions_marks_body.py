@@ -316,29 +316,8 @@ def test_marks_that_contradict_each_other_are_inconsistent():
     )
 
 
-def test_marks_outvote_a_seeded_label():
-    """A seeded per-footprint polarity is one vote; this part's own two marks win."""
-    marks = DrawingMarks(positive_pin="1", positive_pad="1")
-    verdict = resolve(
-        KICAD_SMF,
-        "Diode_SMD:D_SMF",
-        "ok",
-        "DIO-SMD_L2.8-W1.8",
-        JLC_SMF,
-        D1_PINS,
-        "seed-puuid",
-        marks=marks,
-    )
-    assert (verdict.rotation, verdict.polarity_source, verdict.confidence) == (
-        180,
-        "drawing",
-        "medium",
-    )
-    assert "seeded pin-1 polarity names the other pad" in verdict.note_text
-
-
 def test_a_lone_footprint_mark_decides_when_nothing_else_speaks():
-    """A seeded row has no symbol; the footprint's own + mark is enough, at medium confidence."""
+    """A part with no symbol pins: the footprint's own + mark is enough, at medium confidence."""
     marks = DrawingMarks(positive_pad="2")
     verdict = resolve(
         KICAD_SMF,

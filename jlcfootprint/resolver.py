@@ -97,7 +97,7 @@ class Verdict:
     confidence: str = "none"  # high | medium | low | none
     name_rotation: int | None = None
     polarity_light: str | None = None  # green | yellow | unknown; None for non-polar
-    polarity_source: str = ""  # token | label | seed | drawing | ""
+    polarity_source: str = ""  # token | label | drawing | ""
     non_polar: bool = False  # True when nothing names a polarity (axis, shape, marked)
     pad_count_kicad: int = 0
     pad_count_jlc: int = 0
@@ -335,7 +335,6 @@ def _reference_vote(
     jlc_named: list[Pad],
     package_name: str,
     symbol_pins: list[SymbolPin],
-    polarity_source: str,
     marks: DrawingMarks | None,
     reference: str,
     notes: list[str],
@@ -348,12 +347,11 @@ def _reference_vote(
     inconsistent data.  Calibrated on 2026-09-17: the marks named the right pad on
     all 22 parts with a known truth, the token on all diodes and electrolytics but
     on a minority of the molded-chip tantalums, where the two marks outvote it.
-    A seeded label is weaker: it yields to a token that disagrees with it.
 
     Returns ``(jlc_ref, source, outvoted, polarity, weak_token)``: the winning JLC
-    pad and where it came from (``token``, ``seed``, ``label`` or ``drawing``); the
-    names of the votes it outvoted; the pin-1 polarity the symbol's label or the
-    seed implies (``None`` once outvoted or disagreeing); and whether an
+    pad and where it came from (``token``, ``label`` or ``drawing``); the
+    names of the votes it outvoted; the pin-1 polarity the symbol's label
+    implies (``None`` once outvoted or disagreeing); and whether an
     unchallenged token is from the one family the crawl found weak.  When nothing
     votes, or the vote ties, ``jlc_ref`` is ``None`` and ``source`` carries the
     verdict status to use instead -- the reason is already appended to ``notes``.
@@ -366,29 +364,12 @@ def _reference_vote(
         if token_pad is None:
             notes.append("name token could not be applied: JLC pads are drawn vertical")
     label_pad = label_reference_pad(jlc_named, polarity, reference)
-    seeded = polarity_source != "symbol"
     symbol_drawn, footprint_drawn = drawing_reference_pads(jlc_named, marks, reference)
-    if (
-        seeded
-        and token_pad is not None
-        and label_pad is not None
-        and token_pad is not label_pad
-    ):
-        # The seed was read from one representative part per footprint; against
-        # this part's own name it is set aside (it may still be that the marks
-        # outvote the token below, so the note does not promise the token).
-        notes.append(
-            "seeded pin-1 polarity (per footprint) disagrees with the name token; not counted"
-        )
-        label_pad = None
-        polarity = None
     votes: list[tuple[Pad, str]] = []
     if token_pad is not None:
         votes.append((token_pad, "name token"))
     if label_pad is not None:
-        votes.append(
-            (label_pad, "seeded pin-1 polarity" if seeded else "symbol pin-1 label")
-        )
+        votes.append((label_pad, "symbol pin-1 label"))
     if symbol_drawn is not None:
         votes.append((symbol_drawn, "symbol + mark"))
     if footprint_drawn is not None:
@@ -422,14 +403,12 @@ def _reference_vote(
     if token_pad is jlc_ref:
         source = "token"
     elif label_pad is jlc_ref:
-        source = "seed" if seeded else "label"
+        source = "label"
     else:
         source = "drawing"
         if not outvoted:
             drawn_by = [name.split(" ")[0] for name in winners]  # symbol, footprint
             notes.append(DRAWING_NOTES["both" if len(drawn_by) == 2 else drawn_by[0]])
-    if source == "seed":
-        notes.append("reference terminal from the seeded per-footprint polarity")
     # A token nothing checked, on the one family whose token the crawl found weak,
     # is resolved at medium confidence (spec 16.9).
     weak_token = source == "token" and len(votes) == 1 and token_is_weak(package_name)
@@ -443,7 +422,6 @@ def _resolve_polarized(
     kind: str,
     package_name: str,
     symbol_pins: list[SymbolPin],
-    polarity_source: str,
     marks: DrawingMarks | None = None,
 ) -> Verdict:
     """Align a polarized two-pad part by terminal meaning, never by pad number (spec 7.3).
@@ -474,7 +452,6 @@ def _resolve_polarized(
         jlc_named,
         package_name,
         symbol_pins,
-        polarity_source,
         marks,
         reference,
         verdict.notes,
@@ -509,9 +486,7 @@ def _resolve_polarized(
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "polarity"
     verdict.confidence = (
-        "medium"
-        if assumed or outvoted or weak_token or source in ("seed", "drawing")
-        else "high"
+        "medium" if assumed or outvoted or weak_token or source == "drawing" else "high"
     )
     if (
         source == "token"
@@ -658,7 +633,6 @@ def resolve(
     package_name: str,
     jlc_pads: list[Pad],
     symbol_pins: list[SymbolPin],
-    polarity_source: str = "symbol",
     marks: DrawingMarks | None = None,
     kicad_courtyard: tuple[float, float, float, float] | None = None,
 ) -> Verdict:
@@ -666,8 +640,6 @@ def resolve(
 
     ``kicad_pads`` are in the footprint's own frame (bottom-side parts already
     un-mirrored by the caller); ``jlc_pads`` are millimetres in KiCad's frame.
-    ``polarity_source`` is ``symbol`` when ``symbol_pins`` came from the part's own
-    symbol and ``seed-puuid`` when they were seeded per footprint from the crawl.
     ``marks`` are the drawings' ``+`` marks and the JLC body box
     (:func:`jlcfootprint.drawing.drawing_marks`) and ``kicad_courtyard`` the
     footprint's courtyard box, both optional; together they add the polarity
@@ -731,7 +703,6 @@ def resolve(
             kind,
             package_name,
             symbol_pins,
-            polarity_source,
             marks,
         )
     elif len(kicad_named) == 2 and len(jlc_named) == 2:

@@ -79,11 +79,7 @@ def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup, caplog):
         "yellow",
     )
     part = check.cache.part("C2132")
-    assert (part.source, part.polarity_source, part.record.symbol_uuid) == (
-        "live",
-        "symbol",
-        "sym-C2132",
-    )
+    assert part.record.symbol_uuid == "sym-C2132"
     assert check.cache.needs("C2132") == set()
     assert check.display_text("Q1") == "180°"
     assert messages == []
@@ -631,7 +627,7 @@ def test_refreshing_the_board_forgets_every_row_and_rescans(setup):
 
 
 def test_clearing_the_cache_empties_it_but_keeps_the_schema(setup):
-    """Spec 16.5: every cache row goes, the board is rescanned, a seed can refill it."""
+    """Spec 16.5: every cache row goes, the board is rescanned and refilled."""
     check, _board, _events, _messages, _client = setup
     check.scan_board()
     check.worker.run_pending()

@@ -174,9 +174,7 @@ def test_a_cr123a_holder_reads_its_footprint_plus_and_resolves_green():
         record.symbol_shapes, record.footprint_shapes, record.footprint_origin
     )
     assert (marks.positive_pin, marks.positive_pad) == (None, "1")
-    verdict = resolve_record(
-        CR123A_PADS, CR123A_FOOTPRINT, record, "symbol", CR123A_COURTYARD
-    )
+    verdict = resolve_record(CR123A_PADS, CR123A_FOOTPRINT, record, CR123A_COURTYARD)
     assert (verdict.status, verdict.rotation, verdict.method) == (
         "green",
         0,

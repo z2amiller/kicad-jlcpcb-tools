@@ -476,7 +476,6 @@ def part_detail(check, reference: str, reread: bool = False) -> PartDetail | Non
     detail.marks = drawing_marks(
         record.symbol_shapes, record.footprint_shapes, record.footprint_origin
     )
-    detail.source = cached.source
     detail.fetched_at = cached.fetched_at
     if record.status == "ok" and record.pads:
         # The placement the canvas draws is solved here, not read from the row.
@@ -661,9 +660,7 @@ def jlc_facts(detail: PartDetail, exact_origin: bool = False) -> list:
         ("Origin", origin_text(detail, exact_origin)),
         (
             "Fetched",
-            f"{_when(detail.fetched_at)} ({detail.source})"
-            if detail.source
-            else "not fetched yet",
+            _when(detail.fetched_at) if detail.fetched_at else "not fetched yet",
         ),
     ]
     return facts

@@ -298,7 +298,7 @@ def parse_component_response(body: Any, lcsc: str) -> ComponentRecord:
 
 
 # ---------------------------------------------------------------------------
-# EasyEDA Pro footprint text: the per-uuid endpoint and the crawl's stored copies
+# EasyEDA Pro footprint text: what the per-uuid endpoint returns
 # ---------------------------------------------------------------------------
 
 # Pro footprint text is in mils with Y up; the classic canvas unit is 10 mil with Y
@@ -310,7 +310,7 @@ PRO_MILS_PER_CANVAS_UNIT = 10.0
 
 @dataclass
 class FootprintRecord:
-    """One footprint on its own: what the per-uuid endpoint or a seed row yields.
+    """One footprint on its own: what the per-uuid endpoint yields.
 
     ``pads`` use the same raw form as ``ComponentRecord.pads``: classic canvas units,
     Y down, origin subtracted.

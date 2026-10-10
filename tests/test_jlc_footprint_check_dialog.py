@@ -312,7 +312,6 @@ def make_detail(state: str = "green", **fields: Any) -> PartDetail:
         puuid="b3b82869fa924bae820e3a6cfb44d689",
         symbol_pins=[SymbolPin("1", "1"), SymbolPin("2", "2")],
         marks=MARKS,
-        source="live",
         fetched_at=1_757_000_000,
         verdict=verdict,
         stored=stored,

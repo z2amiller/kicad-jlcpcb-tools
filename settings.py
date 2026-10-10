@@ -642,18 +642,6 @@ class SettingsDialog(wx.Dialog):
         self.jlcfootprint_exact_origin_setting.Bind(
             wx.EVT_CHECKBOX, self.update_settings
         )
-        self.jlcfootprint_seed_button = wx.Button(
-            self,
-            wx.ID_ANY,
-            "Seed cache from file",
-        )
-        self.jlcfootprint_seed_button.SetToolTip(
-            wx.ToolTip(
-                "Merge a footprint cache seed file into the global cache; parts the plugin "
-                "fetched itself are kept"
-            )
-        )
-        self.jlcfootprint_seed_button.Bind(wx.EVT_BUTTON, self.seed_footprint_cache)
 
         jlcfootprint_sizer = wx.BoxSizer(wx.HORIZONTAL)
         jlcfootprint_sizer.Add(
@@ -664,10 +652,6 @@ class SettingsDialog(wx.Dialog):
             0,
             wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
             5,
-        )
-        jlcfootprint_sizer.AddStretchSpacer()
-        jlcfootprint_sizer.Add(
-            self.jlcfootprint_seed_button, 0, wx.ALIGN_CENTER_VERTICAL
         )
 
         ##### Show BOM Cost Estimator panel #####
@@ -941,45 +925,6 @@ class SettingsDialog(wx.Dialog):
     def update_jlcfootprint_exact_origin(self, enabled: bool) -> None:
         """Reflect whether CPL positions come from JLC's package origin (spec 17.1)."""
         self.jlcfootprint_exact_origin_setting.SetValue(bool(enabled))
-
-    def seed_footprint_cache(self, *_) -> None:
-        """Ask for a seed file and merge it into the footprint cache."""
-        from .jlc_footprint_check import import_seed  # noqa: PLC0415
-
-        with wx.FileDialog(
-            self,
-            "Seed the footprint cache from a file",
-            wildcard="SQLite databases (*.db)|*.db|All files (*.*)|*.*",
-            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
-        ) as dialog:
-            if dialog.ShowModal() != wx.ID_OK:
-                return
-            path = dialog.GetPath()
-        try:
-            result = import_seed(self.parent, path)
-        except (OSError, ValueError) as error:
-            self.logger.warning("Seed import failed: %s", error)
-            wx.MessageBox(
-                f"The seed file could not be imported:\n\n{error}",
-                "Seed footprint cache",
-                style=wx.ICON_ERROR,
-            )
-            return
-        self.logger.info(
-            "Seed import: %d parts and %d footprints added or refreshed; %d parts and %d "
-            "footprints the plugin fetched itself were kept",
-            result.parts,
-            result.packages,
-            result.kept_live_parts,
-            result.kept_live_packages,
-        )
-        wx.MessageBox(
-            f"Imported {result.parts} parts and {result.packages} footprints from\n{path}\n\n"
-            f"Kept {result.kept_live_parts} parts and {result.kept_live_packages} footprints "
-            "the plugin had fetched itself.",
-            "Seed footprint cache",
-            style=wx.ICON_INFORMATION,
-        )
 
     def load_settings(self) -> None:
         """Load settings and set checkboxes accordingly."""

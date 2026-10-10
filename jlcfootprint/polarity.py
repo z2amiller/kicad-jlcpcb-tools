@@ -272,9 +272,8 @@ def token_is_weak(package_name: str) -> bool:
     cans) is the one family whose token disagreed with its drawings' ``+`` marks on a
     measurable share of the crawl: 39 of 45 agreed, against 201 of 203 cans and
     effectively every diode (spec 16.9).  A part of that family whose drawings carry
-    no mark to check the token against -- a seeded row, which stores no drawings, or a
-    live drawing without a ``+`` -- is therefore resolved, but not with high
-    confidence.  Cans and diodes keep theirs.
+    no mark to check the token against -- a drawing without a ``+`` -- is therefore
+    resolved, but not with high confidence.  Cans and diodes keep theirs.
     """
     return bool(_MOLDED_CHIP_NAME.match(package_name.strip()))
 
