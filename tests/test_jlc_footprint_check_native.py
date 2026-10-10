@@ -1,21 +1,18 @@
-"""Native JLC column checks; enable with KICAD_NATIVE_WX_TESTS=1 on a desktop (spec 16.7)."""
+"""Native JLC column checks (spec 16.7): native_wx tests, enabled with KICAD_JLCPCB_NATIVE_TESTS=1."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-import os
 from types import SimpleNamespace
 
 import pytest
 
 from jlcfootprint.presentation import GLYPHS, SORT_ORDER
 
+from .variant_matrix_native_test_support import native_marks
 from .wx_harness import load_siblings
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("KICAD_NATIVE_WX_TESTS") != "1",
-    reason="Native wx tests require KICAD_NATIVE_WX_TESTS=1 and a desktop session",
-)
+pytestmark = native_marks
 
 
 @pytest.fixture
@@ -43,6 +40,15 @@ def native_list() -> Iterator[SimpleNamespace]:
             flags=0,
         )
         jlc.SetSortable(True)
+        # The real window ends in this spacer, which takes wxGTK's stretch of the
+        # last column; without it GTK widens JLC instead (mainwindow.py).
+        control.AppendTextColumn(
+            " ",
+            columns["TRAILING_SPACER_COL"],
+            width=24,
+            mode=dv.DATAVIEW_CELL_INERT,
+            align=wx.ALIGN_CENTER,
+        )
         row = ["R1", "10k", "R_0603", "C1", "Basic", "100", *(["0"] * 8)]
         model.AddEntry(row)
         frame.Show()
@@ -91,6 +97,7 @@ def native_detail() -> Iterator[SimpleNamespace]:
     from jlcfootprint.controller import PartDetail
     from jlcfootprint.drawing import drawing_marks
     from jlcfootprint.geometry import easyeda_pads_to_mm
+    from jlcfootprint.model import Decision
     from jlcfootprint.resolver import resolve
     from jlcfootprint.verdicts import StoredVerdict
     from tools.jlcfootprint.kicad_library import library_footprint
@@ -114,6 +121,15 @@ def native_detail() -> Iterator[SimpleNamespace]:
         marks=marks,
         kicad_courtyard=courtyard,
     )
+    stored = StoredVerdict(
+        "C7175",
+        "hash",
+        status=verdict.status,
+        fit=verdict.fit,
+        rotation=verdict.rotation,
+        method=verdict.method,
+        confidence=verdict.confidence,
+    )
     yield SimpleNamespace(
         detail=PartDetail(
             "C5",
@@ -128,14 +144,16 @@ def native_detail() -> Iterator[SimpleNamespace]:
             marks=marks,
             fetched_at=1_757_000_000,
             verdict=verdict,
-            stored=StoredVerdict(
+            stored=stored,
+            # The banner reads the check's decision; without one it is empty.
+            decision=Decision(
+                "C5",
                 "C7175",
-                "hash",
+                rotation=verdict.rotation,
+                source="derived",
                 status=verdict.status,
                 fit=verdict.fit,
-                rotation=verdict.rotation,
-                method=verdict.method,
-                confidence=verdict.confidence,
+                verdict=stored,
             ),
         )
     )
