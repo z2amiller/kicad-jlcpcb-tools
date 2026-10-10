@@ -702,7 +702,10 @@ class FootprintCheck:
         """Return how many part numbers a board-wide fetch adds for the other variants (spec 18.3).
 
         Codes the output variant orders anywhere on the board are not counted again.
+        A board without variants has none, and is not read for them.
         """
+        if self.other_lcscs is None:
+            return 0
         parts = self.read_board()
         codes = {part.lcsc for part in parts if part.lcsc}
         return len(self._other_variant_codes(parts) - codes)
@@ -712,13 +715,17 @@ class FootprintCheck:
 
         A verdict is keyed on the part number and the pad geometry, so two placements
         of one part on one footprint share a row and an override set on either
-        repaints both (spec 5.3).
+        repaints both (spec 5.3).  On a board with variants a reference whose other
+        variant orders this part on the same pads shares the row too (spec 18.2).
         """
         part = self.parts.get(reference)
         if part is None or not part.lcsc:
             return [] if part is None else [reference]
         return sorted(
-            other.reference
-            for other in self.parts.values()
-            if other.lcsc == part.lcsc and other.footprint_hash == part.footprint_hash
+            {
+                other.reference
+                for other in [*self.parts.values(), *self.prefetched.values()]
+                if other.lcsc == part.lcsc
+                and other.footprint_hash == part.footprint_hash
+            }
         )

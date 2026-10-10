@@ -6,6 +6,8 @@ queues them exactly like a judged part, after the judged ones and without making
 them judged parts, so an output switch finds their verdicts stored.
 """
 
+from dataclasses import replace
+
 import pytest
 
 from jlcfootprint.verdicts import PENDING
@@ -127,3 +129,23 @@ def test_a_board_without_variants_prefetches_nothing(tmp_path):
     assert (summary.prefetched, check.prefetched) == (0, {})
     assert "prefetched" not in str(summary)
     assert check.other_variant_codes() == 0
+
+
+def test_another_variant_s_part_on_the_same_pads_shares_the_verdict(setup):
+    """Q2's other variant orders Q1's part on the same pads: an override reaches both (spec 18.2)."""
+    check, board, _events, _client, variants = setup
+    board["parts"].append(replace(board["parts"][0], reference="Q2", lcsc="C2286"))
+    variants["Q2"] = {"C2132"}
+    check.scan_board()
+    assert check.references_sharing_verdict("Q1") == ["Q1", "Q2"]
+    assert check.references_sharing_verdict("Q2") == ["Q2"]
+
+
+def test_an_ordinary_board_is_not_read_for_other_variants_codes(tmp_path):
+    """Refresh and Clear cache ask for the other variants' codes; an ordinary board has none."""
+    check, _board, _events, _messages, _client = controller_setup(tmp_path)
+    reads = []
+    read_board = check.read_board
+    check.read_board = lambda: reads.append(1) or read_board()
+    assert check.other_variant_codes() == 0
+    assert reads == []
