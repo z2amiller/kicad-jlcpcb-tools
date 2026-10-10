@@ -1,5 +1,8 @@
 """The JLC column in upstream's native variant matrix (spec 18.5), headless in CI's lane.
 
+The last test follows a JLC cell into the detail dialog and its override prompt,
+which names the references and the variants an override reaches (spec 18.2).
+
 The matrix is a real ``wx.grid``: these tests mount it (or the whole plugin window)
 under Xvfb and check what wx actually lays out, paints and shows on hover.  The
 window test runs the plugin's own check, through its variant read, against a
@@ -8,6 +11,7 @@ cache that already holds the board's part numbers (``checked_window``).
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 import pytest
@@ -15,7 +19,7 @@ import pytest
 from jlcfootprint.presentation import GLYPHS, MatrixCell
 
 from .jlc_footprint_variant_native_support import checked_window
-from .native_window_support import choose_output, focus, window_ui
+from .native_window_support import choose_output, focus, modal_handler, window_ui
 from .native_wx_support import pump
 from .variant_matrix_native_test_support import (
     MatrixHarness,
@@ -370,6 +374,43 @@ def test_a_variant_window_opens_the_detail_and_re_fetches_through_the_matrix(
         assert "C1" in checks[0].worker.pending_lookups()
         row = view.model.row_for_component("component-1")
         assert view.model.get_display(row, col) == "◷"
+        assert ui.messages == []
+
+    window_ui.run(check)
+
+
+def test_the_override_prompt_names_the_references_and_the_variants(
+    window_ui: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Double-click the JLC cell, then "Set override…": the prompt says what it reaches (spec 18.2)."""
+    checked_window(window_ui, monkeypatch)
+
+    def check(ui: Any) -> None:
+        view, wx = ui.controller.view, ui.wx
+        detail = sys.modules[
+            ui.main.jlc_footprint_window.JlcFootprintDetailDialog.__module__
+        ]
+        said: list[str] = []
+
+        def prompt(dialog: Any) -> None:
+            # wx's Wrap breaks the label into lines; the words are what matter.
+            said.append(
+                " ".join(dialog.scope.GetLabel().split()) if dialog.scope else ""
+            )
+
+        def open_prompt(dialog: Any) -> None:
+            with modal_handler(ui, detail.OverrideDialog, prompt):
+                dialog.on_set_override(None)
+
+        with modal_handler(ui, detail.JlcFootprintDetailDialog, open_prompt) as shown:
+            click_native_cell(
+                view, wx, 0, view.model.column_for(None, "jlc"), double=True
+            )
+        assert len(shown) == 1
+        assert said == [
+            "This override applies to R1, in every variant that orders C1 on this "
+            "footprint."
+        ]
         assert ui.messages == []
 
     window_ui.run(check)

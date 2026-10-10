@@ -11,6 +11,7 @@ no wx anywhere near them.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 import time
 from typing import Any
 
@@ -397,6 +398,43 @@ def matrix_cell(check, reference: str, rule: Any = None) -> MatrixCell:
 # ---------------------------------------------------------------------------
 
 OVERRIDE_ANGLES = (0, 90, 180, 270)
+# The override dialog names this many references at most, then counts the rest.
+SCOPE_NAMED = 6
+
+
+def _reference_order(reference: str) -> tuple:
+    """Sort references naturally: R2 before R10."""
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part.casefold())
+        for part in re.split(r"([0-9]+)", reference)
+    )
+
+
+def override_scope(references, lcsc: str, variants: bool = False) -> str:
+    """Return the override dialog's sentence on what an override reaches (spec 18.2).
+
+    An override lives on the verdict row of the part and its pads, so it applies to
+    every reference sharing that row and, on a board with variants, in every variant
+    that orders the part there: "This override applies to R1 and R5, in every
+    variant that orders C123 on this footprint."  More than ``SCOPE_NAMED``
+    references are counted rather than listed; without a part number or a reference
+    there is nothing to say.
+    """
+    names = sorted(
+        {reference for reference in references if reference}, key=_reference_order
+    )
+    if not names or not lcsc:
+        return ""
+    if len(names) > SCOPE_NAMED:
+        listed = f"{', '.join(names[:SCOPE_NAMED])} and {len(names) - SCOPE_NAMED} more"
+    elif len(names) == 1:
+        listed = names[0]
+    else:
+        listed = f"{', '.join(names[:-1])} and {names[-1]}"
+    sentence = f"This override applies to {listed}"
+    if variants:
+        sentence += f", in every variant that orders {lcsc} on this footprint"
+    return f"{sentence}."
 
 
 def part_detail(check, reference: str, reread: bool = False) -> PartDetail | None:
