@@ -234,6 +234,11 @@ def test_a_variant_window_judges_its_output_variant_in_the_jlc_and_corr_columns(
         assert ui.dialog.jlc_footprint_check is checks[0]
         assert view.model.jlc_available
         assert cells() == ("✓", "180°")
+        # A re-render (a display change, a result repaint) reads the check; it
+        # never scans, so it never starts a generation (spec 18.4).
+        generation = checks[0].generation
+        ui.controller.recompute()
+        assert checks[0].generation == generation
         model = view.model
         row = model.row_for_component("component-1")
         assert "Fits; rotation 180°" in model.cell_details(
