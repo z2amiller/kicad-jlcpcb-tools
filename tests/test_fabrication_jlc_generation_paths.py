@@ -3,9 +3,10 @@
 Upstream builds every CPL row in ``Fabrication._cpl_row``, which the ordinary
 generation (``begin_ordinary_generation``, through ``prepare_cpl``) and the variant
 generation (``begin_generation``, reached through the variant controller) both
-call, so the check's decisions enter there for both.  A board with KiCad variants
-never starts the check, so the variant tests pin the path itself: each step must
-hand ``decisions`` on, and without them the rows stay upstream's.
+call, so the check's decisions enter there for both.  The variant tests pin the
+path itself: each step must hand ``decisions`` on, and without them the rows stay
+upstream's.  What the check reads on a variant board is
+``test_jlc_footprint_check_variants.py``'s (spec 18.2).
 """
 
 from __future__ import annotations

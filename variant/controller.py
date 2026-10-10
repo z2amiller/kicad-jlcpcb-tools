@@ -59,6 +59,7 @@ class VariantMainController:
         self._clipboard: Any = None
         self._clipboard_nonce = ""
         self._render_queued = False
+        self._jlc_repaint_queued = False
         self._presentation: Optional[_Presentation] = None
         self.assembly_lookup = AssemblyMetadataLookup(
             on_result=self._enriched,
@@ -218,9 +219,13 @@ class VariantMainController:
             return
         self._refreshing = True
         try:
+            previous = self.session.snapshot.source_token
             self.session.refresh()
             self.dialog._invalidate_catalog_details()
             self._presentation = None
+            if self.session.snapshot.source_token != previous:
+                # This read also advances the token the poll compares (spec 18.4).
+                self._jlc_rescan()
             self.render()
             self.start_enrichment(retry=True)
             if getattr(self, "timer", None) is not None:
@@ -244,6 +249,7 @@ class VariantMainController:
             reliable = self.session.reliable
             latest = self.session.refresh()
             if not reliable or latest.source_token != previous:
+                self._jlc_rescan()
                 self.render()
                 self.start_enrichment()
         except Exception as error:
@@ -421,6 +427,7 @@ class VariantMainController:
             self.session.set_output_variant(
                 self.session.snapshot.variants[event.GetSelection()].name
             )
+            self._jlc_rescan()
             self.render()
         except Exception as error:
             names = [variant.name for variant in self.session.snapshot.variants]
@@ -483,6 +490,7 @@ class VariantMainController:
 
     def _apply(self, edits: Sequence[Any]) -> None:
         """Apply captured edits within the editor's native action transaction."""
+        before = self.session.snapshot
         try:
             callback = getattr(self.dialog, "_board_action", None)
             if callback is None or not self.session.edits_needed(edits):
@@ -493,6 +501,7 @@ class VariantMainController:
             # Native compensation can successfully reread newer external state.
             # Publish that recovered view before accepting another grid action.
             if self.session.reliable:
+                self._jlc_edited(before)
                 try:
                     self.render()
                 except Exception as refresh_error:
@@ -500,6 +509,7 @@ class VariantMainController:
                         "Could not display recovered variant state: %s", refresh_error
                     )
             raise
+        self._jlc_edited(before)
         self.render()
         self.start_enrichment()
         self.dialog.pcbnew.Refresh()
@@ -632,6 +642,44 @@ class VariantMainController:
     def _render_pending(self) -> None:
         self._render_queued = False
         if self.session.reliable:
+            self.recompute()
+
+    # ------------------------------------------------------------------
+    # The JLC footprint check (spec 18): thin delegators into the window's
+    # presenter, which owns everything behind them
+    # ------------------------------------------------------------------
+
+    def _jlc(self) -> Any:
+        """Return the window's JLC footprint presenter, None for a window without one."""
+        return getattr(self.dialog, "jlc_footprint_presenter", None)
+
+    def _jlc_rescan(self) -> None:
+        """Have the check judge the output variant afresh before a re-render (spec 18.4)."""
+        presenter = self._jlc()
+        if presenter is not None:
+            presenter.rescan_variant_board()
+
+    def _jlc_edited(self, before: BoardVariantSnapshot) -> None:
+        """Have the check re-read what an edit changed, before the re-render (spec 18.4)."""
+        presenter = self._jlc()
+        if presenter is not None:
+            presenter.variant_board_edited(before, self.session.snapshot)
+
+    def repaint_jlc(self) -> None:
+        """Repaint the JLC and Corr. cells once per burst of check results (spec 18.4).
+
+        The prepared presentation is kept: only the check's cells changed, so the
+        re-render reuses the catalog facts and the corrections.
+        """
+        if self.closed or self._jlc_repaint_queued:
+            return
+        self._jlc_repaint_queued = True
+        wx.CallAfter(self._repaint_jlc_now)
+
+    def _repaint_jlc_now(self) -> None:
+        """Re-render with the check's current cells unless generation holds the matrix."""
+        self._jlc_repaint_queued = False
+        if self.session.reliable and not self.session.generating:
             self.recompute()
 
     def begin_generation(self, corrections: Any, *, decisions: Any = None) -> None:
