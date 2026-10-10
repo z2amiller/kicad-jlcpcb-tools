@@ -429,6 +429,32 @@ class JlcFootprintPresenter:
             for part in snapshot.for_variant("")
         }
 
+    def _variant_references_with_lcsc(self, references: Iterable[str]) -> list[str]:
+        """Return those references whose judged part, the output variant's, has a number."""
+        check = self._active_jlc_footprint_check()
+        if check is None:
+            return []
+        return [
+            reference
+            for reference in references
+            if (part := check.parts.get(reference)) is not None and part.lcsc
+        ]
+
+    def show_variant_jlc_detail(self, references: Iterable[str]) -> None:
+        """Open the detail dialog for the first reference whose output part has a number (spec 18.5)."""
+        wanted = self._variant_references_with_lcsc(references)
+        if wanted:
+            self.show_jlc_footprint_detail(wanted[0])
+
+    def refetch_variant_references(self, references: Iterable[str]) -> None:
+        """Re-fetch the output variant's parts of these references (spec 18.5)."""
+        wanted = self._variant_references_with_lcsc(references)
+        if wanted:
+            refetch_jlc_footprint_references(
+                self.window, wanted, self._active_jlc_footprint_check()
+            )
+            self._repaint_jlc_references(wanted)
+
     def rescan_variant_board(self) -> None:
         """Judge the output variant afresh: a full scan, a new generation (spec 18.4).
 

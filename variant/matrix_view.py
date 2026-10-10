@@ -35,6 +35,16 @@ _COMPACT_FIELDS = FLAG_FIELDS | {
 }
 # The JLC footprint check's glyph column keeps the ordinary list's Std width (spec 18.5).
 _JLC_WIDTH_DIP = 36
+# Its submenu in the cell menu: (action, label, needs a selected part number); None
+# is the separator (spec 18.5).
+_JLC_ACTIONS = (
+    ("jlc_details", "Details…", True),
+    ("jlc_refetch", "Re-fetch data", True),
+    (None, "", False),
+    ("jlc_recheck", "Re-check board", False),
+    ("jlc_refresh", "Refresh board data", False),
+    ("jlc_clear_cache", "Clear cache", False),
+)
 _VERTICAL_HEADERS = _COMPACT_FIELDS | {"pcb_angle", "correction"}
 _SIDE_HEADER_SCALE = 0.8
 _SIDE_PADDING_DIP = 6
@@ -1258,6 +1268,10 @@ class VariantMatrixView(gridlib.Grid):
 
     def _activate_target(self, target: MatrixTarget) -> bool:
         """Share keyboard and mouse activation without changing native selection."""
+        if target.field == "jlc":
+            # The check's detail dialog writes no board data (spec 18.5).
+            self._dispatch_action("jlc_details", target)
+            return True
         if not self._mutations_enabled:
             return False
         if target.field == "correction":
@@ -1330,10 +1344,40 @@ class VariantMatrixView(gridlib.Grid):
                 ),
                 item,
             )
+        self._append_jlc_menu(menu, target)
         try:
             self.PopupMenu(menu)
         finally:
             menu.Destroy()
+
+    def _append_jlc_menu(self, menu: wx.Menu, target: MatrixTarget) -> None:
+        """Append the JLC footprint check's submenu, enabled as on the ordinary list (spec 18.5).
+
+        Everything is disabled while the check is off; Details and Re-fetch also need
+        a selected row whose output variant carries a part number.
+        """
+        available = self.model.jlc_available
+        selected = available and any(
+            (cell := self.model.jlc_cell(component)) is not None and cell.lcsc
+            for component in self.selected_physical_component_ids()
+        )
+        submenu = wx.Menu()
+        for action, label, per_part in _JLC_ACTIONS:
+            if action is None:
+                submenu.AppendSeparator()
+                continue
+            item = submenu.Append(wx.ID_ANY, label)
+            item.Enable(selected if per_part else available)
+            submenu.Bind(
+                wx.EVT_MENU,
+                lambda _event,
+                captured_action=action,
+                captured_target=target: self._dispatch_action(
+                    captured_action, captured_target
+                ),
+                item,
+            )
+        menu.AppendSubMenu(submenu, "JLC footprint")
 
     def _dispatch_action(self, action: str, target: MatrixTarget) -> None:
         """Route cell actions through the controller that owns editing and dialogs."""
