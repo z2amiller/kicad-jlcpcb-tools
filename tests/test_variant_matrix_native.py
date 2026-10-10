@@ -243,7 +243,7 @@ def test_native_large_matrix_paints_headers_and_preserves_deep_scroll(
             dc: Any, cols: list[int], left_origin: int, visible_width: int
         ) -> None:
             if left_origin == 0:
-                frozen_labels.update(col for col in cols if col < 5)
+                frozen_labels.update(col for col in cols if col < 6)
             draw_labels(dc, cols, left_origin, visible_width)
 
         def observe_grid_line(col: int) -> Any:
@@ -257,8 +257,8 @@ def test_native_large_matrix_paints_headers_and_preserves_deep_scroll(
         view.ForceRefresh()
         settle(wx)
         assert view.GetNumberRows() == 1000
-        assert view.GetNumberFrozenCols() == 5
-        assert frozen_labels == set(range(5))
+        assert view.GetNumberFrozenCols() == 6
+        assert frozen_labels == set(range(6))
 
         click_native_cell(view, wx, 0, 0)
         assert view.selected_target.component_id == "component-0"
@@ -268,7 +268,7 @@ def test_native_large_matrix_paints_headers_and_preserves_deep_scroll(
             view.ForceRefresh()
             settle(wx)
             painted = {col for row, col, _clip in draws if row == 0}
-            assert set(range(5)) <= painted, (
+            assert set(range(6)) <= painted, (
                 "Ref selection must repaint the native frozen physical cells"
             )
             assert any(
@@ -319,9 +319,9 @@ def test_native_large_matrix_paints_headers_and_preserves_deep_scroll(
         original_size = frame.GetSize()
         frame.SetSize((650, 420))
         settle(wx)
-        assert view.GetNumberFrozenCols() == 5
+        assert view.GetNumberFrozenCols() == 6
         assert view.GetFrozenColGridWindow().GetClientSize().width == sum(
-            view.GetColSize(index) for index in range(5)
+            view.GetColSize(index) for index in range(6)
         )
         assert (
             view.GetGridWindow().GetClientSize().width
@@ -525,7 +525,7 @@ def test_native_sparse_selection_survives_reorder_sort_and_catalog_refresh(
 
 
 @pytest.mark.parametrize("legacy_resize", [False, True])
-@pytest.mark.parametrize("frozen", [1, 5])
+@pytest.mark.parametrize("frozen", [1, 6])
 def test_native_freeze_permissions_follow_empty_repopulate_geometry(
     modules: tuple[ModuleType, ModuleType],
     monkeypatch: pytest.MonkeyPatch,
@@ -552,7 +552,7 @@ def test_native_freeze_permissions_follow_empty_repopulate_geometry(
             frame.SetSize((420, 450) if count == 1 else (1200, 650))
             settle(wx)
 
-        previous = 5 if frozen == 1 else 1
+        previous = 6 if frozen == 1 else 1
         geometry(previous)
         assert view.GetNumberFrozenCols() == previous
         view.set_model(model_module.MatrixModel(Snapshot(())))
@@ -624,7 +624,7 @@ def test_native_ref_only_seam_allows_scrolling_correction_auto_size(
         window, point = support.cell_point(view, wx, 0, 0)
         support.send_mouse(wx, window, wx.wxEVT_MOTION, point)
         assert "R1" in window.GetToolTip().GetTip()
-        for shared_col in range(5):
+        for shared_col in range(6):
             click_native_cell(view, wx, 0, shared_col)
             assert view.selected_target.field == view.model.columns[shared_col].key
         col = view.model.column_for(None, "correction")

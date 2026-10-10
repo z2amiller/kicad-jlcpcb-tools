@@ -511,7 +511,7 @@ def test_name_click_reveals_variant_without_changing_component_selection(
             h.selection(),
             view.GetViewStart()[1],
             view._sort_state,
-            tuple(view.GetColSize(col) for col in range(5)),
+            tuple(view.GetColSize(col) for col in range(6)),
         )
         visible_left, visible_right = h.viewport()
         x = (max(left, visible_left) + min(right, visible_right)) // 2 - visible_left
@@ -541,7 +541,7 @@ def test_name_click_reveals_variant_without_changing_component_selection(
             h.selection(),
             view.GetViewStart()[1],
             view._sort_state,
-            tuple(view.GetColSize(col) for col in range(5)),
+            tuple(view.GetColSize(col) for col in range(6)),
         )
         if right - left <= view.GetGridWindow().GetClientSize().width:
             assert h.viewport()[0] <= left and right <= h.viewport()[1]

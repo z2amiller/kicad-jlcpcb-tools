@@ -55,17 +55,18 @@ def test_native_boundary_normalizes_values_and_rejects_duplicate_edit_targets(
 
 
 def test_schema_and_shared_row_map(snapshot: native.BoardVariantSnapshot) -> None:
-    """Keep five physical columns and ten visible fields in every variant."""
+    """Keep six physical columns and ten visible fields in every variant."""
     model = m.MatrixModel(snapshot)
     assert model.variants == ("", "A", "B")
-    assert [column.key for column in model.columns[:5]] == [
+    assert [column.key for column in model.columns[:6]] == [
         "ref",
         "footprint",
         "side",
         "pcb_angle",
         "correction",
+        "jlc",
     ]
-    assert len(model.columns) == 35
+    assert len(model.columns) == 36
     fields = [
         "value",
         "params",
@@ -340,10 +341,10 @@ def test_saved_order_is_normalized_without_losing_live_variants(
     model.set_variant_order(("B", "A", ""))
     assert model.set_variant_order(saved)
     assert not model.set_variant_order(saved)
-    assert model.columns == original_columns[:5] + tuple(
+    assert model.columns == original_columns[:6] + tuple(
         col
         for variant in expected
-        for col in original_columns[5:]
+        for col in original_columns[6:]
         if col.variant == variant
     )
     assert semantic_cells(model) == original_cells and model.snapshot is snapshot
