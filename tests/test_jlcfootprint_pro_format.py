@@ -81,6 +81,15 @@ def test_pro_pads_skip_unreadable_records_and_other_shapes():
     assert skipped == 2
 
 
+def test_a_polygon_pad_drawn_with_an_arc_is_unreadable():
+    """Its arc's angle is no coordinate and its end points miss the bulge: the pad is counted as skipped."""
+    straight = '["PAD","e1",0,"",1,"1",0,0,0,null,["POLY",[-10,-10,"L",10,-10,10,10,-10,10]],[]]'
+    arced = '["PAD","e2",0,"",1,"2",50,0,0,null,["POLY",[40,-10,"L",60,-10,"ARC",180,40,10]],[]]'
+    pads, skipped = parse_pro_pads([straight, arced])
+    assert [(pad["number"], pad["w"], pad["h"]) for pad in pads] == [("1", 2.0, 2.0)]
+    assert skipped == 1
+
+
 def test_pro_shape_lines_drop_blank_lines():
     """Splitting keeps every record and nothing else."""
     assert pro_shape_lines("\n" + "\n\n".join(PRO_SOT23) + "\n  \n") == PRO_SOT23

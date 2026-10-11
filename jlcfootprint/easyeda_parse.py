@@ -348,12 +348,21 @@ def pro_shape_lines(text: str) -> list[str]:
     return [line.strip() for line in text.split("\n") if line.strip()]
 
 
+# The tokens that open an arc in a Pro point list.
+_ARC_TOKENS = ("A", "CA", "ARC")
+
+
 def _poly_extent(points: Any) -> tuple[float, float]:
     """Return the width and height of a Pro ``POLY`` outline's bounding box in canvas units.
 
-    The outline lists coordinates in mils with letter tokens (``L``, ``A``) between
-    segments; the numbers are read in x/y pairs and the letters skipped.
+    The outline lists coordinates in mils with the letter ``L`` between straight
+    segments; the numbers are read in x/y pairs.  An outline with an arc
+    (``ARC``, ``A`` or ``CA``) is unreadable, as the drawing reader treats a body
+    outline with one: the arc's angle sits among the coordinates, and a box of
+    its end points would leave out the bulge.
     """
+    if any(isinstance(value, str) and value.upper() in _ARC_TOKENS for value in points):
+        raise ValueError("polygon pad drawn with an arc")
     numbers = [float(value) for value in points if not isinstance(value, str)]
     if len(numbers) < 4:
         raise ValueError("polygon pad without an outline")
