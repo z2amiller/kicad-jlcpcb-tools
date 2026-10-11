@@ -3,12 +3,12 @@
 from jlcfootprint.drawing import DrawingMarks
 from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.geometry import Pad
-from jlcfootprint.resolver import (
+from jlcfootprint.polarity import (
     kicad_reference_pad,
     label_reference_pad,
-    resolve,
     token_reference_side,
 )
+from jlcfootprint.resolver import resolve
 
 # KiCad Diode_SMD:D_SMF with the schematic's K on pad 1 and A on pad 2.
 KICAD_SMF = [

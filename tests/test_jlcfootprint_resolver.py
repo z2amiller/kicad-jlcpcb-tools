@@ -5,7 +5,8 @@ from pathlib import Path
 
 from jlcfootprint.easyeda_parse import SymbolPin, parse_component_response
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
-from jlcfootprint.resolver import normalise_function, part_kind, resolve, terminal_of
+from jlcfootprint.polarity import normalise_function, part_kind, terminal_of
+from jlcfootprint.resolver import resolve
 
 FIXTURES = Path(__file__).parent / "fixtures" / "jlcfootprint" / "easyeda"
 

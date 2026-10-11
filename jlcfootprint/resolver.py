@@ -45,27 +45,13 @@ from .polarity import (
     drawing_reference_pads,
     kicad_reference_pad,
     label_reference_pad,
-    normalise_function,
     part_kind,
     pin1_meaning,
     side_of,
-    terminal_of,
     token_is_weak,
     token_reference_side,
 )
 from .records import DrawingMarks, SymbolPin, pin1_polarity
-
-__all__ = [
-    "Verdict",
-    "kicad_reference_pad",
-    "label_reference_pad",
-    "normalise_function",
-    "pair_by_name",
-    "part_kind",
-    "resolve",
-    "terminal_of",
-    "token_reference_side",
-]
 
 CHECKERBOARD_NOTE = (
     "no JLC footprint data for this part (expect a checkerboard in the preview)"
@@ -362,7 +348,8 @@ def _reference_vote(
     Returns ``(jlc_ref, source, outvoted, polarity, weak_token)``: the winning JLC
     pad and where it came from (``token``, ``label`` or ``drawing``); the
     names of the votes it outvoted; the pin-1 polarity the symbol's label
-    implies (``None`` once outvoted or disagreeing); and whether an
+    implies (``None`` when the vote ties or nothing votes), which the caller
+    replaces with what the vote says JLC's pad 1 is; and whether an
     unchallenged token is from the one family whose token is weak
     (:func:`jlcfootprint.polarity.token_is_weak`).  When nothing votes, or the
     vote ties, ``jlc_ref`` is ``None`` and ``source`` carries the verdict status
@@ -410,8 +397,6 @@ def _reference_vote(
             f"{', '.join(outvoted)} {'names' if len(outvoted) == 1 else 'name'} the other pad; "
             f"{', '.join(winners)} {'decides' if len(winners) == 1 else 'decide'}"
         )
-        if label_pad is not None and label_pad is not jlc_ref:
-            polarity = None
     if token_pad is jlc_ref:
         source = "token"
     elif label_pad is jlc_ref:

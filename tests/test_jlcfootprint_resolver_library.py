@@ -5,9 +5,10 @@ import math
 import pytest
 
 from jlcfootprint.drawing import drawing_marks
+from jlcfootprint.fit import pair_by_name
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm, rotate
 from jlcfootprint.naming import parse_package_name
-from jlcfootprint.resolver import pair_by_name, resolve
+from jlcfootprint.resolver import resolve
 from tests.jlcfootprint_support import recorded
 from tools.jlcfootprint.kicad_library import (
     footprints_available,
