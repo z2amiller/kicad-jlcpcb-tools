@@ -57,6 +57,8 @@ from .fabrication_archive import (
     collect_gerber_entries,
 )
 from .footprint_helpers import get_is_dnp
+from .jlcfootprint.model import Decision
+from .jlcfootprint.report import CplRotation
 from .lcsc import is_lcsc_part, normalize_lcsc
 
 # JLC rejects BOM rows whose total length exceeds 2048 characters.  We budget
@@ -218,6 +220,7 @@ class Fabrication:
         self.logger = logging.getLogger(__name__)
         self.board = board
         self.corrections: tuple[AnyCorrection, ...] = ()
+        self.rotation_report: list[CplRotation] = []
         self.variant_name = ""
         self._generation: Optional[_Generation] = None  # noqa: UP045
         self._ordinary_generation: Optional[_OrdinaryGeneration] = None  # noqa: UP045
@@ -264,7 +267,10 @@ class Fabrication:
         return tuple(sorted(tuple(part[key] for key in keys) for part in parts))
 
     def begin_ordinary_generation(
-        self, corrections: tuple[AnyCorrection, ...]
+        self,
+        corrections: tuple[AnyCorrection, ...],
+        *,
+        decisions: Optional[dict[str, Any]] = None,  # noqa: UP045
     ) -> OutputAssemblySnapshot:
         """Freeze ordinary BOM, placements and checks from one native mapping read."""
         if self.output_snapshot is not None:
@@ -294,7 +300,8 @@ class Fabrication:
                 )
 
         output = OutputAssemblySnapshot(
-            self.prepare_bom(parts), self.prepare_cpl(corrections, parts)
+            self.prepare_bom(parts),
+            self.prepare_cpl(corrections, parts, decisions=decisions),
         )
         validate_source()
         self._ordinary_generation = _OrdinaryGeneration(output, validate_source)
@@ -390,6 +397,8 @@ class Fabrication:
         variant_name: str,
         corrections: tuple[AnyCorrection, ...],
         validate_source: Callable[[], None],
+        *,
+        decisions: Optional[dict[str, Any]] = None,  # noqa: UP045
     ) -> OutputAssemblySnapshot:
         """Freeze native assembly rows and allocate isolated output staging.
 
@@ -430,6 +439,7 @@ class Fabrication:
         )
         groups: dict[tuple[str, str, str], list[str]] = {}
         placements = []
+        self.rotation_report = []
         references: set[str] = set()
         for part in sorted(
             assembly_snapshot.for_variant(variant_name), key=lambda part: part.reference
@@ -460,6 +470,8 @@ class Fabrication:
                         origin,
                         shared_corrections[part.component_id],
                         (part.reference, part.value, package),
+                        lcsc=part.lcsc,
+                        decisions=decisions,
                     )
                 )
         bom = tuple(
@@ -975,26 +987,107 @@ class Fabrication:
     def generate_cpl(
         self,
         corrections: Optional[tuple[AnyCorrection, ...]] = None,  # noqa: UP045
+        *,
+        decisions: Optional[dict[str, Any]] = None,  # noqa: UP045
     ) -> None:
         """Prepare every placement before opening the output file."""
-        self.write_cpl(self.prepare_cpl(corrections))
+        self.write_cpl(self.prepare_cpl(corrections, decisions=decisions))
+
+    def _decision_for_part(self, decision: Any, part: dict) -> Any:
+        """Return the decision the CPL may act on, or a raw-angle stand-in.
+
+        The check judges the part the board names; when this row places another LCSC
+        (a variant can order another part than the board's own) the two disagree about
+        what is being placed, so neither the rotation nor the origin may be used and
+        the part keeps its raw angle and the pad-box centre.  The stand-in is a
+        real ``Decision`` whose defaults already say all of that: no rotation,
+        ``source`` raw, no origin.
+        """
+        stored_lcsc = str(part["lcsc"] or "")
+        if decision is None or str(decision.lcsc or "") == stored_lcsc:
+            return decision
+        note = (
+            f"the check saw {decision.lcsc or 'no LCSC'} but the project has "
+            f"{stored_lcsc or 'none'}; raw angle kept"
+        )
+        self.logger.warning("JLC footprint check: %s: %s", part["reference"], note)
+        return Decision(
+            str(part["reference"]), stored_lcsc, status="lcsc-mismatch", note=note
+        )
+
+    def _rotation_for_decision(
+        self,
+        footprint: Any,
+        decision: Any,
+        match: Optional[CorrectionMatch],  # noqa: UP045
+        part: dict,
+        position_source: str = "pad-box",
+    ) -> float:
+        """Apply the footprint check's decision and record the summary row.
+
+        A decision without a rotation, a pending part and a part without a verdict all
+        keep the raw angle.  The correction rule that would have matched is only noted.
+        ``decision`` has already passed :meth:`_decision_for_part`.
+        """
+        raw = self._rotation_for_match(footprint, None)
+        correction = None if decision is None else decision.rotation
+        rotation = (
+            raw if correction is None else self.rotate(footprint, raw, correction)
+        )
+        self.rotation_report.append(
+            CplRotation(
+                reference=str(part["reference"]),
+                lcsc=str(part["lcsc"] or ""),
+                footprint=str(part["footprint"]),
+                value=str(part["value"]),
+                raw=raw,
+                emitted=rotation,
+                correction=correction,
+                source=(
+                    decision.source
+                    if decision is not None and correction is not None
+                    else "raw"
+                ),
+                status=decision.status if decision is not None else "no-verdict",
+                polarity_light=decision.polarity_light
+                if decision is not None
+                else None,
+                fit=decision.fit if decision is not None else None,
+                note=decision.note if decision is not None else "",
+                pending=bool(decision.pending) if decision is not None else False,
+                legacy_correction=None if match is None else match.correction.rotation,
+                body_excess=decision.body_excess if decision is not None else None,
+                position_source=position_source,
+            )
+        )
+        return rotation
 
     def prepare_cpl(
         self,
         corrections: Optional[tuple[AnyCorrection, ...]] = None,  # noqa: UP045
         parts: Optional[Iterable[dict[str, Any]]] = None,  # noqa: UP045
+        *,
+        decisions: Optional[dict[str, Any]] = None,  # noqa: UP045
     ) -> tuple[tuple[Any, ...], ...]:
         """Capture placement rows from one complete immutable correction set.
 
         Direct calls read current storage; a supplied preflight tuple stays fixed
         for the operation. Unavailable or unresolved storage is rejected before
         touching the board or opening an existing output file.
+
+        ``decisions`` carries the JLC footprint check's rotation per reference: each
+        rotation is then the decision's, or the raw angle when it has none, and no
+        correction rule is applied; the rules are read only when available, to note
+        in ``rotation_report`` what they would have done.  With
+        ``jlcfootprint.exact_origin`` on as well, a decision that carries JLC's
+        package origin also places the part there; every other part keeps the
+        pad-bounding-box centre, and each row says which it got.
         """
         self._require_output_snapshot()
         if self.output_snapshot is not None:
             self.validate_generation()
             return self.output_snapshot.cpl_rows
-        if corrections is None:
+        if corrections is None and decisions is None:
             snapshot = self.parent.library.read_correction_data()
             corrections = snapshot.corrections
             if corrections is None:
@@ -1003,8 +1096,10 @@ class Fabrication:
                     f"database ({snapshot.db_path}). Open Corrections Manager "
                     "to repair or retry loading before generating fabrication files."
                 )
-        self._check_corrections(corrections)
-        self.corrections = corrections
+        if corrections is not None:
+            self._check_corrections(corrections)
+        self.corrections = corrections if corrections is not None else ()
+        self.rotation_report = []
         aux_origin = self.board.GetDesignSettings().GetAuxOrigin()
         add_without_lcsc = self.parent.settings.get("gerber", {}).get(
             "lcsc_bom_cpl", True
@@ -1037,6 +1132,8 @@ class Fabrication:
                     aux_origin,
                     match,
                     (part["reference"], part["value"], part["footprint"]),
+                    lcsc=part["lcsc"],
+                    decisions=decisions,
                 )
             )
         return tuple(rows)
@@ -1047,26 +1144,72 @@ class Fabrication:
         origin: Any,
         match: Optional[CorrectionMatch],  # noqa: UP045
         identity: tuple[str, str, str],
+        *,
+        lcsc: str = "",
+        decisions: Optional[dict[str, Any]] = None,  # noqa: UP045
     ) -> tuple[Any, ...]:
-        """Format reference/value/package with the shared placement transformations."""
+        """Format reference/value/package with the shared placement transformations.
+
+        Both generation paths come through here, so the JLC footprint check's
+        ``decisions`` apply to the ordinary and the variant CPL alike;
+        ``lcsc`` is the part the row places, for the rotation report.
+        """
+        part = {
+            "reference": identity[0],
+            "value": identity[1],
+            "footprint": identity[2],
+            "lcsc": lcsc,
+        }
+        decision = (
+            None
+            if decisions is None
+            else self._decision_for_part(decisions.get(identity[0]), part)
+        )
+        # Only the check's path can place a part at JLC's origin, because only a
+        # verdict knows where that origin is.
+        exact_origin = decisions is not None and self.parent.settings.get(
+            "jlcfootprint", {}
+        ).get("exact_origin", False)
         try:
             center = self.get_position(footprint)
+            source = "pad-box"
+            package_origin = None if decision is None else decision.origin
+            if exact_origin and package_origin is not None:
+                # JLC centres the package on Mid X/Y, so a part whose verdict
+                # knows where JLC's drawing origin sits goes there, turned and
+                # mirrored exactly as a correction rule's offset would be.
+                center = self.reposition(
+                    footprint, footprint.GetPosition(), package_origin
+                )
+                source = "origin"
             # Subtract in Python before native coordinate arithmetic can wrap.
             position = SimpleNamespace(x=center.x - origin.x, y=center.y - origin.y)
-            position = self._position_for_match(footprint, position, match)
+            if decisions is None:
+                position = self._position_for_match(footprint, position, match)
             position = _checked_position(position.x, position.y)
+            if decisions is None:
+                rotation = self._rotation_for_match(footprint, match)
+            else:
+                # The footprint check owns the rotation, and the position too once
+                # the setting is on; no correction rule is applied either way.
+                rotation = self._rotation_for_decision(
+                    footprint, decision, match, part, source
+                )
             return (
                 *identity,
                 # Six decimal millimetres retain KiCad's nanometre resolution.
                 f"{ToMM(position.x):.6f}",
                 f"{ToMM(position.y) * -1:.6f}",
-                self._rotation_for_match(footprint, match),
+                rotation,
                 "top" if footprint.GetLayer() == 0 else "bottom",
             )
         except (OverflowError, ValueError) as error:
-            source = (
-                f"correction {match.correction.key!r}" if match else "no correction"
-            )
+            if decisions is not None:
+                source = "JLC footprint check"
+            elif match:
+                source = f"correction {match.correction.key!r}"
+            else:
+                source = "no correction"
             raise ValueError(
                 f"Cannot generate CPL for {identity[0]} ({source}): {error}"
             ) from error

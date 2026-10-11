@@ -26,6 +26,7 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `model.py` | `Decision`, what the CPL emits for one reference |
 | `presentation.py` | How the plugin words the check for the user: `describe_seconds` |
 | `controller.py` | One open board's check: scanning, the fetch results, the decisions |
+| `report.py` | The CPL's rotation report and the generate-time summary |
 
 ## Frames and units
 
@@ -245,6 +246,16 @@ $KPY $T/check_live_adapter.py $B/pin_functions_and_marks/pin_functions_and_marks
 - **Results.** The worker's handlers store each answer in the cache. Once a part's row is complete, every board part with that LCSC is resolved and stored, and `post(lcsc, generation)` tells the caller; an event of an older generation belongs to a board state that is gone, and the caller drops it. A failed fetch becomes an error row and an unknown verdict, so the part keeps its raw angle and is looked up again the next time it is checked. A tripped breaker reaches the caller through `message`.
 - **The lock.** One re-entrant lock makes each scan step and each result handler whole with respect to the other: a result landing mid-scan is seen still pending or complete, never half handled, and a scan never queues a part behind a request that has just been answered.
 - **Decisions.** `decisions` re-reads the board and returns one `model.Decision` per reference, from the verdict row: the rotation the CPL applies (`emitted_rotation`: the override, else a green or yellow row's rotation, else none), where it comes from (`source`), the status, fit, notes, the courtyard overhang, JLC's package origin and whether the part is still pending. A part without an LCSC is `no-lcsc` and a part with no row `no-verdict`. `display_text` is the Rotation column's text: `180°`, `90° !` for a yellow part, `270° set` for an override, or `raw`.
+
+## The CPL
+
+`Fabrication` takes the check's decisions through a keyword-only `decisions` on both of its generation paths: `begin_ordinary_generation` (through `prepare_cpl`) and the variant path's `begin_generation`. Both build every row in `_cpl_row`, so the rules below hold for each.
+
+- **The rotation.** An override comes first, then the derived rotation, else KiCad's raw angle (after the bottom-side mirror, as the CPL always takes it). The correction rules are never applied while there are decisions, neither their rotation nor their offset. When they can be read, each row only notes what they would have done.
+- **The LCSC-mismatch guard.** A decision is used only for the part it judged. A row that places another LCSC number than its decision names (a variant ordering another part, an assignment changed since the check) keeps the raw angle and the pad-box centre, and is logged and reported as `lcsc-mismatch`.
+- **The position.** Mid X/Y stays the centre of the part's soldered pads' bounding box. With `jlcfootprint.exact_origin` on as well, a part whose decision carries JLC's package origin is placed there instead, the origin turned and mirrored with the part exactly as a correction rule's offset would be (`reposition`); a part without one keeps the pad-box centre.
+- **The report.** Each row also goes into `Fabrication.rotation_report` as a `report.CplRotation`: the raw and emitted angles, the correction, its source, the verdict's status, fit and notes, what the rules would have applied and where the position came from. `report.summarise` sorts the rows into four groups, worst first: does not fit, the applied rotations (a `*` where the rules would have set another angle, a `!` where JLC's body overhangs the courtyard), the parts whose JLC pin-1 marker will look wrong, and the unresolved parts, emitted raw. `raw_angle_reason` says why a part goes out at the raw angle against the check: it does not fit, EasyEDA's data is inconsistent, it is unknown, not checked, still fetching, or its part number changed. A part with an override, a part without an LCSC number and an unknown part with fewer than two named pads on a side are never named.
+- Without decisions the CPL is the correction rules' CPL, unchanged.
 
 ## What comes next
 
