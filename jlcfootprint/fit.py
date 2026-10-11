@@ -89,17 +89,29 @@ def _area(pad: Pad) -> float:
     return pad.width * pad.height
 
 
+def _groups(pads: list[Pad]) -> dict[str, list[Pad]]:
+    """Return the named pads grouped by number, numbers in the order they first appear."""
+    groups: dict[str, list[Pad]] = {}
+    for pad in named_pads(pads):
+        groups.setdefault(pad.number, []).append(pad)
+    return groups
+
+
 def _pair_groups(
     pairs: dict[str, str],
     groups_k: dict[str, list[Pad]],
     groups_j: dict[str, list[Pad]],
 ) -> tuple[dict[str, Pad], dict[str, Pad], list[Pad]]:
-    """Pair the members of matched groups by closest area, keyed by the JLC number."""
+    """Pair the members of matched groups by closest area, keyed by the JLC number.
+
+    ``pairs`` maps a JLC number to the KiCad number it pairs with.  The JLC pads of a
+    number with no KiCad pads left over are returned as the third value.
+    """
     kicad: dict[str, Pad] = {}
     jlc: dict[str, Pad] = {}
     leftovers: list[Pad] = []
     for number_j, number_k in pairs.items():
-        group_k = list(groups_k[number_k])
+        group_k = list(groups_k.get(number_k, []))
         for index, pad_j in enumerate(sorted(groups_j[number_j], key=_area)):
             if not group_k:
                 leftovers.append(pad_j)
@@ -132,12 +144,8 @@ def pair_by_function(
         name = normalise_function(pin.label)
         if name and not is_no_function(pin.label):
             labels.setdefault(pin.number, name)
-    groups_k: dict[str, list[Pad]] = {}
-    for pad in named_pads(kicad_pads):
-        groups_k.setdefault(pad.number, []).append(pad)
-    groups_j: dict[str, list[Pad]] = {}
-    for pad in named_pads(jlc_pads):
-        groups_j.setdefault(pad.number, []).append(pad)
+    groups_k = _groups(kicad_pads)
+    groups_j = _groups(jlc_pads)
     functions_k: dict[str, str] = {}
     for number, group in groups_k.items():
         for pad in group:
@@ -190,29 +198,10 @@ def pair_by_name(
     are paired by closest area, so a pin meets a pin and a tab meets a tab; the
     leftovers go to the position pass.  Keys are ``name`` then ``name#1``, ...
     """
-    groups_k: dict[str, list[Pad]] = {}
-    for pad in named_pads(kicad_pads):
-        groups_k.setdefault(pad.number, []).append(pad)
-    groups_j: dict[str, list[Pad]] = {}
-    for pad in named_pads(jlc_pads):
-        groups_j.setdefault(pad.number, []).append(pad)
-    kicad: dict[str, Pad] = {}
-    jlc: dict[str, Pad] = {}
-    leftovers: list[Pad] = []
-    for name, group_j in groups_j.items():
-        group_k = list(groups_k.get(name, []))
-        for index, pad_j in enumerate(sorted(group_j, key=_area)):
-            if not group_k:
-                leftovers.append(pad_j)
-                continue
-            pad_k = min(
-                group_k, key=lambda p, target=_area(pad_j): abs(_area(p) - target)
-            )
-            group_k.remove(pad_k)
-            key = name if index == 0 else f"{name}#{index}"
-            kicad[key] = pad_k
-            jlc[key] = pad_j
-    return kicad, jlc, leftovers
+    groups_j = _groups(jlc_pads)
+    return _pair_groups(
+        {number: number for number in groups_j}, _groups(kicad_pads), groups_j
+    )
 
 
 def align(kicad: dict[str, Pad], jlc: dict[str, Pad]) -> Placement:
