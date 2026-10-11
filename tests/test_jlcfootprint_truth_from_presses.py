@@ -2,12 +2,11 @@
 
 import pytest
 
-from .jlcfootprint_support import load_script
+from tools.jlcfootprint import truth_from_presses as converter
 
 
 def test_presses_add_to_the_uploaded_angle(tmp_path):
     """Comments and notes are tolerated, blanks stay blank, and a reference not in the CPL stops."""
-    converter = load_script("truth_from_presses")
     cpl = tmp_path / "cpl.csv"
     cpl.write_text(
         "Designator,Val,Package,Mid X,Mid Y,Rotation,Layer\n"

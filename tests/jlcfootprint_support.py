@@ -1,16 +1,12 @@
-"""Shared helpers for the jlcfootprint tests: recorded EasyEDA responses and the script loader.
+"""Shared helpers for the jlcfootprint tests: EasyEDA's recorded answers.
 
-Everything here reads files: EasyEDA's recorded answers under
-``tests/fixtures/jlcfootprint/`` and the development tools under
-``tools/jlcfootprint/``.
+Everything here reads the recordings under ``tests/fixtures/jlcfootprint/``.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
-from types import ModuleType
 
 from jlcfootprint.easyeda_parse import (
     ComponentRecord,
@@ -22,7 +18,6 @@ from jlcfootprint.easyeda_parse import (
     parse_symbol_response,
 )
 
-ROOT = Path(__file__).parent.parent
 FIXTURES = Path(__file__).parent / "fixtures" / "jlcfootprint" / "easyeda"
 
 
@@ -77,14 +72,3 @@ def pro_record(lcsc: str) -> ComponentRecord:
             recorded_document("symbol", hit.symbol_uuid), hit.symbol_uuid
         )
     return assemble_record(lcsc, hit, footprint, symbol)
-
-
-def load_script(name: str) -> ModuleType:
-    """Import one ``tools/jlcfootprint/`` module as a module, without running its CLI."""
-    spec = importlib.util.spec_from_file_location(
-        name, ROOT / "tools" / "jlcfootprint" / f"{name}.py"
-    )
-    assert spec is not None and spec.loader is not None
-    loaded = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(loaded)
-    return loaded

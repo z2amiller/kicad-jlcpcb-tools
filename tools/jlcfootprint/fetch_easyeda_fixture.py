@@ -2,14 +2,14 @@
 
 Usage:
     python3 tools/jlcfootprint/fetch_easyeda_fixture.py C2132 C1978115 [...] [--out DIR] [--interval 10]
-    python3 tools/jlcfootprint/fetch_easyeda_fixture.py --puuid b3b82869fa924bae820e3a6cfb44d689 [--pro] [--out DIR]
+    python3 tools/jlcfootprint/fetch_easyeda_fixture.py --puuid b3b82869fa924bae820e3a6cfb44d689 [--out DIR]
     python3 tools/jlcfootprint/fetch_easyeda_fixture.py --batch C2132 C7950 [...] --name corner_case [--interval 1]
     python3 tools/jlcfootprint/fetch_easyeda_fixture.py --footprint UUID [...] --symbol UUID [...] [--interval 1]
     python3 tools/jlcfootprint/fetch_easyeda_fixture.py --from-devices DEVICES.json [...] [--interval 1]
 
 Classic per-LCSC responses land in ``tests/fixtures/jlcfootprint/easyeda/<lcsc>.json``;
 classic per-uuid footprint responses in ``tests/fixtures/jlcfootprint/easyeda_uuid/
-uuid_<uuid>.json`` (``pro_<uuid>.json`` with ``--pro``).  The EasyEDA Pro host's
+uuid_<uuid>.json``.  The EasyEDA Pro host's
 answers, which the plugin fetches live, land in
 ``tests/fixtures/jlcfootprint/easyeda_pro/``: ``--batch`` records one
 ``searchByCodes`` answer as ``devices_<name>.json`` (the codes asked and the body,
@@ -138,18 +138,13 @@ def record(lcsc: str, out: Path, pace: Pacer) -> str:
     return parsed.status
 
 
-def record_puuid(puuid: str, out: Path, pace: Pacer, host: str = "classic") -> str:
-    """Fetch one footprint by uuid (classic-style fixture name), keep it when the parser accepts it."""
-    body = fetch(PUUID_URLS[host].format(puuid=puuid), pace, puuid)
+def record_puuid(puuid: str, out: Path, pace: Pacer) -> str:
+    """Fetch one footprint by uuid from the classic host, keep it when the parser accepts it."""
+    body = fetch(PUUID_URLS["classic"].format(puuid=puuid), pace, puuid)
     parsed = parse_puuid_response(body, puuid)
     _accept(parsed.status, parsed.error)
-    write_fixture(out / puuid_fixture_name(puuid, host), body)
+    write_fixture(out / f"uuid_{puuid}.json", body)
     return parsed.status
-
-
-def puuid_fixture_name(puuid: str, host: str) -> str:
-    """Return the fixture file name for one footprint uuid on one host."""
-    return f"{'pro' if host == 'pro' else 'uuid'}_{puuid}.json"
 
 
 def record_batch(codes: list[str], name: str, out: Path, pace: Pacer) -> str:
@@ -216,11 +211,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="EasyEDA footprint uuids to record from the per-uuid endpoint",
     )
     parser.add_argument(
-        "--pro",
-        action="store_true",
-        help="record --puuid footprints from the EasyEDA Pro host instead of the classic one",
-    )
-    parser.add_argument(
         "--batch",
         nargs="*",
         default=[],
@@ -273,13 +263,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     items: list[tuple[str, Path, Any]] = [
         (code, (args.out or DEFAULT_OUT) / f"{code}.json", record) for code in args.lcsc
     ]
-    host = "pro" if args.pro else "classic"
     items += [
-        (
-            uuid,
-            (args.out or DEFAULT_PUUID_OUT) / puuid_fixture_name(uuid, host),
-            lambda item, out, pace: record_puuid(item, out, pace, host),
-        )
+        (uuid, (args.out or DEFAULT_PUUID_OUT) / f"uuid_{uuid}.json", record_puuid)
         for uuid in args.puuid
     ]
     pro_out = args.out or DEFAULT_PRO_OUT

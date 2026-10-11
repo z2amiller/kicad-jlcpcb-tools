@@ -4,10 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
+import requests
 
-from .jlcfootprint_support import load_script
-
-requests = pytest.importorskip("requests")
+from tools.jlcfootprint import fetch_easyeda_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
@@ -36,7 +35,7 @@ class FakeResponse:
 @pytest.fixture
 def fake_network(monkeypatch):
     """Serve queued responses, record every request URL, POST body and sleep."""
-    recorder = load_script("fetch_easyeda_fixture")
+    recorder = fetch_easyeda_fixture
     log = {"urls": [], "sleeps": [], "queue": [], "posts": []}
 
     def get(url, headers=None, timeout=None):
