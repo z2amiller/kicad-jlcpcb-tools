@@ -5,7 +5,9 @@ import json
 import pytest
 
 from jlcfootprint.easyeda_parse import (
+    DeviceHit,
     SymbolPin,
+    assemble_record,
     parse_component_response,
     parse_devices_response,
     parse_pro_pins,
@@ -212,6 +214,31 @@ def test_corner_case_recordings_are_complete_and_names_agree():
         "devices_pin_functions_and_marks.json",
         "devices_pin_functions_and_marks_c8.json",
     ]
+
+
+def test_the_joined_record_keeps_the_footprint_s_error_and_unreadable_shapes():
+    """A refused footprint's reason and a footprint's skipped pads reach the record; a failed symbol leaves no pins."""
+    hit = DeviceHit("C1", "s1", "f1", "0603")
+    refused = parse_puuid_response(
+        {"success": False, "code": 500, "message": "busy"}, "f1"
+    )
+    record = assemble_record("C1", hit, refused, None)
+    assert (record.status, record.error) == ("error", "code 500: busy")
+    one_unreadable = parse_puuid_response(
+        {
+            "success": True,
+            "result": {
+                "dataStr": '["DOCTYPE","FOOTPRINT","1.8"]\n'
+                '["PAD","e1",0,"",1,"1",0,0,0,null,["RECT",1,1,0]]\n'
+                '["PAD","e2",0,"",1,"2",0,0,"x",null,["RECT",1,1,0]]'
+            },
+        },
+        "f1",
+    )
+    symbol = parse_symbol_response({"success": False, "code": 500}, "s1")
+    record = assemble_record("C1", hit, one_unreadable, symbol)
+    assert (record.status, record.skipped_shapes) == ("ok", 1)
+    assert (record.error, record.symbol_pins) == ("", [])
 
 
 def test_polygon_pads_take_their_bounding_box():

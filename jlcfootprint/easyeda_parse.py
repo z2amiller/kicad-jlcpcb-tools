@@ -676,15 +676,16 @@ def assemble_record(
     It is the same join whether the three came from the network or from recorded
     answers.  ``hit`` names the uuids and the batch lookup's package name.
     ``footprint`` is the parsed per-uuid footprint document, and the record takes
-    its status, whatever that is: a caller that only wants an ``ok`` part checks
-    that itself.  ``symbol`` is the parsed per-uuid symbol document, or None when
-    the part names no symbol uuid or none was fetched for it; a symbol whose own
-    status is not ``ok`` leaves the record without pins, the same as no symbol at
-    all.
+    its status, its error text and its count of unreadable shapes, whatever they
+    are: a caller that only wants an ``ok`` part checks that itself.  ``symbol`` is
+    the parsed per-uuid symbol document, or None when the part names no symbol
+    uuid or none was fetched for it; a symbol whose own status is not ``ok``
+    leaves the record without pins, the same as no symbol at all.
     """
     record = ComponentRecord(
         lcsc=lcsc,
         status=footprint.status,
+        error=footprint.error,
         symbol_uuid=hit.symbol_uuid,
         puuid=hit.puuid,
         package_name=footprint.package_name or hit.package_name,
@@ -692,6 +693,7 @@ def assemble_record(
         footprint_shapes=footprint.footprint_shapes,
         footprint_source="puuid-endpoint",
         footprint_origin=footprint.footprint_origin,
+        skipped_shapes=footprint.skipped_shapes,
     )
     if symbol is not None and symbol.status == "ok":
         record.symbol_pins = symbol.pins
