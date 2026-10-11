@@ -5,7 +5,14 @@ from pathlib import Path
 
 from jlcfootprint.easyeda_parse import SymbolPin, parse_component_response
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
-from jlcfootprint.polarity import normalise_function, part_kind, terminal_of
+from jlcfootprint.polarity import (
+    DIODE,
+    OTHER,
+    POLAR_CAP,
+    normalise_function,
+    part_kind,
+    terminal_of,
+)
 from jlcfootprint.resolver import resolve
 
 FIXTURES = Path(__file__).parent / "fixtures" / "jlcfootprint" / "easyeda"
@@ -63,30 +70,30 @@ def test_part_kind_from_family_footprint_functions_or_labels():
     """Any side may declare the part polarized: KiCad evidence, then the family, then labels."""
     plain = [Pad("1", 0, 0, 1, 1), Pad("2", 1, 0, 1, 1)]
     wired = [Pad("1", 0, 0, 1, 1, 0, "K"), Pad("2", 1, 0, 1, 1, 0, "A")]
-    assert part_kind("R0603", "Resistor_SMD:R_0603_1608Metric", plain, []) == "other"
-    assert part_kind("SMF_L2.8-W1.8-LS3.7-RD", "Diode_SMD:D_SMF", plain, []) == "diode"
-    assert part_kind("DIO-SMD_X", "Custom:Thing", wired, []) == "diode"
-    assert part_kind("X", "LED_SMD:LED_0603_1608Metric", plain, []) == "diode"
+    assert part_kind("R0603", "Resistor_SMD:R_0603_1608Metric", plain, []) is OTHER
+    assert part_kind("SMF_L2.8-W1.8-LS3.7-RD", "Diode_SMD:D_SMF", plain, []) is DIODE
+    assert part_kind("DIO-SMD_X", "Custom:Thing", wired, []) is DIODE
+    assert part_kind("X", "LED_SMD:LED_0603_1608Metric", plain, []) is DIODE
     assert (
         part_kind(
             "X", "Custom:Thing", plain, [SymbolPin("1", "A"), SymbolPin("2", "K")]
         )
-        == "diode"
+        is DIODE
     )
     assert (
         part_kind(
             "CAP-SMD_BD6.3-L6.6-W6.6-FD", "Capacitor_SMD:CP_Elec_6.3x7.7", plain, []
         )
-        == "polar_cap"
+        is POLAR_CAP
     )
     assert (
-        part_kind("CAP-SMD_BD6.3-L6.6-W6.6-RD", "Custom:Elec", plain, []) == "polar_cap"
+        part_kind("CAP-SMD_BD6.3-L6.6-W6.6-RD", "Custom:Elec", plain, []) is POLAR_CAP
     )
     assert (
         part_kind(
             "X", "Custom:Thing", plain, [SymbolPin("1", "+"), SymbolPin("2", "-")]
         )
-        == "polar_cap"
+        is POLAR_CAP
     )
 
 
@@ -94,22 +101,20 @@ def test_part_kind_reads_kicad_diode_evidence_before_capacitor_evidence():
     """An LED whose pads say +/- is a diode: the footprint name and K/A functions come first."""
     plus_minus = [Pad("1", 0, 0, 1, 1, 0, "-"), Pad("2", 1, 0, 1, 1, 0, "+")]
     assert (
-        part_kind("LED0805-RD", "LED_SMD:LED_0805_2012Metric", plus_minus, [])
-        == "diode"
+        part_kind("LED0805-RD", "LED_SMD:LED_0805_2012Metric", plus_minus, []) is DIODE
     )
     assert (
-        part_kind("SMF_L2.8-W1.8-LS3.7-RD", "Diode_SMD:D_SMF", plus_minus, [])
-        == "diode"
+        part_kind("SMF_L2.8-W1.8-LS3.7-RD", "Diode_SMD:D_SMF", plus_minus, []) is DIODE
     )
     wired = [Pad("1", 0, 0, 1, 1, 0, "K"), Pad("2", 1, 0, 1, 1, 0, "A")]
     cap_labels = [SymbolPin("1", "+"), SymbolPin("2", "-")]
     assert (
         part_kind("CAP-SMD_BD6.3-L6.6-W6.6-FD", "Custom:Thing", wired, cap_labels)
-        == "diode"
+        is DIODE
     )
     assert (
         part_kind("CAP-SMD_BD6.3-L6.6-W6.6-FD", "Custom:Thing", plus_minus, [])
-        == "polar_cap"
+        is POLAR_CAP
     )
 
 
