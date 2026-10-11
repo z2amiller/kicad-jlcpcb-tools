@@ -20,6 +20,7 @@ records are skipped, never raised.
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 import json
 import math
 import re
@@ -307,7 +308,11 @@ def _footprint_primitives(shapes: list[Any]) -> tuple[list[Segment], list[Segmen
     edges: list[Segment] = []
     if is_pro(shapes):
         for record in _pro_records(shapes):
-            if len(record) < 5 or record[4] not in _PRO_MARK_LAYERS:
+            if (
+                len(record) < 5
+                or not isinstance(record[4], Hashable)
+                or record[4] not in _PRO_MARK_LAYERS
+            ):
                 continue
             layer = _PRO_MARK_LAYERS[record[4]]
             if record[0] == "POLY" and len(record) > 6:

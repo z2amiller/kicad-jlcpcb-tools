@@ -252,6 +252,17 @@ def test_a_plus_must_stand_alone_and_its_bars_must_be_alike():
     assert footprint_positive_pad(TWO_PADS + unlike) is None
 
 
+def test_a_pro_record_whose_layer_is_a_list_or_a_dict_is_skipped():
+    """A malformed record is skipped, never raised: the rest of the drawing is still read."""
+    odd = [
+        pro_line([13], -100, 0, -60, 0, "a"),
+        pro_line({"layer": 13}, 60, 0, 100, 0, "b"),
+    ]
+    assert footprint_bars(odd) == [] and footprint_edges(odd) == []
+    marks = drawing_marks([], TWO_PADS + plus_at(13, -60, 0) + odd)
+    assert marks == DrawingMarks(positive_pin=None, positive_pad="1", body_box=None)
+
+
 def test_vertical_pad_axis():
     """With the pads drawn vertical the + is judged along that axis."""
     pads = [pro_pad("1", 0, 80), pro_pad("2", 0, -80)]
