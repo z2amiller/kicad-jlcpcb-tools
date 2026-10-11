@@ -66,7 +66,7 @@ def test_token_bucket_jitter_and_stop():
     assert not stopping.take()
 
 
-def test_default_buckets_and_the_estimate_follow_the_spec():
+def test_default_paces_chunk_size_and_estimate():
     """Lookups: burst 2 then one per 2 s; documents: burst 10 then one per second; one chunk is 200."""
     clock = Clock()
     buckets = Buckets.default(clock=clock, jitter=lambda: 0.0)

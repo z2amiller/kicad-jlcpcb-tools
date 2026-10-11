@@ -17,7 +17,7 @@ from jlcfootprint.verdicts import (
 
 from .test_jlcfootprint_origin import placement
 
-SPEC_COLUMNS = [
+VERDICT_COLUMNS = [
     "lcsc",
     "footprint_hash",
     "footprint_name",
@@ -73,7 +73,7 @@ def _verdict(**overrides) -> Verdict:
     return verdict
 
 
-def test_schema_matches_the_spec(store):
+def test_the_table_has_exactly_these_columns_keyed_on_lcsc_and_hash(store):
     """The table has exactly these columns, in this order, keyed on (lcsc, footprint_hash)."""
     with closing(sqlite3.connect(store.db_path)) as con:
         columns = [
@@ -84,7 +84,7 @@ def test_schema_matches_the_spec(store):
             for row in con.execute("PRAGMA table_info(footprint_verdict)")
             if row[5]
         ]
-    assert columns == SPEC_COLUMNS
+    assert columns == VERDICT_COLUMNS
     assert keys == ["lcsc", "footprint_hash"]
     VerdictStore(store.db_path)  # opening it again changes nothing
 
@@ -110,7 +110,7 @@ def test_an_older_table_gains_the_caveat_column(tmp_path):
         columns = [
             row[1] for row in con.execute("PRAGMA table_info(footprint_verdict)")
         ]
-    assert columns[:-1] == SPEC_COLUMNS[:17] + SPEC_COLUMNS[18:]
+    assert columns[:-1] == VERDICT_COLUMNS[:17] + VERDICT_COLUMNS[18:]
     assert columns[-1] == "body_excess_mm"
     saved = store.save("C1", "h", "F", "p", _verdict(body_excess_mm=0.9))
     assert (saved.body_excess_mm, saved.override_rotation) == (0.9, 180)
