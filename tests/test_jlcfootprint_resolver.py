@@ -333,3 +333,21 @@ def test_no_easyeda_record_is_unknown_with_the_checkerboard_note():
     assert verdict.status == "unknown"
     assert verdict.rotation is None
     assert "checkerboard" in verdict.note_text
+
+
+def test_a_switch_numbered_1_1_2_2_fits_whatever_order_its_legs_are_listed_in():
+    """Legs sharing a number pair by position, so a listing order is never a reversed pin order."""
+    legs = [
+        Pad("1", -3.0, -2.0, 1.0, 1.0),
+        Pad("1", 3.0, -2.0, 1.0, 1.0),
+        Pad("2", -3.0, 2.0, 1.0, 1.0),
+        Pad("2", 3.0, 2.0, 1.0, 1.0),
+    ]
+    for degrees in (0, 90):
+        for order in ([0, 1, 2, 3], [1, 0, 3, 2], [1, 0, 2, 3]):
+            jlc = rotated_on_screen_ccw([legs[i] for i in order], degrees)
+            verdict = resolve(
+                legs, "Button_Switch_SMD:SW_SPST", "ok", "SW-SMD_4P", jlc, []
+            )
+            assert (verdict.status, verdict.fit) == ("green", "fits"), order
+            assert verdict.rotation == (360 - degrees) % 360

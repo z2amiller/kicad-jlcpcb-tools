@@ -1,4 +1,6 @@
-"""Tests for jlcfootprint.fit: group grading, pairing by pin function, the courtyard overhang."""
+"""Tests for jlcfootprint.fit: pairing duplicate numbers, group grading, pairing by pin function, the courtyard overhang."""
+
+import itertools
 
 import pytest
 
@@ -10,9 +12,10 @@ from jlcfootprint.fit import (
     group_fit,
     pad_fit,
     pair_by_function,
+    pair_by_name,
     transformed_box,
 )
-from jlcfootprint.geometry import Pad
+from jlcfootprint.geometry import Pad, rotate
 
 # KiCad's TO-252-3_TabPin2: the tab and the stub of the cut lead are both pad 2.
 TABPIN2 = [
@@ -28,6 +31,13 @@ JLC_DPAK = [
     Pad("2", -5.04, 2.28, 1.6, 3.0),
 ]
 DPAK_PINS = [SymbolPin("3", "D"), SymbolPin("1", "G"), SymbolPin("2", "S")]
+# A four-legged tactile switch numbered 1, 1, 2, 2: two legs per side, all one size.
+SWITCH = [
+    Pad("1", -3.0, -2.0, 1.0, 1.0),
+    Pad("1", 3.0, -2.0, 1.0, 1.0),
+    Pad("2", -3.0, 2.0, 1.0, 1.0),
+    Pad("2", 3.0, 2.0, 1.0, 1.0),
+]
 
 
 def identity():
@@ -38,6 +48,56 @@ def identity():
 def geom(pad):
     """Return a pad's box as the fit functions take it."""
     return (pad.x, pad.y, pad.width, pad.height)
+
+
+def turned(pads, degrees):
+    """Return the pads turned about the origin, each pad's own angle with them."""
+    out = []
+    for pad in pads:
+        x, y = rotate(pad.x, pad.y, degrees)
+        out.append(pad._replace(x=x, y=y, rotation=(pad.rotation + degrees) % 360))
+    return out
+
+
+@pytest.mark.parametrize("degrees", [0, 90, 180, 270])
+def test_pads_sharing_a_number_pair_the_same_way_in_any_listing_order(degrees):
+    """Every order of the switch's legs, on either side, aligns at the turn with each leg on its own."""
+    jlc = turned(SWITCH, degrees)
+    for kicad_order in itertools.permutations(SWITCH):
+        for jlc_order in itertools.permutations(jlc):
+            kicad, matched, rest = pair_by_name(list(kicad_order), list(jlc_order))
+            placement = align(kicad, matched)
+            assert rest == []
+            assert (placement.rotation_deg, placement.is_mirrored) == (degrees, False)
+            assert placement.residual == pytest.approx(0.0, abs=1e-9)
+
+
+def test_a_pin_meets_a_pin_and_a_tab_meets_a_tab_before_position():
+    """A DPAK drawing whose leads are numbered the other way round still pairs its tab with KiCad's tab.
+
+    The leads alone place KiCad's stub under JLC's tab; pairing by position would
+    take the stub, hide the reversed order and call it a numbering difference.
+    """
+    jlc = [
+        Pad("2", 0.0, -3.349, 6.5, 6.0, 270.0),
+        Pad("1", 2.266, 3.349, 3.1, 1.064, 270.0),
+        Pad("3", -2.266, 3.349, 3.1, 1.064, 270.0),
+    ]
+    for order in itertools.permutations(jlc):
+        kicad, matched, _ = pair_by_name(TABPIN2, list(order))
+        assert kicad["2"] is TABPIN2[2]  # the tab, not the stub
+        assert align(kicad, matched).is_mirrored
+
+
+def test_one_centre_pad_pairs_with_the_centre_pad_of_its_size():
+    """A KiCad exposed pad pairs with JLC's exposed pad, not with a small pad that shares its number."""
+    kicad = [Pad("1", -2.0, 0.0, 0.5, 1.0), Pad("2", 2.0, 0.0, 0.5, 1.0)]
+    kicad.append(Pad("3", 0.0, 0.0, 3.0, 3.0))
+    corners = [Pad("3", x, y, 0.4, 0.4) for x in (-1.8, 1.8) for y in (-1.8, 1.8)]
+    jlc = kicad[:2] + corners + [Pad("3", 0.0, 0.0, 3.2, 3.2)]
+    kicad_pairs, matched, rest = pair_by_name(kicad, jlc)
+    assert matched["3"].width == 3.2
+    assert sorted((pad.x, pad.y) for pad in rest) == sorted((p.x, p.y) for p in corners)
 
 
 def test_group_fit_grades_a_jlc_pad_against_the_union_of_its_group():

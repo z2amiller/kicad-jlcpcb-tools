@@ -17,7 +17,7 @@ from .geometry import Pad, centroid, named_pads, pad_geom, rotate
 from .polarity import is_no_function, normalise_function
 from .quality import angular_rms
 from .records import SymbolPin
-from .solver import solve_transform
+from .solver import TransformResult, solve_transform
 
 # A JLC pad lands on copper when its centre sits inside the inner part of the KiCad pad
 # (this fraction of the pad's half-size each way) and the overlap is at least MIN_OVERLAP
@@ -27,7 +27,9 @@ from .solver import solve_transform
 CENTRE_TOLERANCE = 0.8
 MIN_OVERLAP = 0.5
 # Pads this much bigger on one side are reported: KiCad's larger as the grade
-# ``fits_larger_pads``, JLC's larger as a note that KiCad's pads are smaller.
+# ``fits_larger_pads``, JLC's larger as a note that KiCad's pads are smaller.  When
+# pads that share a number are paired, a pad this much bigger than another is of
+# another kind (a tab beside a pin).
 SIZE_RATIO = 1.5
 # One pairing of a two-pad part's pads fits clearly better than the swapped one when
 # its worst pad overlaps by at least this much more.  Mirror-symmetric pads give
@@ -97,32 +99,108 @@ def _groups(pads: list[Pad]) -> dict[str, list[Pad]]:
     return groups
 
 
+def _first_placement(
+    pairs: dict[str, str],
+    groups_k: dict[str, list[Pad]],
+    groups_j: dict[str, list[Pad]],
+) -> Optional[TransformResult]:
+    """Return a rough placement of KiCad's pads onto JLC's that no duplicate number sways, or None.
+
+    It is solved on the numbers that name one pad on each side, or, when fewer than
+    two do, on the centroid of each number's pads on each side.  None when neither
+    fixes a rotation.
+    """
+    shared = [(nj, nk) for nj, nk in pairs.items() if groups_k.get(nk)]
+    unique = [
+        (nj, nk)
+        for nj, nk in shared
+        if len(groups_j[nj]) == 1 and len(groups_k[nk]) == 1
+    ]
+    for chosen in (unique, shared):
+        if len(chosen) < 2:
+            continue
+        transform = solve_transform(
+            {nj: centroid(groups_k[nk]) for nj, nk in chosen},
+            {nj: centroid(groups_j[nj]) for nj, _ in chosen},
+        )
+        if not transform.is_underdetermined:
+            return transform
+    return None
+
+
+def _pair_members(
+    group_k: list[Pad], group_j: list[Pad], transform: Optional[TransformResult]
+) -> tuple[list[tuple[Pad, Pad]], list[Pad]]:
+    """Pair the pads one number names on each side; return the (KiCad, JLC) pairs and the JLC pads left over.
+
+    A JLC pad pairs with a KiCad pad of its own kind first: one whose area is within
+    SIZE_RATIO of its own, so a pin meets a pin and a tab meets a tab whatever the
+    placement says.  Among pads of one kind the nearest after the first placement
+    wins, or, without one, the closest in area.  The closest candidates pair first,
+    and equal candidates are told apart by the pads themselves, never by the order
+    they are listed in.
+    """
+
+    def cost(pad_k: Pad, pad_j: Pad) -> tuple[int, float]:
+        small, large = sorted((_area(pad_k), _area(pad_j)))
+        other_kind = int(large > SIZE_RATIO * small)
+        if transform is None:
+            return other_kind, round(large - small, 6)
+        x, y = rotate(pad_k.x, pad_k.y, transform.rotation_deg_raw)
+        distance = math.hypot(
+            x + transform.offset_x - pad_j.x, y + transform.offset_y - pad_j.y
+        )
+        return other_kind, round(distance, 6)
+
+    candidates = sorted(
+        (cost(pad_k, pad_j), pad_j, pad_k, index_j, index_k)
+        for index_k, pad_k in enumerate(group_k)
+        for index_j, pad_j in enumerate(group_j)
+    )
+    used_k: set[int] = set()
+    used_j: set[int] = set()
+    matched: list[tuple[Pad, Pad]] = []
+    for _, pad_j, pad_k, index_j, index_k in candidates:
+        if index_j in used_j or index_k in used_k:
+            continue
+        used_j.add(index_j)
+        used_k.add(index_k)
+        matched.append((pad_k, pad_j))
+    rest = [pad for index, pad in enumerate(group_j) if index not in used_j]
+    return sorted(matched, key=lambda pair: (_area(pair[1]), pair[1])), sorted(
+        rest, key=lambda pad: (_area(pad), pad)
+    )
+
+
 def _pair_groups(
     pairs: dict[str, str],
     groups_k: dict[str, list[Pad]],
     groups_j: dict[str, list[Pad]],
 ) -> tuple[dict[str, Pad], dict[str, Pad], list[Pad]]:
-    """Pair the members of matched groups by closest area, keyed by the JLC number.
+    """Pair the members of matched groups, keyed by the JLC number.
 
-    ``pairs`` maps a JLC number to the KiCad number it pairs with.  The JLC pads of a
-    number with no KiCad pads left over are returned as the third value.
+    ``pairs`` maps a JLC number to the KiCad number it pairs with.  A number that
+    names one pad on each side pairs those two.  Where a number names several pads
+    on a side (KiCad numbers a SOT-223's tab as a second pad 2, a DPAK's tab and the
+    stub of its cut lead both 2, a switch its four legs 1, 1, 2, 2), they pair by
+    kind and then by position after :func:`_first_placement` (:func:`_pair_members`),
+    so the pairing does not depend on the order either footprint lists its pads in.  The JLC pads a number has no
+    KiCad pad left for are returned as the third value.  Keys are the JLC number,
+    then ``number#1``, ``number#2``, ... in order of the JLC pads' area.
     """
+    transform = _first_placement(pairs, groups_k, groups_j)
     kicad: dict[str, Pad] = {}
     jlc: dict[str, Pad] = {}
     leftovers: list[Pad] = []
     for number_j, number_k in pairs.items():
-        group_k = list(groups_k.get(number_k, []))
-        for index, pad_j in enumerate(sorted(groups_j[number_j], key=_area)):
-            if not group_k:
-                leftovers.append(pad_j)
-                continue
-            pad_k = min(
-                group_k, key=lambda p, target=_area(pad_j): abs(_area(p) - target)
-            )
-            group_k.remove(pad_k)
+        matched, rest = _pair_members(
+            groups_k.get(number_k, []), groups_j[number_j], transform
+        )
+        for index, (pad_k, pad_j) in enumerate(matched):
             key = number_j if index == 0 else f"{number_j}#{index}"
             kicad[key] = pad_k
             jlc[key] = pad_j
+        leftovers.extend(rest)
     return kicad, jlc, leftovers
 
 
@@ -195,8 +273,9 @@ def pair_by_name(
 
     When a name covers several pads on one side (KiCad numbers a SOT-223 tab as a
     second pad ``2``, and a DPAK's tab and its stub pin both as ``2``), the pads
-    are paired by closest area, so a pin meets a pin and a tab meets a tab; the
-    leftovers go to the position pass.  Keys are ``name`` then ``name#1``, ...
+    pair by position after a first placement (:func:`_pair_groups`), so a pin meets
+    a pin and a tab meets a tab; the leftovers go to the position pass.  Keys are
+    ``name`` then ``name#1``, ...
     """
     groups_j = _groups(jlc_pads)
     return _pair_groups(
