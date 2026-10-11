@@ -200,6 +200,9 @@ def test_a_file_from_another_layout_is_dropped_and_refilled(tmp_path, version):
             "CREATE TABLE lcsc_map (lcsc TEXT PRIMARY KEY, status TEXT NOT NULL,"
             " source TEXT NOT NULL, fetched_at INTEGER NOT NULL);"
             "INSERT INTO lcsc_map VALUES ('C9', 'ok', 'live', 1);"
+            "CREATE TABLE package (puuid TEXT PRIMARY KEY, package_name TEXT NOT NULL,"
+            " pads_json TEXT NOT NULL, source TEXT NOT NULL, fetched_at INTEGER NOT NULL);"
+            "INSERT INTO package VALUES ('fp-9', 'R0603', '[]', 'live', 1);"
         )
     cache = Cache(path)
     assert cache.counts() == {"parts": 0, "packages": 0}

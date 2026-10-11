@@ -247,12 +247,24 @@ def test_cancel_at_the_prompt_returns_false(facade, caplog):
     assert FakeMessageDialog.instances[0].destroyed
 
 
+def test_closing_the_prompt_without_an_answer_stops_too(facade):
+    """Only Continue Anyway goes on: a dialog closed any other way stops generation."""
+    module, wx = facade
+    FakeMessageDialog.answer = wx.ID_CANCEL
+    assert (
+        module.confirm_cpl_rotations(object(), [_row(module, "U3", "red")], True)
+        is False
+    )
+
+
 def test_the_prompt_names_ten_parts_and_counts_the_rest(facade):
-    """A long list is cut at ten references; the log carries every one."""
+    """A long list is cut at ten references; the count and the log cover every one."""
     module, _ = facade
     rows = [_row(module, f"U{index}", "red") for index in range(1, 13)]
     module.confirm_cpl_rotations(object(), rows, True)
-    listed = FakeMessageDialog.instances[0].message.split("\n\n")[1].splitlines()
+    message = FakeMessageDialog.instances[0].message
+    assert message.startswith("12 part(s) would be placed at KiCad's raw angle")
+    listed = message.split("\n\n")[1].splitlines()
     assert listed[0] == "  U1  C1  does not fit"
     assert listed[9] == "  U10  C1  does not fit"
     assert listed[10:] == ["  and 2 more"]
