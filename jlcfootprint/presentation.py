@@ -1,11 +1,11 @@
-"""What the part list shows for one part: the JLC glyph, its order, and the hover text.
+"""How the plugin words the footprint check for the user; pure and stdlib only.
 
-Pure and stdlib only (spec 16.3).  One function turns a CPL decision and the
-fetch queue's state into the column's state name; the glyph, the colour and the
-sort order follow from that name, so the model stores the state and the view maps
-it.  A second function composes the cell's help text out of the stored verdict,
-the worker state and the two package names, which is why both are testable with
-no wx anywhere near them.
+What the part list shows for one part: the JLC glyph, its order, and the hover
+text (spec 16.3).  One function turns a CPL decision and the fetch queue's state
+into the column's state name; the glyph, the colour and the sort order follow from
+that name, so the model stores the state and the view maps it.  A second function
+composes the cell's help text out of the stored verdict, the worker state and the
+two package names, which is why both are testable with no wx anywhere near them.
 """
 
 from __future__ import annotations
@@ -85,8 +85,8 @@ FETCH_TEXT = {
 def describe_seconds(seconds: float) -> str:
     """Render a queue estimate as seconds under a minute, else minutes.
 
-    The controller re-exports it: the log line, the wait dialog and this module's
-    help text quote one estimate in one wording.
+    Every estimate the plugin shows goes through it, the scan's log line and the
+    generate-time wait among them, so they all read alike.
     """
     if seconds < 60:
         return f"{int(round(seconds))} s"

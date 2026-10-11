@@ -50,7 +50,7 @@ def test_scan_queues_unknown_parts_and_the_worker_resolves_them(setup, caplog):
     assert (
         check.verdicts.get("C2132", board["parts"][0].footprint_hash).status == PENDING
     )
-    # Spec 16.3: a pending part's Rotation cell says what the CPL emits, not "…".
+    # A pending part's Rotation text says what the CPL emits, not a placeholder.
     assert check.display_text("Q1") == "raw"
     with caplog.at_level(logging.INFO, logger="jlcfootprint.controller"):
         assert check.worker.run_pending() == 5
@@ -162,7 +162,7 @@ def test_a_shared_footprint_is_fetched_once(setup):
 
 
 def test_transient_failures_trip_the_breaker_and_leave_parts_pending(setup):
-    """Three symbol failures in a row trip the breaker; those parts retry next session, the rest wait."""
+    """Three symbol failures in a row trip the breaker; those parts get error rows, the rest wait."""
     check, board, events, messages, client = setup
     for i in range(1, 5):
         client.records[f"C{i}"] = alias(f"C{i}")
@@ -210,7 +210,7 @@ def test_a_failed_lookup_marks_its_parts_for_retry(setup, caplog):
 
 
 def test_lookup_misses_and_missing_documents(setup):
-    """A miss is the checkerboard case; a silent symbol leaves the token or the geometry to decide."""
+    """A part EasyEDA does not know is a none row; a silent symbol leaves the token or the geometry to decide."""
     check, board, events, _, client = setup
     client.records["C16133"] = recorded("C16133")
     client.records["C5"] = alias("C5", "C2286")
@@ -226,7 +226,7 @@ def test_lookup_misses_and_missing_documents(setup):
     assert check.cache.status("C404") == "none"
     d6 = check.verdicts.get("C404", board["parts"][3].footprint_hash)
     assert d6.status == "unknown" and "no JLC footprint data" in d6.notes
-    # No token in the name and no symbol: the footprint's own + mark decides (spec 16.6).
+    # No token in the name and no symbol: the footprint's own + mark decides.
     c6 = check.verdicts.get("C16133", board["parts"][1].footprint_hash)
     assert (c6.status, c6.rotation) == ("green", 0)
     assert "polarity from the footprint's + mark" in c6.notes

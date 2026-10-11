@@ -63,7 +63,7 @@ def test_enabled_setting_defaults_off(facade):
 def test_create_footprint_check_uses_the_library_directory_and_the_project_db(
     facade, tmp_path
 ):
-    """The cache sits beside corrections.db, verdicts go to project.db, and results post events."""
+    """The cache sits in the library's data directory, verdicts go to project.db, and results post events."""
     module, wx, events = facade
     window, pcbnew = _window(tmp_path)
     check = module.create_footprint_check(window, pcbnew)
@@ -227,7 +227,7 @@ def test_default_settings_ship_the_switch():
 
 
 def test_pcm_keeps_the_cache_on_update():
-    """The cache is user data like corrections.db and must survive a PCM update."""
+    """The cache survives a PCM update like the plugin's databases, so no board is fetched again."""
     from .wx_harness import ROOT
 
     # The template holds unquoted placeholders the release script fills in, so it is

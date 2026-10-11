@@ -1,4 +1,4 @@
-"""The CPL path with ``jlcfootprint.exact_origin`` on: JLC's package origin (spec 17.4)."""
+"""The CPL with ``jlcfootprint.exact_origin`` on: checked parts at JLC's package origin."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -152,7 +152,7 @@ def test_the_origin_is_turned_by_the_placement_and_mirrored_on_the_bottom(
 def test_the_setting_off_leaves_every_position_on_the_pad_box_centre(
     modules, library, tmp_path
 ):
-    """With the setting off the CPL is exactly M3's, and every row says pad-box."""
+    """With the setting off every part sits at its pad-box centre, and every row says so."""
     parts = [footprint("U1", 0, 0), footprint("U2", 31, 90)]
     generator = fabrication(modules, library, tmp_path, parts, exact_origin=False)
 
@@ -210,7 +210,7 @@ def test_a_part_the_check_judged_under_another_lcsc_keeps_the_pad_box_centre(
 def test_a_part_whose_origin_is_its_pad_box_centre_emits_a_byte_equal_cpl(
     modules, library, tmp_path
 ):
-    """Spec 17.4: rounding is upstream's, so such a board's file does not change."""
+    """The position is rounded as every CPL position is, so such a board's file does not change."""
     # The pad box is the origin's own place on the board, so both paths agree.
     centred = [
         footprint(
@@ -235,7 +235,7 @@ def test_a_part_whose_origin_is_its_pad_box_centre_emits_a_byte_equal_cpl(
 
 
 def test_the_legacy_path_never_reads_the_setting(modules, library, tmp_path):
-    """Without decisions there are no verdicts, so the correction rules run as before."""
+    """Without decisions there are no verdicts, so the correction rules place every part."""
     generator = fabrication(modules, library, tmp_path, [footprint("U1", 0, 0)])
 
     rows = generator.prepare_cpl(())

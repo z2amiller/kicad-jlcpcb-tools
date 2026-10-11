@@ -1,6 +1,6 @@
-"""The JLC footprint check's decisions on both of upstream's generation paths.
+"""The JLC footprint check's decisions on both of the plugin's generation paths.
 
-Upstream builds every CPL row in ``Fabrication._cpl_row``, which the ordinary
+Every CPL row is built in ``Fabrication._cpl_row``, which the ordinary
 generation (``begin_ordinary_generation``, through ``prepare_cpl``) and the variant
 generation (``begin_generation``, reached through the variant controller) both
 call, so the check's decisions enter there for both.  The variant tests pin the
@@ -37,7 +37,7 @@ modules = fabrication_modules
 
 @pytest.fixture
 def ordinary(modules: SimpleNamespace, tmp_path: Path) -> SimpleNamespace:
-    """Build upstream's ordinary exporter over two parts that share one LCSC rule."""
+    """Build the ordinary exporter over two parts that share one LCSC rule."""
     parts = [
         {
             "reference": reference,
@@ -151,7 +151,7 @@ def test_the_ordinary_generation_without_decisions_is_upstream_s(ordinary):
 
 @pytest.fixture
 def variant(modules: SimpleNamespace, tmp_path: Path) -> SimpleNamespace:
-    """Build upstream's variant exporter over one footprint, R1 at (10, 20)."""
+    """Build the variant exporter over one footprint, R1 at (10, 20)."""
     footprints = [make_footprint("R1", 0, 0, Point(10, 20))]
     board = SimpleNamespace(
         GetFileName=lambda: str(tmp_path / "board.kicad_pcb"),
@@ -174,7 +174,7 @@ def _variant_rows(
     corrections: tuple = (),
     **changes: Any,
 ) -> tuple[Any, dict[str, Any]]:
-    """Run upstream's variant generation of output "A" and return its rows and report."""
+    """Run the variant generation of output "A" and return its rows and report."""
     state = State(
         "R1",
         "R1",

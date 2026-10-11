@@ -1,8 +1,8 @@
-"""The JLC footprint check where it meets upstream's window.
+"""The JLC footprint check where it meets the plugin's main window.
 
-Upstream's main window gained a variant matrix, a board-context guard and its own
-refresh of the Correction cell (the check's Rotation cell); these tests pin how the
-check sits beside each of them.
+The window has a variant matrix, a board-context guard and its own refresh of the
+Correction cell (the check's Rotation cell); these tests pin how the check sits
+beside each of them.
 """
 
 from types import SimpleNamespace
@@ -54,7 +54,7 @@ def _window(module, check=None, *, enabled=True):
 
 
 def test_upstream_s_cell_refresh_shows_what_the_cpl_emits(mainwindow):
-    """Upstream rewrites the cell on every assignment and removal: the check's text wins."""
+    """The window rewrites the cell on every assignment and removal: the check's text wins."""
     module, _ = mainwindow
     check = SimpleNamespace(display_text=lambda reference: "90°")
     for enabled, expected in ((True, "90°"), (False, "0°, 0.0/0.0 (fpt)")):
@@ -149,7 +149,7 @@ def test_a_board_replaced_before_the_first_scan_recovers_like_upstream(mainwindo
 
 
 class CloseEvent:
-    """Keep the native veto flag, as upstream's close tests do."""
+    """Keep the native veto flag, as the window's own close tests do."""
 
     def __init__(self) -> None:
         self.vetoed = False
@@ -202,7 +202,7 @@ def test_a_completed_close_stops_the_check_after_upstream_s_save(mainwindow):
 
 @pytest.mark.parametrize("veto", ["generating", "save cancelled"])
 def test_a_vetoed_close_keeps_the_check_of_the_open_window(mainwindow, veto):
-    """Upstream's close vetoes come first: a window that stays open keeps its check."""
+    """The window's close vetoes come first: a window that stays open keeps its check."""
     module, _ = mainwindow
     steps = []
     window = _closing_window(module, steps, _generating=veto == "generating")
@@ -219,7 +219,7 @@ def test_a_vetoed_close_keeps_the_check_of_the_open_window(mainwindow, veto):
 
 
 def test_unavailable_project_storage_stops_the_check(mainwindow):
-    """Upstream's storage-error path stops the check beside its own assembly lookup."""
+    """The storage-error path stops the check beside the assembly lookup."""
     module, _ = mainwindow
     check = MagicMock()
     window = _window(module, check)
@@ -303,7 +303,7 @@ def test_the_jlc_submenu_follows_upstream_s_last_correction_entry(
 
 @pytest.mark.parametrize("enabled", [True, False])
 def test_every_list_fill_shows_what_the_cpl_emits(mainwindow, monkeypatch, enabled):
-    """Upstream refills the list on each window activation: the check's text and glyph."""
+    """The window refills the list on each activation: the check's text and glyph."""
     module, _ = mainwindow
     monkeypatch.setattr(module.wx, "PostEvent", MagicMock(), raising=False)
     check = SimpleNamespace(

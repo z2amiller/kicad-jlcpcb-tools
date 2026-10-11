@@ -1,4 +1,4 @@
-"""The CPL path with the footprint check's decisions (spec section 8) beside the legacy path."""
+"""The CPL with the footprint check's decisions, beside the CPL the correction rules give."""
 
 from collections.abc import Iterator
 from types import SimpleNamespace
@@ -98,7 +98,7 @@ def test_parts_without_a_usable_decision_keep_the_raw_angle(modules, library, tm
 def test_missing_rules_do_not_stop_generation_with_decisions(
     modules, library, tmp_path
 ):
-    """Unresolved correction storage is fatal only on the legacy path."""
+    """Unresolved correction storage is fatal only when there are no decisions."""
     fabrication = make_fabrication(modules, library, tmp_path)
     fabrication.parent.library = SimpleNamespace(
         read_correction_data=lambda: SimpleNamespace(
@@ -116,7 +116,7 @@ def test_missing_rules_do_not_stop_generation_with_decisions(
 
 
 def test_legacy_path_is_unchanged_without_decisions(modules, library, tmp_path):
-    """Without decisions the rule's rotation and offset apply exactly as before."""
+    """Without decisions the rule's rotation and offset apply unchanged."""
     fabrication = make_fabrication(modules, library, tmp_path)
     corrections = _rule(library)
     legacy = fabrication.prepare_cpl(corrections)
@@ -149,7 +149,7 @@ def test_decision_for_another_part_keeps_the_raw_angle(modules, library, tmp_pat
 
 
 def test_the_body_caveat_reaches_the_rotation_report(modules, library, tmp_path):
-    """A decision's body excess (spec 16.6 item 4) rides on its CPL row for the summary."""
+    """A decision's body excess rides on its CPL row for the summary."""
     fabrication = make_fabrication(modules, library, tmp_path)
     fabrication.prepare_cpl(None, decisions={"U1": decision(0, body_excess=0.9)})
     report = {row.reference: row for row in fabrication.rotation_report}

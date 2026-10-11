@@ -1,11 +1,10 @@
 """Builders the JLC footprint check's plugin-root tests share.
 
 ``jlcfootprint_support`` and its fetch and controller siblings hold the pure
-package's helpers; this module holds what the tests around the plugin root need
-and had each written for themselves: the fake-wx loaders for the facade and for
-the main window, the window double the column, dialog and generate tests build on,
-the storage doubles the two CPL tests run against, and the duck-typed decision
-they pass through ``prepare_cpl``.
+package's helpers; this module holds what the tests around the plugin root share:
+the storage doubles the CPL tests run against and the duck-typed decision they pass
+through ``prepare_cpl``.  It also holds the fake-wx loaders for the facade and for
+the main window, and the window double the window tests build on.
 
 Everything here is a builder, not a fixture, so a test file keeps naming its own
 fixtures and pytest keeps reporting them against that file.
@@ -58,7 +57,7 @@ def facade_symbols(**overrides: Any) -> dict:
     """Return the facade functions the window imports: inert, but answering truthfully.
 
     Only ``is_footprint_check_enabled`` is a real function, because the window
-    branches on it; the rest report the "nothing happened" value each action returns.
+    branches on it; each of the rest gives the answer that lets the window carry on.
     """
     symbols = {
         "clear_cache": MagicMock(return_value=0),
@@ -116,8 +115,8 @@ def cpl_decision(
     """Return what the controller's decision carries for one reference.
 
     Duck-typed on purpose: ``prepare_cpl`` takes whatever the check hands it, and a
-    test that has to build a real ``Decision`` cannot say "a decision missing this
-    field" any more.
+    real ``Decision`` always has every field, so it could not stand for a decision
+    that lacks one.
     """
     return SimpleNamespace(
         rotation=rotation,

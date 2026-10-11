@@ -923,7 +923,7 @@ class SettingsDialog(wx.Dialog):
         self.jlcfootprint_exact_origin_setting.Enable(bool(enabled))
 
     def update_jlcfootprint_exact_origin(self, enabled: bool) -> None:
-        """Reflect whether CPL positions come from JLC's package origin (spec 17.1)."""
+        """Reflect whether CPL positions come from JLC's package origin."""
         self.jlcfootprint_exact_origin_setting.SetValue(bool(enabled))
 
     def load_settings(self) -> None:

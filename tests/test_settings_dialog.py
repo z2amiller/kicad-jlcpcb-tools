@@ -549,7 +549,7 @@ def _origin_settings(enabled: bool, exact_origin: bool) -> dict:
 
 
 def test_the_exact_origin_checkbox_reads_its_own_setting():
-    """Its label is static and its value is the stored one (spec 17.1)."""
+    """Its label is static and its value is the stored one."""
     on = _dialog(_origin_settings(True, True)).jlcfootprint_exact_origin_setting
     off = _dialog(_origin_settings(True, False)).jlcfootprint_exact_origin_setting
 
@@ -558,7 +558,7 @@ def test_the_exact_origin_checkbox_reads_its_own_setting():
 
 
 def test_the_exact_origin_checkbox_defaults_to_off():
-    """A settings file written before M4 has no key, so the box reads unchecked."""
+    """A settings file without the key reads unchecked: the setting ships off."""
     settings_dict = _settings(True)
     settings_dict["jlcfootprint"] = {"enabled": True}
 
@@ -624,7 +624,7 @@ def test_the_exact_origin_setting_survives_the_main_window_and_a_reopen(
 
 
 def test_the_jlc_footprint_row_closes_the_grid_after_the_library_rows(monkeypatch):
-    """The fork's row keeps its place: last, right after the catalog data path."""
+    """The JLC footprint row keeps its place: last, right after the catalog data path."""
 
     class Sizer(_FakeWidget):
         """Remember the controls placed in it, so a row can be told by its content."""

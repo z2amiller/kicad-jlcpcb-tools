@@ -190,7 +190,7 @@ def test_summary_without_the_legacy_rules_shows_no_comparison():
 
 
 def test_the_summary_counts_the_two_position_sources_when_the_setting_is_on():
-    """Spec 17.4: with the setting on, the header line says where Mid X/Y came from."""
+    """With the setting on, the header line says where Mid X/Y came from."""
     rows = _rows()
     rows[0].position_source = "origin"
 
@@ -204,7 +204,7 @@ def test_the_summary_counts_the_two_position_sources_when_the_setting_is_on():
 
 
 def test_the_summary_says_nothing_about_positions_when_the_setting_is_off():
-    """Off, the summary is exactly M3's, whatever a row happens to carry."""
+    """Off, the summary has no position line, whatever a row happens to carry."""
     rows = _rows()
     rows[0].position_source = "origin"
 

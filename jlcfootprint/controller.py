@@ -1,4 +1,4 @@
-"""One plugin session's footprint check: scan, fetch, resolve, store (spec sections 8, 10, 15).
+"""One plugin session's footprint check: scan, fetch, resolve, store.
 
 The controller owns the cache, the verdict store, the client and the worker for one
 open board.  Scanning reads the board on the caller's thread, resolves what the
@@ -10,12 +10,13 @@ one event posted to the main thread with the session generation so a stale board
 reload can drop it.  One lock keeps each scan step and each result handler whole
 with respect to the other, so a scan never sees a half-handled result and never
 queues a part behind a request that has just answered.  The CPL path asks
-:meth:`FootprintCheck.decisions` for one rotation decision per reference.  On a
-board with KiCad design variants the judged parts are the output variant's, and each
-scan also prefetches the other variants' part numbers on the same footprints: those
-are scanned, queued and resolved exactly like judged parts, one at a time under the
-same lock, but kept apart from them (spec 18.3).  Stdlib only; wx and pcbnew stay
-in the caller.
+:meth:`FootprintCheck.decisions` for one rotation decision per reference.  Stdlib
+only; wx and pcbnew stay in the caller.
+
+On a board with KiCad design variants the judged parts are the output variant's,
+and each scan also prefetches the other variants' part numbers on the same
+footprints: those are scanned, queued and resolved exactly like judged parts, one
+at a time under the same lock, but kept apart from them (spec 18.3).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from dataclasses import dataclass, field, replace
 import logging
 import threading
 import time
-from typing import Any
+from typing import Any, Optional
 
 from .cache import Cache, CachedPart
 from .easyeda_client import EasyEdaClient
@@ -93,11 +94,11 @@ class FootprintCheck:
         verdicts: VerdictStore,
         read_board: Callable[[], list[BoardPart]],
         post: Callable[[str, int], None],
-        client: EasyEdaClient | None = None,
-        worker: FetchWorker | None = None,
-        message: Callable[[str], None] | None = None,
+        client: Optional[EasyEdaClient] = None,
+        worker: Optional[FetchWorker] = None,
+        message: Optional[Callable[[str], None]] = None,
         now: Callable[[], float] = time.time,
-        buckets: Buckets | None = None,
+        buckets: Optional[Buckets] = None,
         other_lcscs: Callable[[], Mapping[str, Iterable[str]]] | None = None,
     ) -> None:
         self.cache = cache
@@ -150,7 +151,7 @@ class FootprintCheck:
     # Scanning
     # ------------------------------------------------------------------
 
-    def scan_board(self, references: Iterable[str] | None = None) -> ScanSummary:
+    def scan_board(self, references: Optional[Iterable[str]] = None) -> ScanSummary:
         """Read the board and resolve or queue every part with an LCSC.
 
         ``references`` limits the work to those parts (after an assignment); a full
@@ -232,8 +233,9 @@ class FootprintCheck:
         """Resolve one part from the cache or queue what it needs (the caller holds the lock)."""
         stored = self.verdicts.get(part.lcsc, part.footprint_hash)
         needed = self.cache.needs(part.lcsc, self.now())
-        # A verdict is final only while its cache row is: an error row is fetched
-        # again next session and a ``none`` row after thirty days (spec 5.1).
+        # A verdict is final only while its cache row is: an error row is looked up
+        # again the next time the part is checked, and a ``none`` row after thirty
+        # days.
         if stored is not None and stored.status != PENDING and not needed:
             summary.already_resolved += 1
             return
@@ -328,7 +330,7 @@ class FootprintCheck:
         self.post(lcsc, self.generation)
 
     def _fail(self, lcsc: str, error: str) -> None:
-        """Record a failed fetch as an error row so the next session tries again (lock held)."""
+        """Store a failed fetch as an error row, which the next check of the part retries (lock held)."""
         self.cache.store(
             ComponentRecord(lcsc=lcsc, status="error", error=error or "fetch failed"),
             self.now(),
@@ -397,7 +399,7 @@ class FootprintCheck:
             transient = bool(getattr(document, "transient", False))
             if record is None or transient or record.status == "error":
                 # Transient or final, a failed document is never stored as an answer:
-                # the part gets an error row and the next session asks again.
+                # the part gets an error row and the next check asks again.
                 error = str(
                     getattr(record, "error", "") or getattr(document, "error", "")
                 )
@@ -415,7 +417,9 @@ class FootprintCheck:
                 if record.status == "ok":
                     self.cache.store_footprint(record, self.now())
                 else:
-                    # No footprint means nothing to align: the checkerboard case.
+                    # EasyEDA has no footprint for the part, so there is nothing to
+                    # align: it is stored as a ``none`` row, like a part the lookup
+                    # does not know.
                     for lcsc in lcscs:
                         self.cache.store_lookup_miss(lcsc, self.now())
             else:
@@ -464,7 +468,7 @@ class FootprintCheck:
         )
 
     def decision(self, part: BoardPart) -> Decision:
-        """Return the CPL decision for one board part (spec 8)."""
+        """Return the CPL decision for one board part."""
         if not part.lcsc:
             return Decision(part.reference, "", status="no-lcsc", note="no LCSC number")
         stored = self.verdicts.get(part.lcsc, part.footprint_hash)

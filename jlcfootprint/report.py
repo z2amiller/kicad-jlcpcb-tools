@@ -1,4 +1,4 @@
-"""The generate-time rotation summary: four groups, worst first (spec 8).
+"""The generate-time rotation summary: four groups, worst first.
 
 "Does not fit" first, then the applied rotations with caveated fits marked, then
 the pin-1 marker warnings, then the unresolved parts.  Pure formatting over what
@@ -9,6 +9,7 @@ asks before writing when :func:`raw_angle_reason` names a part.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from .resolver import SINGLE_PAD_NOTE
 
@@ -23,21 +24,21 @@ class CplRotation:
     value: str
     raw: float  # KiCad's angle after the bottom mirror, before any correction
     emitted: float  # the angle written to the CPL
-    correction: int | None = (
-        None  # the correction applied; None when the raw angle was kept
-    )
+    # The correction applied; None when the raw angle was kept.
+    correction: Optional[int] = None
     source: str = "raw"  # 'override' | 'derived' | 'raw'
     status: str = "unknown"
-    polarity_light: str | None = None
-    fit: str | None = None
+    polarity_light: Optional[str] = None
+    fit: Optional[str] = None
     note: str = ""
     pending: bool = False
-    legacy_correction: int | None = None  # what the correction rules would have applied
-    # How far the JLC body overhangs the KiCad courtyard, in mm (spec 16.6).
-    body_excess: float | None = None
-    # Where Mid X/Y came from: 'origin' is JLC's package origin and 'pad-box' is
-    # upstream's pad bounding-box centre, which is every part's while
-    # ``jlcfootprint.exact_origin`` is off (spec 17.4).
+    # What the correction rules would have applied, read for comparison only.
+    legacy_correction: Optional[int] = None
+    # How far the JLC body overhangs the KiCad courtyard, in mm.
+    body_excess: Optional[float] = None
+    # Where Mid X/Y came from: 'origin' is JLC's package origin and 'pad-box' the
+    # centre of the soldered pads' bounding box, which every part gets while
+    # ``jlcfootprint.exact_origin`` is off.
     position_source: str = "pad-box"
 
 
@@ -45,8 +46,11 @@ class CplRotation:
 class GenerateSummary:
     """The groups of the rotation summary.
 
-    ``red`` holds the parts the check found not to fit (the raw angle emitted);
-    ``unresolved`` the parts it could not judge: unknown, pending, no LCSC.
+    ``applied`` holds the parts the CPL turned (derived or overridden), and
+    ``yellow`` those of them whose JLC pin-1 marker will look wrong; ``red`` the
+    parts the check found not to fit, emitted at the raw angle; ``unresolved`` the
+    rest, emitted raw too: unknown, still pending, not checked, no LCSC, or placing
+    another part than the one the check judged.
     """
 
     applied: list[CplRotation] = field(default_factory=list)
@@ -54,7 +58,7 @@ class GenerateSummary:
     red: list[CplRotation] = field(default_factory=list)
     unresolved: list[CplRotation] = field(default_factory=list)
     legacy_available: bool = True
-    exact_origin: bool = False  # whether the setting asked for JLC's origin (17.4)
+    exact_origin: bool = False  # whether the setting asked for JLC's origin
 
     @property
     def at_origin(self) -> list[CplRotation]:
@@ -63,7 +67,7 @@ class GenerateSummary:
 
     @property
     def at_pad_box(self) -> list[CplRotation]:
-        """Return the rows the CPL placed at upstream's pad-bounding-box centre."""
+        """Return the rows the CPL placed at the pad-box centre."""
         return [row for row in self.rows if row.position_source != "origin"]
 
     @property
@@ -119,14 +123,14 @@ def _reason(row: CplRotation) -> str:
     )
 
 
-def raw_angle_reason(row: CplRotation) -> str | None:
+def raw_angle_reason(row: CplRotation) -> Optional[str]:
     """Return why the CPL emits this part at KiCad's raw angle against the check, or None.
 
     A part counts when it has an LCSC number and keeps the raw angle because the
     check refused it (it does not fit, or EasyEDA's data contradicts itself), could
     not decide it (no data, polarity unknown, never checked), was still being
-    fetched when generation went on, or now places another part than the one the
-    check judged.  An explicit override replaces the raw angle, so a part carrying
+    fetched when generation went on, or its row places another part than the one
+    the check judged.  An explicit override replaces the raw angle, so a part carrying
     one never counts; a part whose LCSC changed is emitted raw whatever the old
     part's override says, so it still does.  Parts without an LCSC and parts the
     check placed are never named, and neither is an unknown part the resolver
@@ -150,13 +154,15 @@ def raw_angle_reason(row: CplRotation) -> str | None:
     return None
 
 
-def summary_lines(summary: GenerateSummary) -> list[tuple[CplRotation | None, str]]:
+def summary_lines(
+    summary: GenerateSummary,
+) -> list[tuple[Optional[CplRotation], str]]:
     """Return the summary's lines worst first, each with the row it lists (None for headers)."""
-    lines: list[tuple[CplRotation | None, str]] = []
+    lines: list[tuple[Optional[CplRotation], str]] = []
     differs = {id(row) for row in summary.differs_from_legacy}
     if summary.exact_origin:
         # With the setting on, say how the positions were split before anything
-        # else, because that is what changed about this CPL (spec 17.4).
+        # else, because that is what the setting changes about this CPL.
         lines.append(
             (
                 None,

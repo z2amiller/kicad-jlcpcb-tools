@@ -1,10 +1,14 @@
-"""Wire the JLC footprint check into the plugin (spec sections 9 and 10).
+"""Wire the JLC footprint check into the plugin.
 
 The pure package under ``jlcfootprint/`` knows nothing of wx, pcbnew or the main
 window; this module builds one :class:`FootprintCheck` for an open board from the
-window's library, store and pcbnew, and posts its results as wx events.  On a board
-with KiCad design variants the part numbers come from upstream's variant session
-instead of the store (spec 18.2).
+window's library, store and pcbnew, and posts its results as wx events.  It also
+holds the two steps generation adds while the check is on: the wait for parts still
+being fetched, and the rotation summary with its question before any file is
+written.
+
+On a board with KiCad design variants the part numbers come from upstream's
+variant session instead of the store (spec 18.2).
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ POLL_MS = 200
 logger = logging.getLogger(__name__)
 
 # One request budget per plugin session, however often the check is restarted.
-_shared_buckets: Buckets | None = None
+_shared_buckets: Optional[Buckets] = None
 
 
 def shared_buckets() -> Buckets:
@@ -50,15 +54,15 @@ def shared_buckets() -> Buckets:
 
 
 def is_footprint_check_enabled(settings: dict) -> bool:
-    """Return the setting that switches the resolver path on (spec 9)."""
+    """Return whether the CPL takes its rotations from the check (``jlcfootprint.enabled``)."""
     return bool(settings.get("jlcfootprint", {}).get("enabled", False))
 
 
 def is_exact_origin_enabled(settings: dict) -> bool:
-    """Return whether the CPL places parts at JLC's package origin (spec 17.1).
+    """Return whether the CPL places checked parts at JLC's package origin.
 
-    Off by default, and only ever consulted on the resolver path: a part's origin
-    comes from its verdict, which the legacy path does not have.
+    Off by default, and only ever consulted while the check is on: a part's origin
+    comes from its verdict, which generation by the correction rules does not have.
     """
     return bool(settings.get("jlcfootprint", {}).get("exact_origin", False))
 
@@ -183,7 +187,7 @@ def create_footprint_check(window: Any, pcbnew: Any) -> FootprintCheck:
 
 
 def wait_for_pending_fetches(window: Any, check: FootprintCheck) -> bool:
-    """Wait with a cancellable dialog until no part is pending (spec 8).
+    """Wait with a cancellable dialog until no part is pending.
 
     Returns False when the user cancels or the breaker has tripped; the caller then
     emits the pending parts with their raw angle.

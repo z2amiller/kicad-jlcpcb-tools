@@ -402,7 +402,7 @@ def test_generate_continues_raw_after_a_cancelled_wait_and_without_rules(mainwin
 
 
 def test_generate_takes_the_legacy_path_when_the_check_is_off(mainwindow):
-    """With the setting off the correction rules are validated and applied as before."""
+    """With the setting off the correction rules are validated and applied, and the check takes no step."""
     module, facade = mainwindow
     window, steps = _generate_window(module, check=None, corrections=("rule",))
     window.settings["jlcfootprint"] = {"enabled": False}
@@ -420,7 +420,7 @@ def test_generate_takes_the_legacy_path_when_the_check_is_off(mainwindow):
 
 
 def test_generate_hands_the_decisions_to_upstream_s_variant_controller(mainwindow):
-    """Upstream's variant path gets the decisions by keyword, as the ordinary path does."""
+    """The variant path gets the decisions by keyword, as the ordinary path does."""
     module, facade = mainwindow
     check = SimpleNamespace(
         decisions=MagicMock(return_value={"R1": "decision"}), scan_board=MagicMock()
@@ -488,7 +488,7 @@ def _column_window(module, check, enabled=True):
 
 
 def test_rotation_cells_show_the_decision_or_the_rule(mainwindow, monkeypatch):
-    """The Rotation column carries the check's text when it runs, else the rule as before."""
+    """The Rotation column carries the check's text when it runs, else the rule's."""
     module, _ = mainwindow
     check = SimpleNamespace(
         display_text=lambda reference: {"R1": "180°", "R2": ""}[reference],
@@ -557,7 +557,7 @@ def test_result_event_repaints_the_checked_references(mainwindow, monkeypatch):
 def test_the_summary_reports_the_position_split_from_the_window_s_settings(
     facade, caplog
 ):
-    """Spec 17.4: the window carries the setting, so no generate step has to pass it."""
+    """The window carries the setting, so no generate step has to pass it."""
     module, _ = facade
     rows = [
         module.CplRotation(

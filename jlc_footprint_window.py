@@ -1,13 +1,14 @@
-"""The main window's JLC footprint check: the column, the dialog and the submenu.
+"""The main window's side of the JLC footprint check.
 
-``JLCPCBTools`` owns the hooks -- the column, the binds, the tooltip map, the
-generate steps -- and hands everything behind them to a ``JlcFootprintPresenter``
-built once per window, which reaches back through ``self.window`` for the part
-list, the settings and the store.  Keeping the feature here means a rebase onto
-upstream's ``mainwindow.py`` touches the hooks only, and an upstream reader sees
-one file per feature instead of 300 lines inside a 3,000-line frame.  On a board
-with KiCad design variants upstream's variant controller keeps the same kind of
-thin hooks and calls the presenter's variant methods (spec 18).
+``JLCPCBTools`` owns the hooks -- where the check starts and stops, the binds, the
+part list's cells, the generate steps -- and hands everything behind them to a
+``JlcFootprintPresenter`` built once per window, which reaches back through
+``self.window`` for the part list, the settings and the store.  Keeping the feature
+here keeps the window's own changes to small hooks, and gives a reader one file for
+the feature instead of a few hundred lines inside a 3,000-line frame.
+
+On a board with KiCad design variants upstream's variant controller keeps the
+same kind of thin hooks and calls the presenter's variant methods (spec 18).
 """
 
 from __future__ import annotations
@@ -96,7 +97,8 @@ class JlcFootprintPresenter:
             return
         except BoardContextChanged as error:
             # The scan reads each LCSC through the store, which refuses a closed or
-            # replaced board: stop the new check and recover as upstream does.
+            # replaced board: stop the new check and recover the way every other
+            # store read does.
             check.stop()
             self.window._set_project_storage_error(error)
             return
@@ -286,7 +288,7 @@ class JlcFootprintPresenter:
         return str(self.window.get_correction(part, corrections))
 
     def _refresh_jlc_rotation_cells(self) -> None:
-        """Repaint every Rotation and JLC cell from the footprint check's decisions."""
+        """Repaint the cells the check fills on every row, from its decisions."""
         check = self._active_jlc_footprint_check()
         if check is None or self._repaint_variant_matrix():
             return

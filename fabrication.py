@@ -994,12 +994,12 @@ class Fabrication:
         self.write_cpl(self.prepare_cpl(corrections, decisions=decisions))
 
     def _decision_for_part(self, decision: Any, part: dict) -> Any:
-        """Return the decision the CPL may act on, or a raw-angle stand-in (spec 8).
+        """Return the decision the CPL may act on, or a raw-angle stand-in.
 
         The check judges the part the board names; when this row places another LCSC
         (a variant can order another part than the board's own) the two disagree about
         what is being placed, so neither the rotation nor the origin may be used and
-        the part keeps its raw angle and upstream's pad-box centre.  The stand-in is a
+        the part keeps its raw angle and the pad-box centre.  The stand-in is a
         real ``Decision`` whose defaults already say all of that: no rotation,
         ``source`` raw, no origin.
         """
@@ -1023,7 +1023,7 @@ class Fabrication:
         part: dict,
         position_source: str = "pad-box",
     ) -> float:
-        """Apply the footprint check's decision (spec 8) and record the summary row.
+        """Apply the footprint check's decision and record the summary row.
 
         A decision without a rotation, a pending part and a part without a verdict all
         keep the raw angle.  The correction rule that would have matched is only noted.
@@ -1078,10 +1078,10 @@ class Fabrication:
         ``decisions`` carries the JLC footprint check's rotation per reference: each
         rotation is then the decision's, or the raw angle when it has none, and no
         correction rule is applied; the rules are read only when available, to note
-        in ``rotation_report`` what they would have done (spec 8).  With
+        in ``rotation_report`` what they would have done.  With
         ``jlcfootprint.exact_origin`` on as well, a decision that carries JLC's
-        package origin also places the part there; every other part keeps upstream's
-        pad-bounding-box centre, and each row says which it got (spec 17.4).
+        package origin also places the part there; every other part keeps the
+        pad-bounding-box centre, and each row says which it got.
         """
         self._require_output_snapshot()
         if self.output_snapshot is not None:
@@ -1151,7 +1151,7 @@ class Fabrication:
         """Format reference/value/package with the shared placement transformations.
 
         Both generation paths come through here, so the JLC footprint check's
-        ``decisions`` apply to the ordinary and the variant CPL alike (spec 8);
+        ``decisions`` apply to the ordinary and the variant CPL alike;
         ``lcsc`` is the part the row places, for the rotation report.
         """
         part = {
@@ -1165,8 +1165,8 @@ class Fabrication:
             if decisions is None
             else self._decision_for_part(decisions.get(identity[0]), part)
         )
-        # Only the resolver path can place a part at JLC's origin, because only a
-        # verdict knows where that origin is (spec 17.4).
+        # Only the check's path can place a part at JLC's origin, because only a
+        # verdict knows where that origin is.
         exact_origin = decisions is not None and self.parent.settings.get(
             "jlcfootprint", {}
         ).get("exact_origin", False)
@@ -1177,8 +1177,7 @@ class Fabrication:
             if exact_origin and package_origin is not None:
                 # JLC centres the package on Mid X/Y, so a part whose verdict
                 # knows where JLC's drawing origin sits goes there, turned and
-                # mirrored exactly as a correction rule's offset would be
-                # (spec 17.4).
+                # mirrored exactly as a correction rule's offset would be.
                 center = self.reposition(
                     footprint, footprint.GetPosition(), package_origin
                 )

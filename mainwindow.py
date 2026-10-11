@@ -2400,7 +2400,7 @@ class JLCPCBTools(wx.Frame):
         self.jlc_footprint_presenter._enqueue_jlc_footprint_check(references)
 
     def on_jlc_footprint_result(self, e):
-        """Repaint the Rotation and JLC cells of one checked part."""
+        """Repaint the cells of one checked part."""
         self.jlc_footprint_presenter.on_jlc_footprint_result(e)
 
     def on_footprint_activated(self, event: Any) -> None:
@@ -2434,7 +2434,7 @@ class JLCPCBTools(wx.Frame):
         return self.jlc_footprint_presenter._rotation_cell_text(part, corrections)
 
     def _refresh_jlc_rotation_cells(self) -> None:
-        """Repaint every Rotation and JLC cell from the footprint check's decisions."""
+        """Repaint the cells the check fills on every row, from its decisions."""
         self.jlc_footprint_presenter._refresh_jlc_rotation_cells()
 
     def read_corrections_for_summary(self):
@@ -3185,10 +3185,10 @@ class JLCPCBTools(wx.Frame):
                     self.read_corrections_for_summary,
                 )
                 # Unresolved rules only take the summary's comparison away: the
-                # resolver path applies none, so generation gets an empty set.
+                # check's path applies no rule, so generation gets an empty set.
                 rules_available = corrections is not None
                 corrections = corrections if rules_available else ()
-                # Parts placed since the plugin opened get their check now (spec 10).
+                # Parts placed since the plugin opened are checked here.
                 self.run_generation_step(
                     "Checking the board for unchecked parts", check.scan_board
                 )
