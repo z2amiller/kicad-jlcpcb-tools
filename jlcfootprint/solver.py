@@ -27,6 +27,8 @@ from collections.abc import Hashable
 from dataclasses import dataclass
 import math
 
+from .geometry import normalize_angle, snap_to_90
+
 Point = tuple[float, float]
 PadDict = dict[Hashable, Point]
 
@@ -191,17 +193,9 @@ def solve_transform(a: PadDict, b: PadDict) -> TransformResult:
     if res_mirror + floor < residual / 10.0:
         is_mirrored = True
 
-    theta_deg = math.degrees(theta)
-    # Normalise raw to (-180, 180].
-    while theta_deg <= -180.0:
-        theta_deg += 360.0
-    while theta_deg > 180.0:
-        theta_deg -= 360.0
-
-    # Snap to the nearest 90 and report it as 0, 90, 180 or 270; the raw angle
-    # stays in (-180, 180].
-    snapped = int(round(theta_deg / 90.0)) * 90
-    snapped %= 360  # 0, 90, 180, 270
+    # The raw angle in (-180, 180]; the snapped one as 0, 90, 180 or 270.
+    theta_deg = normalize_angle(math.degrees(theta))
+    snapped = snap_to_90(theta_deg)
 
     if is_mirrored:
         flag = "mirrored"

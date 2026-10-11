@@ -6,7 +6,7 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 
 | Module | What it holds |
 | --- | --- |
-| `geometry.py` | The `Pad` record, unit and frame conversions, the pad fingerprint, and the two conversions to CPL angles |
+| `geometry.py` | The `Pad` record, unit and frame conversions, the pad fingerprint, the angle helpers the solver and quality share, and the two conversions to CPL angles |
 | `solver.py` | The 2D rigid alignment of two pad sets |
 | `quality.py` | The angular RMS, a measure of how well a rotation explains the pads |
 | `naming.py` | EasyEDA's footprint naming rule: the pin-1 position a package name encodes |

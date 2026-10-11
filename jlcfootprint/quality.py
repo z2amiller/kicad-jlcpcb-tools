@@ -16,14 +16,7 @@ from __future__ import annotations
 
 import math
 
-
-def _normalize_angle(deg: float) -> float:
-    """Normalize angle to the half-open interval (-180, 180]."""
-    while deg <= -180.0:
-        deg += 360.0
-    while deg > 180.0:
-        deg -= 360.0
-    return deg
+from .geometry import normalize_angle
 
 
 def angular_rms(
@@ -71,7 +64,7 @@ def angular_rms(
             continue
         bearing_kicad = math.degrees(math.atan2(dk_y, dk_x))
         bearing_jlc = math.degrees(math.atan2(dj_y, dj_x))
-        err = _normalize_angle(bearing_jlc - bearing_kicad - rotation_deg)
+        err = normalize_angle(bearing_jlc - bearing_kicad - rotation_deg)
         angular_errs_sq.append(err * err)
 
     if angular_errs_sq:

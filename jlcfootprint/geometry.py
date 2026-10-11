@@ -150,15 +150,16 @@ def centroid(pads: list[Pad]) -> tuple[float, float]:
 
 
 def pad_box_centre(pads: list[Pad]) -> Optional[tuple[float, float]]:
-    """Return the centre of the named pads' bounding box, or None without any.
+    """Return the centre of the pads' bounding box, or None without any.
 
-    The box is the union of the pads' effective boxes (:func:`pad_geom`): the
-    footprint-frame counterpart of the box ``Fabrication.get_position`` merges in
-    board coordinates for the CPL's Mid X/Y.  Both leave out NPTH holes and
-    paste-only copper, ``get_position`` by the pad's attribute and layers and this
-    function by the pad's name, which KiCad's libraries leave empty on such pads.
+    The box is the union of the pads' effective boxes (:func:`pad_geom`).  Given a
+    footprint's soldered pads, every copper pad that is neither an NPTH hole nor
+    paste-only, numbered or not, it is the footprint-frame counterpart of the box
+    ``Fabrication.get_position`` merges in board coordinates for the CPL's Mid X/Y,
+    which keeps the same pads.  No pad is dropped here, so an unnumbered soldered
+    pad (a thermal or shield tab) counts, as it does there.
     """
-    boxes = [pad_geom(pad) for pad in named_pads(pads)]
+    boxes = [pad_geom(pad) for pad in pads]
     if not boxes:
         return None
     left = min(x - width / 2.0 for x, _y, width, _h in boxes)
@@ -200,6 +201,24 @@ def pad_geom(pad: Pad) -> tuple[float, float, float, float]:
     return (pad.x, pad.y, round(width, 9), round(height, 9))
 
 
+def normalize_angle(degrees: float) -> float:
+    """Return the angle in degrees, normalised to the half-open interval (-180, 180]."""
+    while degrees <= -180.0:
+        degrees += 360.0
+    while degrees > 180.0:
+        degrees -= 360.0
+    return degrees
+
+
+def snap_to_90(degrees: float) -> int:
+    """Return the multiple of 90 nearest the angle, as 0, 90, 180 or 270.
+
+    Exact 45-degree ties round to the even multiple (Python's ``round``), which is
+    deterministic.
+    """
+    return (round(degrees / 90.0) * 90) % 360
+
+
 def ccw_correction(math_rotation_deg: float) -> int:
     """Convert the solver's Y-down math-frame angle to the CPL correction, snapped to 90.
 
@@ -212,11 +231,11 @@ def ccw_correction(math_rotation_deg: float) -> int:
     degrees, where the negated angle would give 90 (a 180-degree part such as a
     SOT-23 reads the same either way).
     Feed it ``TransformResult.rotation_deg`` (or the raw angle; both snap here).
-    Exact 45-degree ties round to the even multiple, which is deterministic and
-    irrelevant in practice because a part turned 45 degrees from both snaps fits
-    at neither.
+    The snap is :func:`snap_to_90`: exact 45-degree ties round to the even
+    multiple, which is irrelevant in practice because a part turned 45 degrees
+    from both snaps fits at neither.
     """
-    return (round(math_rotation_deg / 90.0) * 90) % 360
+    return snap_to_90(math_rotation_deg)
 
 
 def naming_rule_to_cpl(rotation: int) -> int:

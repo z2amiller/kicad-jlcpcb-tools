@@ -12,9 +12,12 @@ from jlcfootprint.geometry import (
     mirror_y,
     named_pads,
     naming_rule_to_cpl,
+    normalize_angle,
     pad_box_centre,
     pad_geom,
     pad_hash,
+    pad_pitch,
+    snap_to_90,
 )
 
 
@@ -116,16 +119,69 @@ def test_centroid_is_the_mean_and_rejects_no_pads():
 
 
 def test_the_pad_box_centre_is_the_union_of_the_turned_pad_boxes():
-    """The centre ignores unnamed pads and uses each pad's box after its own rotation."""
+    """The centre uses each pad's box after its own rotation."""
     pads = [
         Pad("1", -1.0, 0.0, 0.4, 1.0),
         Pad("2", 1.0, 0.0, 1.0, 0.4, rotation=90.0),
-        Pad("", 9.0, 9.0, 1.0, 1.0),
     ]
 
     # Pad 2 is 0.4 wide once its own 90 degrees are applied, so the box is -1.2 .. 1.2.
     assert pad_box_centre(pads) == (0.0, 0.0)
     assert pad_box_centre([]) is None
+
+
+def test_an_unnumbered_soldered_pad_counts_in_the_pad_box_centre():
+    """A soldered pad without a number widens the box, as it does in ``get_position``."""
+    pads = [
+        Pad("1", -1.0, 0.0, 0.4, 1.0),
+        Pad("2", 1.0, 0.0, 1.0, 0.4, rotation=90.0),
+        Pad("", 2.0, 0.0, 0.4, 0.4),
+    ]
+
+    # The unnumbered pad reaches 2.2, so the box is -1.2 .. 2.2 across and -0.5 .. 0.5 down.
+    assert pad_box_centre(pads) == pytest.approx((0.5, 0.0))
+
+
+def test_pad_pitch_is_the_nearest_two_terminals():
+    """Pads sharing a number (a DPAK's tab and its stub) are one terminal and never set the pitch."""
+    dpak = [
+        Pad("1", -2.28, 4.0, 1.0, 1.6),
+        Pad("3", 2.28, 4.0, 1.0, 1.6),
+        Pad("2", 0.0, -1.0, 6.0, 6.0),
+        Pad("2", 0.0, 4.0, 1.0, 1.6),
+    ]
+    # The two pad 2s are 5 mm apart and the stub sits 2.28 mm from pads 1 and 3.
+    assert pad_pitch(dpak) == pytest.approx(2.28)
+    assert (
+        pad_pitch([Pad("2", 0.0, -1.0, 6.0, 6.0), Pad("2", 0.0, 4.0, 1.0, 1.6)]) is None
+    )
+    assert (
+        pad_pitch([Pad("1", 0.0, 0.0, 1.0, 1.0), Pad("", 1.0, 0.0, 1.0, 1.0)]) is None
+    )
+
+
+def test_normalize_angle_is_half_open():
+    """Angles land in (-180, 180]: 180 stays, -180 becomes 180."""
+    assert [normalize_angle(a) for a in (0.0, 180.0, -180.0, 190.0, -190.0, 720.0)] == [
+        0.0,
+        180.0,
+        180.0,
+        -170.0,
+        170.0,
+        0.0,
+    ]
+
+
+def test_snap_to_90_rounds_to_the_nearest_quarter_turn():
+    """The nearest multiple of 90 as 0, 90, 180 or 270; an exact 45 rounds to the even multiple."""
+    assert [snap_to_90(a) for a in (44.0, 46.0, -92.0, 359.0, 45.0, 135.0)] == [
+        0,
+        90,
+        270,
+        0,
+        0,
+        180,
+    ]
 
 
 def test_ccw_correction_snaps_and_wraps():
