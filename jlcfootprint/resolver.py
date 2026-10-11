@@ -704,7 +704,7 @@ def resolve(
         if kind == "other":
             verdict.non_polar = True
             verdict.notes.append(
-                "orientation token on a non-polar part: pin 1 kept where JLC draws it"
+                "orientation token on a non-polar part: KiCad pad 1 goes where the token puts pin 1, which need not be JLC's pad 1"
             )
         _resolve_polarized(
             kicad_named,

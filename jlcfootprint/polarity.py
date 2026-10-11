@@ -80,7 +80,14 @@ REFERENCE_TERMINAL = {
     "other": "positive",
 }
 # What pad 1 is assumed to be when the KiCad side says nothing, per kind, for the note.
-CONVENTION = {"diode": "K", "polar_cap": "+", "polar": "+", "other": "JLC's pin 1"}
+# A part of no polarized kind reaches the meaning path only through an FD/RD token,
+# which says where pin 1 goes as it does for a capacitor's positive terminal.
+CONVENTION = {
+    "diode": "K",
+    "polar_cap": "+",
+    "polar": "+",
+    "other": "the token's pin 1",
+}
 OPPOSITE = {
     "cathode": "anode",
     "anode": "cathode",

@@ -1,9 +1,11 @@
 """Resolver tests on real KiCad library footprints against recorded EasyEDA responses."""
 
+import math
+
 import pytest
 
 from jlcfootprint.drawing import drawing_marks
-from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
+from jlcfootprint.geometry import Pad, easyeda_pads_to_mm, rotate
 from jlcfootprint.naming import parse_package_name
 from jlcfootprint.resolver import pair_by_name, resolve
 from tests.jlcfootprint_support import recorded
@@ -180,14 +182,31 @@ def test_missing_exposed_pad_is_a_warning_not_a_wrong_pick():
 
 
 def test_marked_inductor_honours_the_direction_token():
-    """L0402-RD: not polarized, but JLC marks pin 1; keep pin 1 where JLC draws it (180)."""
-    kicad = library_pads("Inductor_SMD", "L_0402_1005Metric")
-    jlc = [Pad("1", 0.51, 0.0, 0.54, 0.64), Pad("2", -0.51, 0.0, 0.54, 0.64)]
-    verdict = resolve(
-        kicad, "Inductor_SMD:L_0402_1005Metric", "ok", "L0402-RD", jlc, []
+    """C77110 (L0402-RD) is not polarized: the token puts pin 1 on the right, so KiCad's pad 1 lands on JLC's pad 2 at 180."""
+    verdict = verdict_for("Inductor_SMD", "L_0402_1005Metric", "C77110")
+    assert (verdict.rotation, verdict.method, verdict.status) == (
+        180,
+        "polarity",
+        "green",
     )
-    assert (verdict.rotation, verdict.method) == (180, "polarity")
     assert verdict.name_rotation == 180
+    assert verdict.non_polar
+    assert verdict.notes == [
+        "orientation token on a non-polar part: KiCad pad 1 goes where the token puts pin 1, which need not be JLC's pad 1",
+        "assumed KiCad pad 1 = the token's pin 1",
+    ]
+    jlc = easyeda_pads_to_mm(recorded("C77110").pads)
+    assert [pad.number for pad in sorted(jlc, key=lambda pad: pad.x)] == ["1", "2"]
+    kicad_pad_1 = library_pads("Inductor_SMD", "L_0402_1005Metric")[0]
+    x, y = rotate(kicad_pad_1.x, kicad_pad_1.y, verdict.placement.rotation_deg)
+    landed = min(
+        jlc,
+        key=lambda pad: math.hypot(
+            pad.x - x - verdict.placement.offset_x,
+            pad.y - y - verdict.placement.offset_y,
+        ),
+    )
+    assert (kicad_pad_1.number, landed.number) == ("1", "2")
 
 
 def test_sot23_with_clockwise_numbering_is_a_numbering_finding():

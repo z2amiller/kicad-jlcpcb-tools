@@ -21,7 +21,7 @@ D11    C553979    yellow   fits                 0    0   0.00   0.00  Diode_SMD:
 D12    C2836396   green    fits                 0    0   0.00   0.00  Diode_SMD:D_SMA / DO-214AC_L4.3-W2.7-LS5.0-RD / symbol pin-1 label names the other pad; name token, footprint + mark decide
 D13    C2857328   green    fits                 0    0   0.00   0.00  Diode_SMD:D_SMF / SMF_L2.8-W1.8-LS3.7-BI / bidirectional part; aligned by axis
 J1     C165948    green    fits                 0        0.00  -0.11  Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12 / USB-C_SMD-TYPE-C-31-M-12_1 / pad counts differ (17 vs 16) but the 8 shared names align
-L1     C77110     green    fits               180  180   0.00   0.00  Inductor_SMD:L_0402_1005Metric / L0402-RD / orientation token on a non-polar part: pin 1 kept where JLC draws it; assumed KiCad pad 1 = JLC's pin 1
+L1     C77110     green    fits               180  180   0.00   0.00  Inductor_SMD:L_0402_1005Metric / L0402-RD / orientation token on a non-polar part: KiCad pad 1 goes where the token puts pin 1, which need not be JLC's pad 1; assumed KiCad pad 1 = the token's pin 1
 LED1   C2286      yellow   fits                 0    0   0.00   0.00  LED_SMD:LED_0603_1608Metric / LED-SMD_L1.6-W0.8-R-RD / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
 LED2   C50494     yellow   fits               180  180   0.00   0.00  LED_SMD:LED_0603_1608Metric / LED0603-FD / JLC's pin-1 marker will sit on the other terminal; numbering difference, not a rotation error; do not renumber the footprint
 LED3   C965804    green    fits                 0    0   0.00   0.00  LED_SMD:LED_0603_1608Metric / LED0603-RD_GREEN / 

@@ -126,7 +126,7 @@ A part with two JLC pads that is polarized, or whose package name carries an FD/
 - **The EasyEDA side: the vote.** Up to four sources each name the pad that carries the reference terminal: the package name's FD/RD token (forward direction puts the marking band, the cathode or the negative end, on the right of JLC's drawing), the symbol's pin-1 label, the symbol's `+` and the footprint's `+`. The majority decides. A tie, such as one token against one mark, is red: "EasyEDA data inconsistent", and no guess. No source at all is unknown: "polarity unknown". A vote that loses is named in a note and lowers the confidence to medium, and so does a decision by the marks alone or an unchecked token on the molded-chip tantalums, the one family whose token is least reliable (over EasyEDA's library it agrees with the marks on 39 of 45 of them, against 201 of 203 electrolytic cans). A bidirectional (`BI`) part has no reference terminal and aligns by axis.
 - Once both reference pads are known the two pads align like any pair, and that pairing must fit; a polarized part is never turned to fit by shape.
 - **The pin-1 light.** The vote also says what JLC's pad 1 is. When it is not what KiCad's pad 1 is, the rotation is still right but JLC's pin-1 marker will sit on the other terminal, so the part is yellow with a note saying not to renumber the footprint.
-- An FD/RD token on a part that is not polarized (a marked inductor) keeps pin 1 where JLC draws it, and the part is flagged non-polar.
+- An FD/RD token on a part that is not polarized (a marked inductor) puts KiCad's pad 1 where the token puts pin 1, read the way a capacitor's token is read, which need not be JLC's pad 1, and the part is flagged non-polar.
 
 ### Two-pad parts without polarity
 
