@@ -92,6 +92,13 @@ def test_smf_is_treated_as_a_diode_family():
     assert "SMF" in CATHODE_PIN1_FAMILIES
 
 
+def test_micro_melf_reads_cathode_first_without_a_hint():
+    """MICRO-MELF is a MELF diode: its RD reads 0 like MELF and MINIMELF, hint or not."""
+    result = parse_package_name("MICRO-MELF_L2.0-W1.2-RD")
+    assert (result.rotation_correction, result.parser_confidence) == (0, "medium")
+    assert parse_package_name("MICRO-MELF_L2.0-W1.2-FD").rotation_correction == 180
+
+
 def test_lcsc_category_fallback_inverts_polarity_for_unlisted_diode_families():
     """A family the table does not know still inverts FD/RD when the caller knows the part is a diode.
 

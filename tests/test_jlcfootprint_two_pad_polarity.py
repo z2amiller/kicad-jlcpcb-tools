@@ -193,7 +193,7 @@ def test_battery_buzzer_and_microphone_families_are_polarized(package):
 )
 def test_microsmp_and_micro_melf_are_not_microphones(package):
     """``MIC-`` keeps its hyphen: the diode packages MICROSMP and MICRO-MELF never match."""
-    assert part_kind(package, "Custom:Part", PLAIN_KICAD, NUMBERED_PINS) == "other"
+    assert part_kind(package, "Custom:Part", PLAIN_KICAD, NUMBERED_PINS) != "polar"
 
 
 def test_the_families_rank_after_the_capacitor_names_and_before_the_symbol_labels():

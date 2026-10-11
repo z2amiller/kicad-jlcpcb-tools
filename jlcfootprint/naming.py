@@ -29,7 +29,7 @@ Cathode-is-pin-1 exception (LEDs and standard diodes):
   K on the right → 180° correction.  RD (anode on right) places K on the left → 0°.
   This inverts the FD/RD mapping relative to capacitors.
   Affected families include LED, LED-SMD, LED-TH, the chip diodes (D), the DO axial
-  packages, SMA/SMB/SMC, SOD-123/323/523/923 and MELF/MINIMELF/MICROMELF;
+  packages, SMA/SMB/SMC, SOD-123/323/523/923 and MELF/MINIMELF/MICROMELF/MICRO-MELF;
   ``CATHODE_PIN1_FAMILIES`` is the full list.
 
 Which token wins: a corner token (TL/TR/BL/BR), then a polarity token (FD/RD/BI),
@@ -245,6 +245,7 @@ _CATHODE_PIN1_FAMILIES = frozenset(
         "MELF",
         "MINIMELF",
         "MICROMELF",
+        "MICRO-MELF",  # EasyEDA's spelling (MICRO-MELF_L2.0-W1.2-RD)
     }
 )
 
