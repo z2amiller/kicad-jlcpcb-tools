@@ -12,6 +12,7 @@ from jlcfootprint.geometry import (
     mirror_y,
     named_pads,
     naming_rule_to_cpl,
+    pad_box_centre,
     pad_geom,
     pad_hash,
 )
@@ -114,8 +115,21 @@ def test_centroid_is_the_mean_and_rejects_no_pads():
         centroid([])
 
 
+def test_the_pad_box_centre_is_the_union_of_the_turned_pad_boxes():
+    """The centre ignores unnamed pads and uses each pad's box after its own rotation."""
+    pads = [
+        Pad("1", -1.0, 0.0, 0.4, 1.0),
+        Pad("2", 1.0, 0.0, 1.0, 0.4, rotation=90.0),
+        Pad("", 9.0, 9.0, 1.0, 1.0),
+    ]
+
+    # Pad 2 is 0.4 wide once its own 90 degrees are applied, so the box is -1.2 .. 1.2.
+    assert pad_box_centre(pads) == (0.0, 0.0)
+    assert pad_box_centre([]) is None
+
+
 def test_ccw_correction_snaps_and_wraps():
-    """The CPL correction is the snapped math-frame angle, modulo 360 (sign settled by the preview)."""
+    """The CPL correction is the snapped math-frame angle, modulo 360, with its sign kept."""
     assert [ccw_correction(a) for a in (0, 90, 180, 270)] == [0, 90, 180, 270]
     assert ccw_correction(-92.0) == 270
     assert ccw_correction(268.0) == 270
@@ -125,7 +139,7 @@ def test_ccw_correction_snaps_and_wraps():
 
 
 def test_naming_rule_to_cpl_negates():
-    """The crawl table's 90 is the CPL's 270; 0 and 180 are their own negatives."""
+    """The naming-rule table's 90 is the CPL's 270; 0 and 180 are their own negatives."""
     assert [naming_rule_to_cpl(a) for a in (0, 90, 180, 270)] == [0, 270, 180, 90]
 
 

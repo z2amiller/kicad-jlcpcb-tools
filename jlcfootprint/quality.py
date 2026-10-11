@@ -3,11 +3,11 @@
 For pads paired between a KiCad footprint and its JLC counterpart, compares
 each pad's bearing from its side's centroid to the other side's bearing for
 the same pad, after removing the transform's rotation.  The result is the
-root-mean-square of those per-pad errors, in degrees — the one number
-``fit.align`` folds into ``Placement.angular_rms`` and, from there, into the
-resolved ``Verdict``.  Pads sitting near their side's centroid (an exposed
-pad, a DPAK tab) have too unstable a bearing to judge and are left out of the
-average.
+root-mean-square of those per-pad errors, in degrees: how far the pads' layout
+departs from a pure rotation of the other side's.  Unlike the solver's
+residual, which is a distance, it does not grow with the part's size.  Pads
+sitting near their side's centroid (an exposed pad, a DPAK tab) have too
+unstable a bearing to judge and are left out of the average.
 
 Python 3.9 compatible; stdlib only.
 """
@@ -34,10 +34,11 @@ def angular_rms(
     """Return the RMS bearing error, in degrees, between matched pad centres.
 
     ``kicad_centres`` and ``jlc_centres`` are the same pads' (x, y) centres in
-    each footprint's own frame, paired by position (as ``fit.align`` pairs
-    them by dict key).  Empty input reports zero error rather than dividing by
-    zero, which is also what a footprint with no matching pads reported before
-    this was split out of the assessment that used to guard it.
+    each footprint's own frame, paired by position: the n-th KiCad centre and
+    the n-th JLC centre are one pad.  ``rotation_deg`` is the turn that carries
+    the KiCad side onto the JLC side, in the frame both share (the solver's
+    angle).  Empty input reports zero error rather than dividing by zero, so a
+    footprint with no matching pads has no bearing error to report.
     """
     n = len(kicad_centres)
     if n == 0:
@@ -76,7 +77,7 @@ def angular_rms(
     if angular_errs_sq:
         angular_rms_deg = math.sqrt(sum(angular_errs_sq) / len(angular_errs_sq))
     else:
-        # All pads coincide with centroids — underdetermined, treat as 0 error.
+        # Every pad sits near a centroid, so no bearing can be judged: no error.
         angular_rms_deg = 0.0
 
     return angular_rms_deg

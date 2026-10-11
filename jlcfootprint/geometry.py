@@ -1,4 +1,4 @@
-"""Pad geometry primitives shared by the resolver, the solver and the tools.
+"""Pad geometry: the pad record, its frame and units, its fingerprint, and the CPL angle conversions.
 
 Everything here is stdlib and frame-explicit.  A ``Pad`` is always in
 millimetres, in the footprint's own frame, with KiCad's Y-down axis.  EasyEDA
@@ -10,21 +10,18 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 # One EasyEDA canvas unit (the classic per-LCSC response format) is 10 mil.
 EASYEDA_UNIT_MM = 0.254
 
-# Whether EasyEDA's Y axis must be flipped to match KiCad's Y-down frame for the
-# classic per-LCSC response format.  Settled by the validation gate against JLC's
-# own preview rather than assumed: with no flip, the recorded responses reproduce
-# SOT-23 at 180 and SOIC-8 -BL at 90 (spec 6).
-# (EasyEDA Pro footprint text, used by the crawl and the per-uuid endpoint, is in
-# mils with Y up; its parser flips.)
+# Whether EasyEDA's classic canvas Y axis must be negated to match KiCad's Y-down
+# frame.  It must not: the classic canvas also counts Y downwards.  JLC's placement
+# preview agrees on both board sides (on the front, a SOT-23 at 180 degrees and a
+# SOIC-8 with a -BL token at 270), and a flip would leave every part whose pads are
+# not mirror-symmetric fitting only as its mirror image.  (EasyEDA Pro footprint
+# text is in mils with Y up, and is flipped when it is read.)
 FLIP_EASYEDA_Y = False
-# Confirmed against JLC's placement preview on 2026-09-12 with tests/fixtures/jlcfootprint/boards/corner_case (plan
-# Task 12): no mirror findings on either side, and the bottom rows (D2, Q5, Q6, U3)
-# reproduce upstream's mirror formula, so EasyEDA's Y is read as it comes.
 
 
 class Pad(NamedTuple):
@@ -47,10 +44,11 @@ class Pad(NamedTuple):
 
 
 def named_pads(pads: list[Pad]) -> list[Pad]:
-    """Return the pads that carry a name (spec 7.1).
+    """Return the pads that carry a name, the only pads that can be paired.
 
-    Unnamed pads are NPTH holes and paste-only copper.  Names are matched as
-    strings by the resolver, so lettered connector pads (A1, B12) align too.
+    Unnamed pads are NPTH holes and paste-only copper.  Pads are paired between
+    two footprints by name, compared as strings, so lettered pads (A1, B12) pair
+    too.
     """
     return [pad for pad in pads if pad.number]
 
@@ -64,11 +62,13 @@ def pad_hash(pads: list[Pad]) -> str:
     """Return a 16-hex-character fingerprint of the pads' names, positions and effective sizes.
 
     The effective size is the pad's box after its own 90-degree rotation, so
-    turning a rectangular pad on its side changes the hash; pin functions do not,
-    because polarity is re-derived at resolve time rather than read from a stored
-    verdict.  Order independent, 0.001 mm quantised, stable across processes and
-    Python versions (blake2b, 8-byte digest).  It is half the key of every stored
-    verdict and override, so changing it is a migration.
+    turning a rectangular pad on its side changes the hash.  Pin functions do not:
+    the hash identifies the copper, and a part's polarity is worked out from its
+    pin functions each time rather than stored under the hash.  Order independent,
+    0.001 mm quantised, stable across processes and Python versions (blake2b,
+    8-byte digest).  It is meant as a persistent key, so anything stored under it
+    is found again only while the hash stays the same: changing what it covers
+    orphans every stored result.
     """
     rows = []
     for pad in pads:
@@ -86,11 +86,14 @@ def pad_hash(pads: list[Pad]) -> str:
     return hashlib.blake2b(payload, digest_size=8).hexdigest()
 
 
-def easyeda_pads_to_mm(raw_pads: list[dict], flip_y: bool | None = None) -> list[Pad]:
+def easyeda_pads_to_mm(
+    raw_pads: list[dict], flip_y: Optional[bool] = None
+) -> list[Pad]:
     """Convert raw classic-format EasyEDA pads (origin-subtracted canvas units) to millimetre pads.
 
-    A flip negates Y only; the pad's own rotation is left as stored because
-    consumers only use it modulo 180 (to swap width and height).
+    ``flip_y`` defaults to :data:`FLIP_EASYEDA_Y`.  A flip negates Y only; the
+    pad's own rotation is left as stored because it is only ever used modulo 180
+    (to swap width and height, :func:`pad_geom`).
     """
     flip = FLIP_EASYEDA_Y if flip_y is None else flip_y
     sign = -1.0 if flip else 1.0
@@ -111,7 +114,7 @@ def easyeda_pads_to_mm(raw_pads: list[dict], flip_y: bool | None = None) -> list
 def mirror_y(pads: list[Pad]) -> list[Pad]:
     """Return the pads mirrored across the X axis (y -> -y), for bottom-side footprints.
 
-    The pad's own rotation is left as stored; consumers only use it modulo 180.
+    The pad's own rotation is left as stored; it is only ever used modulo 180.
     """
     return [pad._replace(y=-pad.y) for pad in pads]
 
@@ -125,13 +128,13 @@ def mirror_box(
 
 
 def rotate(x: float, y: float, degrees: float) -> tuple[float, float]:
-    """Rotate ``(x, y)`` counter-clockwise by ``degrees`` around the origin.
+    """Rotate ``(x, y)`` by ``degrees`` around the origin, turning +X towards +Y.
 
-    The one 2-by-2 the package's rotation sites shared by hand: ``math.radians``
-    then ``cos``, ``sin`` in the order they use.  A negative angle or a swapped
-    (x, y) pair still calls this; only sites whose angle has no degrees form
-    (already-radians values from ``atan2``) cannot, since converting those would
-    add a lossy round trip through ``degrees``/``radians``.
+    That is counter-clockwise in the usual Y-up picture; in KiCad's Y-down frame
+    it reads clockwise on screen.  Every rotation the package makes from an angle
+    in degrees goes through here, so one sign convention holds everywhere.  Code
+    that already holds radians (the solver's ``atan2`` result) rotates directly
+    instead, because a round trip through degrees would cost precision.
     """
     theta = math.radians(degrees)
     cos, sin = math.cos(theta), math.sin(theta)
@@ -146,14 +149,14 @@ def centroid(pads: list[Pad]) -> tuple[float, float]:
     return (sum(p.x for p in pads) / count, sum(p.y for p in pads) / count)
 
 
-def pad_box_centre(pads: list[Pad]) -> tuple[float, float] | None:
+def pad_box_centre(pads: list[Pad]) -> Optional[tuple[float, float]]:
     """Return the centre of the named pads' bounding box, or None without any.
 
-    The box is the union of the pads' effective boxes (:func:`pad_geom`), which is
-    what upstream's ``Fabrication.get_position`` merges in board coordinates, so
-    this is the position the CPL emits today expressed in the footprint frame.
-    Unnamed pads (NPTH holes, paste-only copper) are left out, which is where the
-    two can differ.
+    The box is the union of the pads' effective boxes (:func:`pad_geom`): the
+    footprint-frame counterpart of the box ``Fabrication.get_position`` merges in
+    board coordinates for the CPL's Mid X/Y.  Both leave out NPTH holes and
+    paste-only copper, ``get_position`` by the pad's attribute and layers and this
+    function by the pad's name, which KiCad's libraries leave empty on such pads.
     """
     boxes = [pad_geom(pad) for pad in named_pads(pads)]
     if not boxes:
@@ -165,14 +168,14 @@ def pad_box_centre(pads: list[Pad]) -> tuple[float, float] | None:
     return ((left + right) / 2.0, (top + bottom) / 2.0)
 
 
-def pad_pitch(pads: list[Pad]) -> float | None:
+def pad_pitch(pads: list[Pad]) -> Optional[float]:
     """Return the smallest centre-to-centre distance between differently numbered pads.
 
-    What the detail dialog calls the pitch: the nearest two terminals of the
-    footprint or of the JLC drawing, in millimetres.  None when fewer than two
-    distinct numbers carry a position, so a one-pad drawing reports nothing rather
-    than zero.  Pads sharing a number (a DPAK's tab and its stub) are one terminal
-    and never set the pitch.
+    This is the footprint's pitch as a reader would measure it: the distance
+    between its two nearest terminals, in millimetres, on a KiCad footprint or a
+    JLC drawing alike.  None when fewer than two distinct numbers carry a
+    position, so a one-pad drawing reports nothing rather than zero.  Pads sharing
+    a number (a DPAK's tab and its stub) are one terminal and never set the pitch.
     """
     named = named_pads(pads)
     distances = [
@@ -185,7 +188,7 @@ def pad_pitch(pads: list[Pad]) -> float | None:
 
 
 def pad_geom(pad: Pad) -> tuple[float, float, float, float]:
-    """Return ``(x, y, w, h)`` for the quality checker: the pad's axis-aligned box after its own rotation.
+    """Return ``(x, y, w, h)``: the pad's centre and its axis-aligned size after its own rotation.
 
     Exact for multiples of 90 degrees (a swap of width and height at 90 and 270);
     for other angles it is the bounding box of the rotated rectangle.
@@ -200,25 +203,30 @@ def pad_geom(pad: Pad) -> tuple[float, float, float, float]:
 def ccw_correction(math_rotation_deg: float) -> int:
     """Convert the solver's Y-down math-frame angle to the CPL correction, snapped to 90.
 
-    The solver's angle turns the KiCad pads onto JLC's drawing in the Y-down frame;
-    the CPL correction is the same turn as JLC counts it.  JLC's placement preview
-    settled the sign on 2026-09-12 (plan Task 12, pass 1): every -BL/-TL multi-pin
-    part on the corner-case board needed 270 where the negated angle gave 90, and
-    every 180-degree part agreed either way, so the angle is taken as it is.
+    The solver's angle turns KiCad's pads onto JLC's drawing, from +X towards +Y,
+    which in KiCad's Y-down frame reads clockwise on screen.  The CPL correction
+    is the inverse turn, JLC's drawing back onto KiCad's pads, counted
+    counter-clockwise as KiCad counts rotation.  Inverting the turn and reversing
+    the direction cancel, so the two are the same number and the angle is taken
+    as it is.  JLC's placement preview agrees: a SOIC-8 with a -BL token needs 270
+    degrees, where the negated angle would give 90 (a 180-degree part such as a
+    SOT-23 reads the same either way).
     Feed it ``TransformResult.rotation_deg`` (or the raw angle; both snap here).
     Exact 45-degree ties round to the even multiple, which is deterministic and
-    irrelevant in practice because such a solve fails a pad anyway.  Never feed
-    the result back into ``fit.align`` and ``quality.angular_rms``, which works in the math frame.
+    irrelevant in practice because a part turned 45 degrees from both snaps fits
+    at neither.
     """
     return (round(math_rotation_deg / 90.0) * 90) % 360
 
 
 def naming_rule_to_cpl(rotation: int) -> int:
-    """Convert a crawl-table rotation (the (family, token) table's sense) to the CPL's.
+    """Convert a rotation from EasyEDA's naming rule (``naming.parse_package_name``) to the CPL's sense.
 
-    The crawler's table and ``tools/jlcfootprint/sweep_crawl.py`` count the turn that brings
-    JLC's drawing onto KiCad's footprint; the CPL counts the turn of KiCad's part
-    onto JLC's drawing.  They are negatives of each other (SOIC-8 -BL: 90 in the
-    table, 270 in the CPL, confirmed by the preview).
+    The naming-rule table counts the counter-clockwise turn that carries KiCad's
+    footprint onto JLC's drawing: for a -BL token, KiCad's top-left pin 1 lands
+    on JLC's bottom-left after 90 degrees.  The CPL counts the turn that carries
+    JLC's drawing back onto KiCad's footprint, so the two are negatives of each
+    other: a SOIC-8 with a -BL token is 90 in the table and 270 in the CPL, which
+    is what JLC's placement preview shows.
     """
     return (-rotation) % 360

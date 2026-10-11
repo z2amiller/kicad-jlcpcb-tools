@@ -53,7 +53,7 @@ def test_extract_family(name, family):
     ],
 )
 def test_parse_package_name(name, rotation, source, confidence):
-    """Known names map to the rotations the crawler validated on the 56-part board."""
+    """Each package name maps to the rotation, source and confidence its tokens define."""
     result = parse_package_name(name)
     assert (
         result.rotation_correction,
@@ -67,14 +67,17 @@ def test_parse_package_name(name, rotation, source, confidence):
 
 
 def test_smf_is_treated_as_a_diode_family():
-    """The Reddit TVS pair lives in SMF, which the crawler resolved through the LCSC category."""
+    """SMF (a TVS and Schottky package) reads its FD/RD tokens cathode-first, like other diodes."""
     assert parse_package_name("SMF_L2.8-W1.8-LS3.7-RD").rotation_correction == 0
     assert parse_package_name("SMF_L2.8-W1.8-LS3.7-FD-1").rotation_correction == 180
     assert "SMF" in CATHODE_PIN1_FAMILIES
 
 
 def test_lcsc_category_fallback_inverts_polarity_for_unlisted_diode_families():
-    """A family the table does not know still inverts FD/RD when LCSC calls it a diode."""
+    """A family the table does not know still inverts FD/RD when the caller knows the part is a diode.
+
+    Any truthy hint counts, here the name of LCSC's "Diodes" category.
+    """
     assert parse_package_name("SOD-110_L2.0-W1.2-FD").rotation_correction == 0
     assert (
         parse_package_name("SOD-110_L2.0-W1.2-FD", "Diodes").rotation_correction == 180

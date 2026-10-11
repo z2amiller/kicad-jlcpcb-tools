@@ -87,19 +87,6 @@ def test_a_verdict_without_a_placement_or_a_fit_has_no_origin():
     assert fitted.origin == package_origin(fitted.placement)
 
 
-def test_the_pad_box_centre_is_the_union_of_the_turned_pad_boxes():
-    """The centre ignores unnamed pads and uses each pad's box after its own rotation."""
-    pads = [
-        Pad("1", -1.0, 0.0, 0.4, 1.0),
-        Pad("2", 1.0, 0.0, 1.0, 0.4, rotation=90.0),
-        Pad("", 9.0, 9.0, 1.0, 1.0),
-    ]
-
-    # Pad 2 is 0.4 wide once its own 90 degrees are applied, so the box is -1.2 .. 1.2.
-    assert pad_box_centre(pads) == (0.0, 0.0)
-    assert pad_box_centre([]) is None
-
-
 # ----------------------------------------------------------------------------
 # The origin on real parts (spec 17.7)
 # ----------------------------------------------------------------------------

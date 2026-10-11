@@ -1,4 +1,4 @@
-"""EasyEDA Footprint Naming Rule suffix parser (3.9 port of jlc-footprint-data's suffix.py).
+"""EasyEDA Footprint Naming Rule suffix parser: the pin-1 position a package name encodes.
 
 Implements the rotation-correction lookup defined by the EasyEDA Footprint Naming
 Rule Reference (MIT licensed, jointly authored by LCSC and EasyEDA engineering).
@@ -14,9 +14,12 @@ The naming rule encodes the footprint's pin-1 orientation in the package name:
     FD / RD / BI       -- polarity direction for 2-terminal polarized parts
 
 Rotation conventions:
-  - Angles are CCW-positive degrees, matching KiCad's CPL convention.
-  - The correction is added to the KiCad footprint rotation to produce the
-    JLCPCB-correct orientation.
+  - Angles are degrees, counter-clockwise as KiCad counts rotation.  Each one is
+    the turn that carries KiCad's footprint onto JLC's drawing: KiCad's pin 1
+    (top-left, or left for two pins) lands where the token puts JLC's pin 1.
+  - The CPL counts the opposite turn, JLC's drawing back onto KiCad's footprint,
+    so the CPL correction is the negative (``geometry.naming_rule_to_cpl``): a
+    SOIC-8 with a -BL token is 90° here and 270° in the CPL.
   - Standard JLCPCB reference: pin-1 at top-left → 0° correction.
   - For 2-pin polarized parts: pin-1 (positive terminal) on left → 0° correction.
 
@@ -25,20 +28,21 @@ Cathode-is-pin-1 exception (LEDs and standard diodes):
   use pin-1 = cathode (K), not anode.  EasyEDA's FD (anode on left) therefore places
   K on the right → 180° correction.  RD (anode on right) places K on the left → 0°.
   This inverts the FD/RD mapping relative to capacitors.
-  Affected families: LED, LED-SMD, LED-TH, DO-1x/DO-3x/DO-41, SMA/SMB/SMC,
-    SOD-123/323/523/923, MELF/MINIMELF/MICROMELF.
+  Affected families include LED, LED-SMD, LED-TH, the DO axial packages, SMA/SMB/SMC,
+  SOD-123/323/523/923 and MELF/MINIMELF/MICROMELF; ``CATHODE_PIN1_FAMILIES`` is the
+  full list.
 """
 
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 # ---------------------------------------------------------------------------
 # Rotation correction lookup tables
 # ---------------------------------------------------------------------------
 
-# Pin-1 corner/edge position → correction (all non-LED families)
+# Pin-1 corner/edge position → correction (every family, cathode-first ones included)
 _PIN1_CORRECTION: dict[str, int] = {
     "TL": 0,  # top-left  → already standard → 0°
     "TR": 270,  # KiCad's top-left pin 1 lands on JLC's top-right after 270° CCW
@@ -152,12 +156,12 @@ _MPN_SUFFIX_FAMILY_ROOTS: frozenset[str] = frozenset(
 #   RD (anode on right → cathode on left) → 0° correction
 #   FD (anode on left  → cathode on right) → 180° correction
 #
-# LED families: KiCad LED footprints have always used pin-1 = K.
+# LED families: KiCad's LED footprints use pin-1 = K.
 #   LED-ARRAY is deliberately excluded: multi-LED packages often use pin-1 = anode.
 #
 # Standard diode packages: KiCad Diode_TH and Diode_SMD footprints also use
-#   pin-1 = K (cathode).  Geometry cross-checks on DO-15, SMA, and SOD-323
-#   confirmed the inversion (geo sees pad-1 on left for RD packages, matching 0°).
+#   pin-1 = K (cathode).  Aligning the pads of DO-15, SMA and SOD-323 parts agrees:
+#   an RD package's cathode, KiCad's pad 1, is on the left, at 0°.
 _CATHODE_PIN1_FAMILIES = frozenset(
     {
         # LED families
@@ -195,12 +199,12 @@ _CATHODE_PIN1_FAMILIES = frozenset(
         "SMCG",  # guard-ring variants (same footprint/convention as SMA/B/C)
         # Large SMD power diode (Microsemi/Vishay)
         "DO-218AB",
-        # DO-219AB / SMF: TVS and Schottky diodes; the crawler resolved these through the
-        # LCSC "Diodes" category, which the plugin does not see at resolve time.
+        # DO-219AB / SMF: TVS and Schottky diode packages.  Nothing in their names
+        # says diode, so they are listed rather than left to a caller's hint.
         "SMF",
         "DO-219AB",
-        # SOD-882 / SOD-882D: 2-lead DFN diodes (KiCad D_SOD-882 has pin 1 = K); the crawl's
-        # table lacked them, so its RD entries for this family read 180 where 0 is right.
+        # SOD-882 / SOD-882D: 2-lead DFN diodes (KiCad's D_SOD-882 has pin 1 = K), so
+        # an RD token reads 0°.
         "SOD-882",
         "SOD-882D",
         # Vishay PowerDI series (SOD-123 footprint-compatible)
@@ -226,16 +230,15 @@ _CATHODE_PIN1_FAMILIES = frozenset(
     }
 )
 
-# Public alias — kept for rotation-correction logic; do NOT add polarized caps here.
-# Adding a family here inverts the FD/RD rotation correction (cathode-is-pin-1 exception).
+# The public name for the families whose FD/RD tokens are read cathode-first.
+# Polarized capacitors never belong here: listing a family inverts its FD/RD rotation.
 CATHODE_PIN1_FAMILIES: frozenset[str] = _CATHODE_PIN1_FAMILIES
 
 # Polarized capacitor families — aluminum electrolytic and tantalum.
-# These have a meaningful pin-1 polarity (positive terminal) that is worth detecting,
-# but they use the STANDARD FD/RD rotation correction (pin-1 = anode/positive),
-# so they must NOT appear in _CATHODE_PIN1_FAMILIES.
+# Their pin 1 is the positive terminal, so a part in one of them is polarized,
+# but they use the STANDARD FD/RD rotation correction (pin-1 = anode/positive)
+# and must NOT appear in _CATHODE_PIN1_FAMILIES.
 #
-# Used only for priority ordering in fetch-easyeda-polarity and the status display.
 # CP-* prefix = "Capacitor Polarized" in EasyEDA naming conventions.
 # CASE-* = EIA standard tantalum case codes (A=3216, B=3528, C=6032, D=7343, E=7360).
 POLARIZED_CAP_FAMILIES: frozenset[str] = frozenset(
@@ -285,11 +288,11 @@ def _is_dimensional(token: str) -> bool:
 # Family extraction
 # ---------------------------------------------------------------------------
 
-# Package names with underscore: everything before _ is the family.
-# Package names without underscore: leading alphabetic-and-dash prefix, stopping at
-# the first digit.  e.g. "LED0603-RD" → "LED",  "C0603" → "C".
-# Hyphens connecting alpha segments are included (e.g. "CAP-SMD" → "CAP-SMD" via _
-# split; this regex covers the no-underscore simpler cases).
+# A name with an underscore has its family before the first underscore
+# ("CAP-SMD_BD6.3-..." → "CAP-SMD"), unless that head carries its own tokens
+# (LED0603-RD_GREEN).  Then, as for a name without an underscore, the family is the
+# leading run of letters, hyphen-joined letter groups included, that ends at a digit
+# or at the end: "LED0603-RD" → "LED", "C0603" → "C".
 _LEADING_ALPHA_RE = re.compile(r"^([A-Z]+(?:-[A-Z]+)*)(?=\d|$)")
 # A head that carries its own orientation token looks like LED0603-RD: letters, digits, token.
 _HEAD_WITH_DIGITS_RE = re.compile(r"^[A-Z]+(?:-[A-Z]+)*\d")
@@ -384,13 +387,13 @@ class SuffixParseResult(NamedTuple):
     rotation_source: str  # 'naming_rule' | 'family_default' | 'none'
     parser_confidence: str  # 'high' | 'medium' | 'low' | 'none'
     family: str
-    parsed_suffix: str | None  # the orientation token(s) found, comma-joined
-    notes: str | None
+    parsed_suffix: Optional[str]  # the orientation token(s) found, comma-joined
+    notes: Optional[str]
 
 
 def parse_package_name(
     package_name: str,
-    cathode_is_pin1: bool | None = None,
+    cathode_is_pin1: Optional[bool] = None,
 ) -> SuffixParseResult:
     """Parse a package name and return the rotation correction.
 
@@ -399,22 +402,25 @@ def parse_package_name(
     Args:
         package_name: The EasyEDA package name string.
         cathode_is_pin1: A caller's knowledge that the part is a diode or LED whose
-            KiCad footprint has pin 1 = cathode (for example from the parts database's
+            KiCad footprint has pin 1 = cathode (for example from the part's catalog
             category, or from the schematic's pin functions).  Used only when the family
             is not already listed, and never for families in _NEVER_CATHODE_FAMILIES.
 
     Lookup order:
-    1. POLARITY_CORRECTION (FD/RD/BI) when a polarity token is present: it names a
-       physical direction, so it wins; cathode-is-pin-1 families (LEDs, standard
-       diodes) invert the mapping.
-    2. PIN1_CORRECTION (TL/TR/BL/BR/L/R/T/B) otherwise: a positional token names
-       where pin 1 is drawn, which for a two-terminal part is only as good as the
-       library's choice of which terminal is pin 1.
-    3. No orientation token found: default to 0° with 'family_default' source.
-    4. Unrecognised package name: 0° with 'none' source and no confidence.
+    1. A polarity token (FD/RD/BI) when one is present: it names a physical
+       direction, so it wins; cathode-is-pin-1 families (LEDs, standard diodes)
+       read it from the inverted table, at medium confidence.
+    2. A positional token (TL/TR/BL/BR/L/R/T/B) otherwise: it names where pin 1 is
+       drawn, which for a two-terminal part is only as good as the library's
+       choice of which terminal is pin 1.
+    3. No orientation token in a standard passive family (R, C, L, D, F): 0° with
+       'family_default' source and low confidence.
+    4. No orientation token otherwise, MPN-suffix families included: 0° with
+       'none' source and no confidence.
 
     When both kinds of token are present and disagree, a note records the
-    positional value.
+    positional value.  The rotation is in the table's sense; the CPL correction is
+    its negative (module docstring).
 
     """
     family = extract_family(package_name)
@@ -425,7 +431,7 @@ def parse_package_name(
 
     if not tokens:
         # No orientation token at all.
-        # Standard passive families (R, C, L, D) default to 0°; others unknown.
+        # Standard passive families (R, C, L, D, F) default to 0°; others unknown.
         is_standard_passive = family.upper() in {"R", "C", "L", "D", "F"}
         if is_standard_passive:
             return SuffixParseResult(
@@ -457,8 +463,8 @@ def parse_package_name(
         _POLARITY_CORRECTION_LED if is_cathode_family else _POLARITY_CORRECTION_STANDARD
     )
 
-    rotation: int | None = None
-    used_token: str | None = None
+    rotation: Optional[int] = None
+    used_token: Optional[str] = None
     confidence = "high"
     notes = None
 

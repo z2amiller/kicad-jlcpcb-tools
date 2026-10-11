@@ -1,14 +1,19 @@
 """2D rigid-transform solver (Kabsch/Umeyama, specialised for 2D).
 
-Angles are in whatever frame both pad sets share (KiCad's Y-down frame in this
-plugin; ``geometry.ccw_correction`` turns the snapped angle into KiCad's CCW CPL
-degrees).  ``residual`` is the RMS error for the raw angle, and ``offset_x/y`` is
-the least-squares translation for the raw angle; consumers that apply the
-snapped angle must recompute the translation from the centroids.
-
 Given two pad dicts ``{pad_number: (x, y)}`` from the same physical part
-(one from KiCad, one from JLCPCB/EasyEDA), compute the rotation and
-translation that best aligns ``A`` to ``B``.
+(one from KiCad, one from JLC's EasyEDA footprint), compute the rotation and
+translation that best align ``A`` onto ``B``, pairing pads by number.
+
+Angles are in whatever frame both pad sets share (KiCad's Y-down frame in this
+package; ``geometry.ccw_correction`` turns the snapped angle into the CPL
+correction).  ``residual`` is the RMS error for the raw angle, and ``offset_x/y`` is
+the least-squares translation for the raw angle; code that applies the snapped
+angle must recompute the translation from the centroids.
+
+A mirrored pin order is reported, never solved.  The reflected fit is tried as
+well, and when its residual is under a tenth of the best rotation's the result
+is flagged ``is_mirrored``; its rotation and offset stay those of the best
+proper rotation.
 
 No numpy dependency: the 2D case admits a closed-form rotation from the
 cross-covariance via ``atan2``, which is numerically well-behaved and
@@ -32,17 +37,18 @@ class TransformResult:
 
     The transform maps a point ``a`` in A's frame to B's frame via
     ``R @ a + t`` where ``R`` is rotation by ``rotation_deg_raw``
-    degrees and ``t = (offset_x, offset_y)``.
+    degrees and ``t = (offset_x, offset_y)``.  It is always a proper rotation:
+    ``is_mirrored`` reports a reflection that fitted better, never applies it.
     """
 
-    rotation_deg_raw: float  # unsnapped, for diagnostics
-    rotation_deg: int  # snapped to nearest 90
+    rotation_deg_raw: float  # unsnapped, in (-180, 180], for diagnostics
+    rotation_deg: int  # snapped to the nearest 90: 0, 90, 180 or 270
     offset_x: float  # translation, same units as input
     offset_y: float
     residual: float  # RMS per-pad error, same units as input
     matched_pad_count: int
     is_mirrored: bool  # true if Kabsch indicates reflection (flag, don't apply)
-    is_underdetermined: bool  # true if <2 pads or pads coincident
+    is_underdetermined: bool  # true if <2 pads, coincident pads or NaN/inf
     quality_flag: str  # "ok" | "mirrored" | "underdetermined" | "no_pads"
 
 
@@ -87,7 +93,7 @@ def _solve_rotation_translation(
     """Return (theta, tx, ty, residual) aligning a_pts onto b_pts.
 
     If ``mirror_y`` is True, mirror the A set across the x-axis first
-    (i.e. apply y -> -y).  Used to test the reflection hypothesis.
+    (i.e. apply y -> -y), which tests the reflection hypothesis.
     """
     if mirror_y:
         a_pts = [(x, -y) for (x, y) in a_pts]
@@ -178,8 +184,9 @@ def solve_transform(a: PadDict, b: PadDict) -> TransformResult:
     _, _, _, res_mirror = _solve_rotation_translation(a_pts, b_pts, mirror_y=True)
 
     is_mirrored = False
-    # "10x better" = reflection residual is <= 1/10 of proper residual.
-    # Use a small floor so two near-zero residuals don't ratio-explode.
+    # "10x better": the reflection wins only when its residual is under a tenth
+    # of the proper rotation's.  The floor keeps two near-zero residuals (a two-pad
+    # part fits both ways exactly) from ever counting as a mirror.
     floor = 1e-9
     if res_mirror + floor < residual / 10.0:
         is_mirrored = True
@@ -191,9 +198,8 @@ def solve_transform(a: PadDict, b: PadDict) -> TransformResult:
     while theta_deg > 180.0:
         theta_deg -= 360.0
 
-    # Snap to nearest 90.  Keep in (-180, 180] range, except we emit
-    # the canonical 0/90/180/270 convention mod 360 for the snapped
-    # value — callers generally want a non-negative integer.
+    # Snap to the nearest 90 and report it as 0, 90, 180 or 270; the raw angle
+    # stays in (-180, 180].
     snapped = int(round(theta_deg / 90.0)) * 90
     snapped %= 360  # 0, 90, 180, 270
 

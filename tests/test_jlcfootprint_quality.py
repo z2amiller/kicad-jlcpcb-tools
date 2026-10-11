@@ -1,7 +1,7 @@
 """Tests for ``jlcfootprint.quality.angular_rms``: the RMS and its degenerate cases.
 
 All tests are offline (no network access, no KiCad dependency).  Pad centres are
-synthetic; the SOT-23-like arrangement is the same one the resolver tests share.
+synthetic, laid out like a SOT-23.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from jlcfootprint.geometry import rotate
 from jlcfootprint.quality import angular_rms
 
 # SOT-23-3 reference geometry (footprint-local, mm): pads 1 and 2 on the right,
-# pad 3 on the left, matching the resolver tests' fixture.
+# pad 3 on the left.
 _SOT23 = [(1.235, 0.950), (1.235, -0.950), (-1.235, 0.0)]
 
 
@@ -31,8 +31,8 @@ def test_a_wrong_rotation_has_a_large_rms():
     """A true 45-degree misalignment forced to a 0-degree placement shows up as a 45-degree error.
 
     Every pad's bearing from its centroid shifts by the same 45 degrees the JLC
-    side was actually rotated by, so the RMS lands exactly there too: this is the
-    signal the deleted ``rotation_mismatch`` tier used to threshold at 10 degrees.
+    side was actually rotated by, so the RMS lands exactly there too: a rotation
+    that does not explain the pads shows up as a large angular error.
     """
     jlc = [rotate(x, y, 45.0) for x, y in _SOT23]
     assert angular_rms(_SOT23, jlc, 0) == pytest.approx(45.0, abs=1e-9)
