@@ -284,10 +284,15 @@ def _resolve_multi_pin(
         if by_function is not None:
             return by_function
         verdict.take_fit(report)
-        if verdict.pad_count_kicad == verdict.pad_count_jlc:
-            # Every JLC pad must land, so the count is of pads, not of distinct numbers.
-            jlc_named = named_pads(jlc_pads)
-            angle, landed = shape_alignment(named_pads(kicad_pads), jlc_named)
+        kicad_named = named_pads(kicad_pads)
+        jlc_named = named_pads(jlc_pads)
+        # Only the numbering differs when the package lands every JLC pad and the two
+        # sides have as many pads, counted by distinct number (a DPAK's tab and its stub
+        # are one pad 2) or one by one (pads numbered 1, 2, 3, 4 on one side and
+        # 1, 1, 2, 2 on the other).
+        same_numbers = verdict.pad_count_kicad == verdict.pad_count_jlc
+        if same_numbers or len(kicad_named) == len(jlc_named):
+            angle, landed = shape_alignment(kicad_named, jlc_named)
             if landed == len(jlc_named):
                 return verdict.unresolved(
                     "red",
@@ -527,7 +532,7 @@ def _resolve_axis(
     Both pairings are graded, KiCad's two pads against JLC's and against JLC's
     swapped.  When one fits clearly better, its own placement is the alignment:
     a full turn, method ``shape``.  Otherwise 180 degrees is irrelevant and the
-    axis alone gives the rotation, modulo 180.
+    axis alone gives the rotation, under 180, taken with the pairing that gives it.
     """
     if _coincident(kicad_named) or _coincident(jlc_named):
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
@@ -542,10 +547,15 @@ def _resolve_axis(
         return _shape_alignment(verdict, swapped_placement, swapped)
     if fits_clearly_better(report, swapped):
         return _shape_alignment(verdict, placement, report)
+    if ccw_correction(placement.rotation_deg) >= 180:
+        # Neither pairing fits clearly better, so 180 degrees is irrelevant and the
+        # rotation is the one under 180: keep the pairing that gives it, so that the
+        # package origin derived from the placement belongs to the emitted rotation.
+        placement, report = swapped_placement, swapped
     verdict.take_placement(placement)
     if not _two_pad_fit(report, verdict):
         return verdict
-    verdict.rotation = ccw_correction(placement.rotation_deg) % 180
+    verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "axis"
     verdict.non_polar = True
     verdict.confidence = "high"

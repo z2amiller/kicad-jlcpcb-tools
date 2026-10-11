@@ -118,6 +118,22 @@ def test_part_kind_reads_kicad_diode_evidence_before_capacitor_evidence():
     )
 
 
+def test_part_kind_takes_a_diode_only_from_evidence_naming_its_cathode():
+    """A connector's A1/A2, a switch's A/B and a transistor's C/E name no diode; A with K or C does."""
+    plain = [Pad("1", 0, 0, 1, 1), Pad("2", 1, 0, 1, 1)]
+    connector = [Pad("1", 0, 0, 1, 1, 0, "A1"), Pad("2", 1, 0, 1, 1, 0, "A2")]
+    assert part_kind("CONN-SMD_2P", "Custom:Conn", connector, []) is OTHER
+
+    def by_labels(first: str, second: str):
+        pins = [SymbolPin("1", first), SymbolPin("2", second)]
+        return part_kind("X", "Custom:Thing", plain, pins)
+
+    assert by_labels("A", "B") is OTHER
+    assert by_labels("C", "E") is OTHER
+    assert by_labels("A", "K") is DIODE
+    assert by_labels("A", "C") is DIODE
+
+
 def test_sot23_against_the_recorded_c2132_footprint_gives_180():
     """KiCad's SOT-23 (pin 1 top-left) against EasyEDA's -BR drawing is exactly 180 degrees."""
     name, jlc, pins = load_jlc("C2132")

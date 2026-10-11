@@ -49,7 +49,11 @@ _ANODE_TOKENS = frozenset({"A", "ANODE", "AN"})
 _POSITIVE_TOKENS = frozenset({"+", "POS", "POSITIVE"})
 _NEGATIVE_TOKENS = frozenset({"-", "NEG", "NEGATIVE"})
 _CAP_LABELS = frozenset({"+", "-", "POS", "NEG"})
-_DIODE_LABELS = (PIN1_CATHODE_LABELS | PIN1_ANODE_LABELS) - _CAP_LABELS
+# The symbol labels that name a diode's terminals.  A part is a diode by its labels
+# only when they name both: ``A`` alone is also a switch's pin, and ``C`` alone a
+# transistor's collector.
+_CATHODE_LABELS = PIN1_CATHODE_LABELS - _CAP_LABELS
+_ANODE_LABELS = PIN1_ANODE_LABELS - _CAP_LABELS
 # Pin functions that say "no connection" rather than naming a signal: they carry no
 # terminal and do not disqualify the other pads' functions.
 _NO_FUNCTION_TEXTS = frozenset({"NC", "N/C", "N.C.", "~", "DNC", "NP", "NU"})
@@ -172,10 +176,13 @@ def terminal_of(pad: Pad, diode: bool = False) -> str:
 def function_terminals(pads: list[Pad], diode: bool = False) -> set[str]:
     """Return the terminals the pads' functions name, or nothing when one names something else.
 
-    A switch symbol's ``A``/``B`` and a connector's ``A1`` must not read as an anode: the
-    functions count only when every function on the pads is a terminal name, where
-    an empty or "not connected" function (``NC``, ``DNC``, ``~``) is no function at
-    all rather than a disqualifying one.
+    A switch symbol's ``A``/``B`` must not read as an anode: the functions count only
+    when every function on the pads is a terminal name, where an empty or "not
+    connected" function (``NC``, ``DNC``, ``~``) is no function at all rather than a
+    disqualifying one.  Numbered names read as their letters, so a connector's
+    ``A1``/``A2`` name two anodes here, as the pins of KiCad's bidirectional TVS
+    symbol do; :func:`part_kind` counts pad functions as a diode's only when they
+    name a cathode.
     """
     terminals: set[str] = set()
     for pad in pads:
@@ -201,11 +208,13 @@ def part_kind(
     and its pads' functions, then EasyEDA's package family, then the symbol's pin
     labels.  LED symbols labelled ``+``/``-`` are common, so labels alone never outrank
     a diode family, and ``+``/``-`` pad functions name a capacitor only when nothing
-    else says diode.  :data:`POLAR` is a polarized part whose reference is its positive
-    terminal although it is neither a diode nor a capacitor: a battery, buzzer or
-    microphone by its footprint name or family, ranked after the diode and capacitor
-    names and families, or a part nothing else classifies whose EasyEDA symbol or
-    footprint drawing carries a ``+`` mark (``marks``).
+    else says diode.  A diode's evidence must name its cathode: pad functions that
+    name only anodes are as likely a connector's ``A1``/``A2``, and labels count only
+    when they name both terminals.  :data:`POLAR` is a polarized part whose reference
+    is its positive terminal although it is neither a diode nor a capacitor: a
+    battery, buzzer or microphone by its footprint name or family, ranked after the
+    diode and capacitor names and families, or a part nothing else classifies whose
+    EasyEDA symbol or footprint drawing carries a ``+`` mark (``marks``).
     """
     family = extract_family(package_name).upper()
     footprint = kicad_footprint_name.rsplit(":", 1)[-1].upper()
@@ -214,7 +223,7 @@ def part_kind(
     polarity_tokens = {
         t for t in extract_orientation_tokens(package_name) if t in ("FD", "RD")
     }
-    if footprint.startswith(("D_", "LED_")) or terminals & {"cathode", "anode"}:
+    if footprint.startswith(("D_", "LED_")) or "cathode" in terminals:
         return DIODE
     if footprint.startswith(("CP_", "C_ELEC", "TANTALUM")):
         return POLAR_CAP
@@ -230,7 +239,7 @@ def part_kind(
         POSITIVE_REFERENCE_FAMILIES
     ):
         return POLAR
-    if labels & _DIODE_LABELS:
+    if labels & _CATHODE_LABELS and labels & _ANODE_LABELS:
         return DIODE
     if terminals & {"positive", "negative"} or labels & _CAP_LABELS:
         return POLAR_CAP
