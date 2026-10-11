@@ -209,7 +209,7 @@ def test_retry_after_parsing():
     ],
 )
 def test_failure_kinds(item, transient, fragment):
-    """Network and body problems retry next session; other HTTP statuses are final."""
+    """Network and body problems are transient; other HTTP statuses are final."""
     document = Network(item).client().fetch_footprint("x")
     assert document.record.status == "error"
     assert document.transient is transient

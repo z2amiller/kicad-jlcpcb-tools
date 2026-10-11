@@ -323,10 +323,11 @@ def test_verdict_key_includes_the_pin_functions():
 def test_swapped_numbered_signs_are_stored_under_different_keys():
     """The key reads ``+_1`` as ``+``: swapped signs on the same pads need opposite rotations.
 
-    This is the K/A protection of spec 5.3 (corner-case D4/D5 share one LCSC on one
-    footprint with swapped functions) for numbered signs: a battery with ``+`` on
-    pad 1 and one with ``+`` on pad 2 must not share a stored verdict, and neither
-    may share the key of the bare pads.
+    Swapped K/A functions get different keys because the corner-case board's D4
+    and D5 share one LCSC on one footprint with their functions swapped; numbered
+    signs get the same protection.  A battery with ``+`` on pad 1 and one with
+    ``+`` on pad 2 must not share a stored verdict, and neither may share the key
+    of the bare pads.
     """
     plus_first = [
         Pad("1", -1, 0, 1, 0.5, 0, "+_1"),
@@ -341,7 +342,7 @@ def test_swapped_numbered_signs_are_stored_under_different_keys():
 
 
 def test_the_verdict_key_follows_the_reading_of_a_numbered_sign():
-    """The key stores what ``+_1`` reads as, so it equals the key of a bare ``+`` (spec 5.3, 19.3)."""
+    """The key stores what ``+_1`` reads as, so it equals the key of a bare ``+``."""
     numbered = [
         Pad("1", -1, 0, 1, 0.5, 0, "+_1"),
         Pad("2", 1, 0, 1, 0.5, 0, "-_2"),

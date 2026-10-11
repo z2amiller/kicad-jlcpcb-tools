@@ -1,15 +1,20 @@
-"""Global EasyEDA cache: one sqlite file beside ``corrections.db`` (spec 5.1).
+"""Global EasyEDA cache: one sqlite file, ``jlcfootprint-cache.db``, shared by every project.
 
 Symbol data is keyed per LCSC because pin meaning is a per-part fact; footprint
 data is keyed per footprint uuid because footprints are shared.  Pads are stored
-as EasyEDA sent them and converted when read, so a change to the frame
-convention never invalidates the cache.  Rows never expire on their own: ``none``
-rows are retried after 30 days, ``error`` rows next session, ``ok`` rows only on
-an explicit refresh.  A row is filled in steps (spec 15): the batch lookup writes
-the uuids, the footprint and the symbol documents follow, and ``needs`` says which
-piece is still missing.  A file written by another layout is dropped and refilled:
-every row can be fetched again.  Stdlib only; safe to use from the worker thread
-and the main thread at once (each call opens its own connection).
+in the parser's raw form (classic canvas units) and converted to millimetres when
+a part is judged, so a change to the frame convention never invalidates the cache.
+
+No row expires on a timer; ``needs`` decides what is fetched again.  A ``none``
+row (EasyEDA has nothing for the part) is looked up again after 30 days, an
+``error`` row (a failed fetch) the next time the part is checked, and an ``ok``
+row never, until ``forget`` or ``clear`` drops it.  A row is filled in steps: the
+batch lookup writes the uuids, the footprint and the symbol documents follow, and
+``needs`` says which piece is still missing.
+
+A file written under another layout is dropped and refilled, since every row in
+it can be fetched again.  Stdlib only; safe to use from the worker thread and the
+main thread at once (each call opens its own connection).
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from dataclasses import dataclass
 import json
 import sqlite3
 import time
-from typing import Any
+from typing import Any, Optional
 import zlib
 
 from .easyeda_parse import ComponentRecord, FootprintRecord, SymbolPin, SymbolRecord
@@ -88,14 +93,14 @@ class CachedPart:
     fetched_at: int
 
 
-def compress(shapes: list[str]) -> bytes | None:
+def compress(shapes: list[str]) -> Optional[bytes]:
     """Return the drawing's shape strings as a zlib-compressed JSON blob, or None when empty."""
     if not shapes:
         return None
     return zlib.compress(json.dumps(shapes, separators=(",", ":")).encode("utf-8"))
 
 
-def decompress(blob: bytes | None) -> list[str]:
+def decompress(blob: Optional[bytes]) -> list[str]:
     """Return the shape strings stored by :func:`compress` (an empty list for None)."""
     if not blob:
         return []
@@ -145,7 +150,7 @@ class Cache:
     # Reading
     # ------------------------------------------------------------------
 
-    def status(self, lcsc: str) -> str | None:
+    def status(self, lcsc: str) -> Optional[str]:
         """Return the stored status for a part, or None when it has no row."""
         with closing(self.connect()) as con:
             row = con.execute(
@@ -153,13 +158,14 @@ class Cache:
             ).fetchone()
         return None if row is None else str(row["status"])
 
-    def needs(self, lcsc: str, now: float | None = None) -> set[str]:
-        """Return what the part still needs from the network (spec 15.4).
+    def needs(self, lcsc: str, now: Optional[float] = None) -> set[str]:
+        """Return what the part still needs from the network.
 
         ``{'lookup'}`` when there is no row, an ``error`` row or a ``none`` row older
-        than thirty days; otherwise the subset of ``{'footprint', 'symbol'}`` that is
-        missing: a ``puuid`` without a package row, or a row whose symbol uuid
-        is known but whose symbol has not been fetched.
+        than thirty days; nothing for a younger ``none`` row; otherwise the subset of
+        ``{'footprint', 'symbol'}`` that is missing: a ``puuid`` without a package
+        row, or a row whose symbol uuid is known but whose symbol has not been
+        fetched.  An empty set means the part can be judged from the cache.
         """
         with closing(self.connect()) as con:
             row = con.execute(
@@ -188,7 +194,7 @@ class Cache:
             is not None
         )
 
-    def part(self, lcsc: str) -> CachedPart | None:
+    def part(self, lcsc: str) -> Optional[CachedPart]:
         """Return the part's record with its footprint joined in, or None without a row."""
         with closing(self.connect()) as con:
             row = con.execute(
@@ -242,7 +248,7 @@ class Cache:
     # Writing
     # ------------------------------------------------------------------
 
-    def store(self, record: ComponentRecord, now: float | None = None) -> None:
+    def store(self, record: ComponentRecord, now: Optional[float] = None) -> None:
         """Store one fetched part: its symbol row and, when it carries pads, its footprint row."""
         fetched_at = int(time.time() if now is None else now)
         row = {
@@ -287,7 +293,7 @@ class Cache:
         lcsc: str,
         symbol_uuid: str,
         puuid: str,
-        now: float | None = None,
+        now: Optional[float] = None,
     ) -> None:
         """Store what the batch lookup knows about a part: its uuids, no drawings yet.
 
@@ -308,12 +314,12 @@ class Cache:
         with closing(self.connect()) as con, con:
             _upsert(con, "lcsc_map", _LCSC_COLUMNS, row)
 
-    def store_lookup_miss(self, lcsc: str, now: float | None = None) -> None:
+    def store_lookup_miss(self, lcsc: str, now: Optional[float] = None) -> None:
         """Store that EasyEDA has nothing for a part: a ``none`` row retried after 30 days."""
         self.store(ComponentRecord(lcsc=lcsc, status="none"), now)
 
     def store_symbol(
-        self, lcsc: str, symbol: SymbolRecord, now: float | None = None
+        self, lcsc: str, symbol: SymbolRecord, now: Optional[float] = None
     ) -> bool:
         """Store a part's fetched symbol on its row; return False when the part has no row.
 
@@ -340,9 +346,9 @@ class Cache:
             return cursor.rowcount > 0
 
     def store_footprint(
-        self, footprint: FootprintRecord, now: float | None = None
+        self, footprint: FootprintRecord, now: Optional[float] = None
     ) -> None:
-        """Store one footprint fetched by uuid (spec 15.2)."""
+        """Store one footprint fetched by uuid; one without pads is not stored."""
         if not footprint.pads:
             return
         fetched_at = int(time.time() if now is None else now)
@@ -370,7 +376,13 @@ class Cache:
         footprint_source: str,
         fetched_at: int,
     ) -> dict[str, Any]:
-        """Build a package row; the name-derived rotation is the naming parser's, crawl sense."""
+        """Build a package row.
+
+        The family and name columns are the naming rule's reading of the package
+        name, the angle in the rule's own sense (``geometry.naming_rule_to_cpl``
+        gives the CPL's) and only for a ``naming_rule`` source; ``part`` does not
+        read them back.
+        """
         parsed = parse_package_name(package_name)
         return {
             "puuid": puuid,
@@ -390,7 +402,7 @@ class Cache:
         }
 
     def forget(self, lcsc: str) -> None:
-        """Drop a part's row so the next scan fetches it again (its footprint row stays)."""
+        """Drop a part's row so it is looked up again when next checked; its footprint row stays."""
         with closing(self.connect()) as con, con:
             con.execute("DELETE FROM lcsc_map WHERE lcsc = ?", (lcsc,))
 

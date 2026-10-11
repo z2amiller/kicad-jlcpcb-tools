@@ -1,12 +1,13 @@
-"""Read a live pcbnew board into resolver inputs (spec sections 4 and 6).
+"""Read a live pcbnew board into resolver inputs: one ``BoardPart`` per footprint.
 
 Pads come out in the footprint's own frame with the placement removed:
 ``GetFPRelativePosition`` where pcbnew has it, otherwise the board position
 un-rotated by the footprint's angle.  pcbnew stores a bottom-side footprint's
 pads mirrored, exactly as the board file does, so bottom parts are un-mirrored
-with ``mirror_y`` like the validator un-mirrors file pads (checked on the
-corner-case board, 2026-09-16).  pcbnew is never imported at module load, so
-the module works in tests and standalone tools with duck-typed footprints.
+with ``mirror_y`` as the validator un-mirrors file pads;
+``tools/jlcfootprint/check_live_adapter.py`` checks that both readings agree on
+the gate boards.  pcbnew is never imported at module load, so the module works
+in tests and standalone tools with duck-typed footprints.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, Optional
 
 from .geometry import Pad, mirror_box, mirror_y, pad_hash, rotate
 from .polarity import normalise_function
@@ -55,7 +56,7 @@ class BoardPart:
     footprint_hash: str = ""  # verdict_key(pads): geometry plus pin functions
     value: str = ""
     # The courtyard's box in the footprint frame (mm, un-mirrored on the bottom).
-    courtyard: tuple[float, float, float, float] | None = None
+    courtyard: Optional[tuple[float, float, float, float]] = None
 
 
 def verdict_key(pads: list[Pad]) -> str:
@@ -79,7 +80,13 @@ def verdict_key(pads: list[Pad]) -> str:
 
 
 def lcsc_value(footprint: Any) -> str:
-    """Return the footprint's LCSC field (upstream's rule: an lcsc/jlc field holding C<digits>)."""
+    """Return the first field whose name starts with lcsc or jlc, in any case, holding C<digits>.
+
+    A plain reading for tools and tests.  The plugin's own rule is
+    ``footprint_helpers.get_lcsc_value``, which reads only the assignment field
+    names it recognises, normalises the number and refuses aliases that
+    disagree; a caller that wants it passes it to ``board_parts`` as ``lcsc_of``.
+    """
     try:
         fields = [(f.GetName(), f.GetText()) for f in footprint.GetFields()]
     except AttributeError:
@@ -122,8 +129,9 @@ def _relative_position(pad: Any, footprint: Any) -> tuple[float, float]:
     dx, dy = float(point.x - origin.x), float(point.y - origin.y)
     # A footprint's orientation turns its pads counter-clockwise as drawn, which on
     # pcbnew's Y-down canvas is board = R(-theta) * local, so removing the placement
-    # is local = R(theta) * (board - origin), the matrix below.  Checked against
-    # GetFPRelativePosition on 47 of 47 and 16 of 16 footprints, bottom side included.
+    # is local = R(theta) * (board - origin), the matrix below.  It agrees with
+    # GetFPRelativePosition on every pad of the two gate boards' 47 and 16
+    # footprints, the bottom side included.
     return rotate(dx, dy, _degrees(footprint.GetOrientation()))
 
 
@@ -139,7 +147,7 @@ def footprint_pads(
     footprint: Any,
     to_mm: Callable[[float], float],
     pcbnew: Any = None,
-    counts: Callable[[Any], bool] | None = None,
+    counts: Optional[Callable[[Any], bool]] = None,
 ) -> list[Pad]:
     """Return the footprint's solderable pads in its own frame, un-mirrored on the bottom."""
     custom = getattr(pcbnew, "PAD_SHAPE_CUSTOM", CUSTOM_SHAPE)
@@ -184,7 +192,7 @@ def _on_courtyard(item: Any, pcbnew: Any = None) -> bool:
 
 def footprint_courtyard(
     footprint: Any, to_mm: Callable[[float], float], pcbnew: Any = None
-) -> tuple[float, float, float, float] | None:
+) -> Optional[tuple[float, float, float, float]]:
     """Return the courtyard's box in the footprint's own frame, un-mirrored on the bottom.
 
     pcbnew gives the graphics in board coordinates with the stroke in their
@@ -226,7 +234,7 @@ def board_part(
     footprint: Any,
     to_mm: Callable[[float], float],
     pcbnew: Any = None,
-    counts: Callable[[Any], bool] | None = None,
+    counts: Optional[Callable[[Any], bool]] = None,
     lcsc_of: Callable[[Any], str] = lcsc_value,
 ) -> BoardPart:
     """Read one placed footprint."""
@@ -247,16 +255,18 @@ def board_part(
 def board_parts(
     board: Any,
     pcbnew: Any = None,
-    to_mm: Callable[[float], float] | None = None,
-    counts: Callable[[Any], bool] | None = None,
+    to_mm: Optional[Callable[[float], float]] = None,
+    counts: Optional[Callable[[Any], bool]] = None,
     lcsc_of: Callable[[Any], str] = lcsc_value,
 ) -> list[BoardPart]:
-    """Read every footprint on the board.
+    """Read every footprint on the board whose reference starts with a word character or a hyphen.
 
     ``pcbnew`` is imported here when not supplied; ``to_mm`` defaults to its
     ``ToMM``, or to the identity when pcbnew is absent (test doubles in millimetres).
-    ``counts`` is upstream's ``count_pad`` when the plugin supplies it and ``lcsc_of``
-    upstream's ``get_lcsc_value``; the defaults apply the same rules.
+    ``counts`` is a pad filter applied on top of ``counts_as_pad``, and ``lcsc_of``
+    reads a footprint's part number (``lcsc_value`` by default); a caller that wants
+    the plugin's own rules passes ``footprint_metadata.count_pad`` and
+    ``footprint_helpers.get_lcsc_value``.
     """
     if pcbnew is None:
         try:

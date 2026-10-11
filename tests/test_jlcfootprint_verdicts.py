@@ -74,7 +74,7 @@ def _verdict(**overrides) -> Verdict:
 
 
 def test_schema_matches_the_spec(store):
-    """The table carries exactly the spec's columns, keyed on (lcsc, footprint_hash)."""
+    """The table has exactly these columns, in this order, keyed on (lcsc, footprint_hash)."""
     with closing(sqlite3.connect(store.db_path)) as con:
         columns = [
             row[1] for row in con.execute("PRAGMA table_info(footprint_verdict)")
@@ -86,11 +86,11 @@ def test_schema_matches_the_spec(store):
         ]
     assert columns == SPEC_COLUMNS
     assert keys == ["lcsc", "footprint_hash"]
-    VerdictStore(store.db_path)  # idempotent beside upstream's own tables
+    VerdictStore(store.db_path)  # opening it again changes nothing
 
 
 def test_an_older_table_gains_the_caveat_column(tmp_path):
-    """A project.db written before the body caveat is migrated in place, rows kept."""
+    """A table without the body caveat's column gains it in place, rows kept."""
     path = tmp_path / "project.db"
     with closing(sqlite3.connect(path)) as con, con:
         con.executescript(SCHEMA.replace("  body_excess_mm    REAL,\n", ""))
@@ -178,7 +178,7 @@ def test_mark_pending_creates_a_row(store):
     )
     assert stored.source == "raw"
     assert stored.emitted_rotation is None
-    assert stored.display_text == "raw"  # spec 16.3 retired the pending ellipsis
+    assert stored.display_text == "raw"  # what the CPL emits while the part waits
 
 
 @pytest.mark.parametrize(
@@ -195,7 +195,7 @@ def test_mark_pending_creates_a_row(store):
 def test_emitted_rotation_precedence_and_display(
     status, rotation, override, source, emitted, text
 ):
-    """Override first, then a green or yellow derived value, else the raw angle (spec section 8)."""
+    """Override first, then a green or yellow derived value, else the raw angle."""
     stored = StoredVerdict(
         "C1", "h", status=status, rotation=rotation, override_rotation=override
     )
@@ -205,7 +205,7 @@ def test_emitted_rotation_precedence_and_display(
 
 
 def test_a_second_process_adding_the_same_column_is_not_an_error(store):
-    """Two KiCad processes migrate one project.db at once; the loser must not raise (review nit)."""
+    """Two KiCad processes add the same column to one project.db at once; the loser must not raise."""
     with closing(store.connect()) as con, con:
         # The column is already there: this is the state the loser of the race sees
         # after the winner's ALTER, holding the column list it read beforehand.
@@ -255,7 +255,7 @@ def test_saving_a_fitting_verdict_writes_the_origin_and_a_refusal_writes_null(st
 
 
 def test_an_older_table_gains_the_two_origin_columns(tmp_path):
-    """A project.db written before M4 is migrated in place and keeps its rows."""
+    """A table without the two origin columns gains them in place and keeps its rows."""
     path = tmp_path / "project.db"
     older = SCHEMA.replace("  origin_dx_mm      REAL,\n", "").replace(
         "  origin_dy_mm      REAL,\n", ""

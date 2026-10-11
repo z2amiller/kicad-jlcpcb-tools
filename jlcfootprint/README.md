@@ -2,7 +2,7 @@
 
 JLC places each part by the EasyEDA footprint of the LCSC part number you picked, not by your KiCad footprint. This package works out a part's CPL rotation from that footprint: it aligns the KiCad footprint's pads onto JLC's pads, and the turn that aligns them is the rotation the CPL needs. The same alignment says whether the picked part fits the pads at all.
 
-Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx or pcbnew, and these modules use the standard library only. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad: EasyEDA's answers and KiCad's library footprints are recorded under `tests/fixtures/jlcfootprint/`.
+Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx. `kicad_adapter.board_parts` imports pcbnew only when it is called without it, and `easyeda_client` imports `requests`, which the plugin already uses, only to make a request; everything else is the standard library. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad: EasyEDA's answers and KiCad's library footprints are recorded under `tests/fixtures/jlcfootprint/`.
 
 | Module | What it holds |
 | --- | --- |
@@ -18,6 +18,11 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `fit.py` | Pad pairing, the placement, the fit grades, JLC's package origin and the courtyard overhang |
 | `resolver.py` | One part's verdict: its rotation, fit and polarity |
 | `resolving.py` | The resolver called on a parsed EasyEDA record |
+| `kicad_adapter.py` | A live pcbnew board read into `BoardPart`s: the resolver's inputs, the LCSC number and the verdict key |
+| `easyeda_client.py` | The EasyEDA Pro client: the batch lookup, the footprint and symbol documents, the backoff |
+| `worker.py` | The background fetch thread: two paced queues and a breaker |
+| `cache.py` | The global cache of EasyEDA's answers |
+| `verdicts.py` | The per-project verdict store in `project.db` |
 
 ## Frames and units
 
@@ -98,7 +103,9 @@ When any of this fails, no terminal is named. The footprint's body outline (Pro 
 
 ## Reading KiCad files
 
-The plugin reads a board through pcbnew. The development tools and the tests read KiCad files from plain Python instead: `boardfile.py` parses the footprints of a `.kicad_pcb` or `.kicad_mod` file into their pads (in the footprint's own frame, with the placed rotation taken off), pin functions, LCSC field and courtyard box. The pads are the soldered ones, the same set the plugin keeps when it reads a board through pcbnew: every copper pad that is not an NPTH hole, numbered or not. A paste-only aperture is left out. The alignment pairs pads by name, so an unnumbered pad only counts in the pad-box centre. That centre is taken from the pads' positions and sizes, so it is the centre of pcbnew's pad bounding box except where the copper is not the pad's size at its position: a custom pad's extra primitives, copper offset from its drill, or a pad turned off the 90-degree grid. Over KiCad 10's library the pad sets agree on every footprint, and the centres on all but 385 of the 15,113 footprints with soldered pads: 358 with custom pads, 11 with offset copper, 2 with both and 14 with pads at other angles. The largest difference is 2.25 mm.
+`kicad_adapter.py` reads a live board through pcbnew into one `BoardPart` per footprint: its reference, LCSC number, footprint name, side and placed rotation, its soldered pads in the footprint's own frame, its courtyard box and its verdict key (see the verdict store below). The pads come from `GetFPRelativePosition` and `GetFPRelativeOrientation` where pcbnew has them (KiCad 8 and later), otherwise from the board position turned back by the footprint's angle; pcbnew stores a bottom-side footprint's pads mirrored, so they are mirrored back. The courtyard is the box of the courtyard lines' centrelines, taken back into the footprint frame. pcbnew is imported only when no module is passed in, so the tests drive the adapter with duck-typed footprints, and `lcsc_of` and `counts` let a caller read part numbers and filter pads by its own rules (the plugin's are `footprint_helpers.get_lcsc_value` and `footprint_metadata.count_pad`).
+
+The development tools and the tests read KiCad files from plain Python instead: `boardfile.py` parses the footprints of a `.kicad_pcb` or `.kicad_mod` file into their pads (in the footprint's own frame, with the placed rotation taken off), pin functions, LCSC field and courtyard box. The pads are the soldered ones, the same set `kicad_adapter` keeps when it reads a board through pcbnew: every copper pad that is not an NPTH hole, numbered or not. A paste-only aperture is left out. The alignment pairs pads by name, so an unnumbered pad only counts in the pad-box centre. That centre is taken from the pads' positions and sizes, so it is the centre of pcbnew's pad bounding box except where the copper is not the pad's size at its position: a custom pad's extra primitives, copper offset from its drill, or a pad turned off the 90-degree grid. Over KiCad 10's library the pad sets agree on every footprint, and the centres on all but 385 of the 15,113 footprints with soldered pads: 358 with custom pads, 11 with offset copper, 2 with both and 14 with pads at other angles. The largest difference is 2.25 mm.
 
 `tools/jlcfootprint/kicad_library.py` reads a named KiCad library footprint for the tests. It uses the snapshot recorded under `tests/fixtures/jlcfootprint/kicad/` when there is one, so the tests see the same pads on every machine and run without KiCad. `tools/jlcfootprint/snapshot_kicad_footprints.py` records the snapshots from an installed KiCad, and `test_jlcfootprint_snapshots.py` compares them with the installed library where there is one.
 
@@ -183,11 +190,54 @@ python3 $T/validate_board.py $B/pin_functions_and_marks/pin_functions_and_marks.
 
 All 47 parts on the corner-case board agree, from the classic answers and from the Pro host's, with the same report; on the second board all 16 agree. `tests/test_jlcfootprint_gate.py` runs the same comparisons in the test suite, compares each report with the committed one byte for byte, and pins a few of the verdicts.
 
+**The live reader.** A live board is read through pcbnew, not through `boardfile`, so `tools/jlcfootprint/check_live_adapter.py` holds the two readers to each other on the gate boards. Run with KiCad's own Python, it loads a board with pcbnew, reads it through `kicad_adapter`, and compares every footprint with `boardfile`'s reading: the pads (positions and sizes to 0.1 µm, angles modulo 180, pin functions), the courtyard box and the verdict key, and, for every part with a recorded answer, the status, fit, rotation and package origin the resolver returns from each. Any difference exits 1. On both boards every footprint agrees.
+
+```bash
+KPY=/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
+$KPY $T/check_live_adapter.py $B/corner_case/corner_case.kicad_pcb
+$KPY $T/check_live_adapter.py $B/pin_functions_and_marks/pin_functions_and_marks.kicad_pcb --pro-fixtures $FX/easyeda_pro
+```
+
+## Fetching from EasyEDA
+
+`easyeda_client.EasyEdaClient` makes the requests and `worker.FetchWorker` paces them on one daemon thread. Neither decides what to fetch: a caller queues LCSC numbers and uuids and handles each answer.
+
+- **One host.** Every request goes to EasyEDA's Pro host, `pro.easyeda.com`. The classic host answers one part per request and starts refusing after a short burst, so nothing here calls it; its answers appear only among the recorded fixtures. The two hosts serve the same library: the corner-case board's gate report, for one, is the same from either host's recorded answers.
+- **What is sent.** The batch lookup POSTs up to 200 LCSC numbers and the LCSC library's id on the Pro host (`LCSC_COMPANY_PATH`) to `/api/devices/searchByCodes`, and gets back each known part's symbol uuid, footprint uuid and package name. Each footprint and each symbol is then one GET of `/api/components/{uuid}`, with a uuid the lookup returned. The requests carry a browser-like `User-Agent` and an `Accept` header for JSON; there is no account, no cookie and nothing about the board beyond the part numbers. Each times out after 20 s.
+- **Pacing.** Each queue has a token bucket. Lookups get a burst of two, then one every two seconds; documents a burst of ten, then one every 1 to 1.2 seconds, well under the 2.5 document requests per second the Pro host has answered over long runs through EasyEDA's library without a refusal. A lookup waits half a second after the newest code arrives, so a burst of assignments shares one call; a settled lookup goes before the documents, and footprints before symbols. Successive workers may share one pair of buckets (`Buckets`), so starting a new worker does not reset the pace. `estimate_seconds` gives a rough wait for what is queued, counting two documents for every code still to be looked up.
+- **Backoff.** HTTP 403, 429, 500, 502, 503 and 504 wait for `Retry-After` when it is a number of seconds (at most ten minutes), otherwise 60, 120 and 240 s, and then fail. The client calls its `acquire` before every attempt, retries included, and its `wait` for each backoff; given the worker's `acquire` and `wait_for`, every attempt spends one of the worker's tokens and a stop request cuts any wait short.
+- **Failures.** A network error, an unreadable body, a refusal of the batch lookup and a status still failing after the backoff are transient: the request may be asked again later. HTTP 404 is `none` (EasyEDA has nothing there), another 5xx is transient, and any other status is final. A document EasyEDA refuses is `none` or a final error, by the status rules under "Reading EasyEDA's data". A lookup's failure fails its whole chunk. None of the calls raises.
+- **The breaker.** Three transient failures in a row, from either queue, trip the worker: it serves neither queue again, what is queued stays pending, and one message is logged and passed to `on_tripped`. A success in between resets the count.
+- **Threads.** One lock guards the queues and the in-flight slot, so queueing and the queries are safe from any thread; a job and its result handler run on the worker's thread, outside the lock. A job leaves the in-flight slot before its handler runs, so a handler that queues the same key again is heard. A job that raises counts as a transient failure, and a handler that raises is logged; neither stops the thread.
+
+## Storage
+
+### The EasyEDA cache
+
+`cache.Cache` keeps EasyEDA's answers in one sqlite file for every project (`cache.FILENAME`, `jlcfootprint-cache.db`), so a part is fetched once, not once per project.
+
+- **`lcsc_map`**, one row per LCSC number: the status (`ok`, `none`, or `error` with its reason), the footprint uuid, the symbol uuid, the symbol's pins and its drawing, and when the row was written. Pin meaning is a per-part fact, so it is kept per part.
+- **`package`**, one row per footprint uuid, shared by every part that uses the footprint: the package name, the pads in the parsers' raw form, the footprint drawing, where the footprint came from, and the naming rule's reading of the name. Pads are converted to millimetres only when a part is judged, so a change to the frame conventions never invalidates the cache. Drawings are stored as zlib-compressed JSON.
+- **Filled in steps.** What the batch lookup returns is stored first: a part's uuids (`store_lookup`; a part with no symbol gets an empty pin list) or a `none` row (`store_lookup_miss`). The footprint document then gives the package row (`store_footprint`, never one without pads) and the symbol document the pins (`store_symbol`). `needs(lcsc)` says what is still missing: `{"lookup"}`, some of `{"footprint", "symbol"}`, or nothing when the part can be judged from the cache. A footprint already stored for another part is not fetched again.
+- **Refresh rules.** No row expires on a timer; `needs` decides. A `none` row is looked up again after 30 days (`NONE_RETRY_S`), an `error` row the next time the part is checked, and an `ok` row never, until `forget` drops the part's row (its shared footprint row stays) or `clear` drops everything.
+- **The layout gate.** The file records `SCHEMA_VERSION` in its `meta` table. A file written under any other version, older or newer, is dropped and rebuilt when it is opened, not migrated: every row in it was fetched and can be fetched again, so a change to these tables only has to raise the version.
+- Every call opens its own connection, with a five-second busy timeout, so the worker thread may write while the main thread reads.
+
+### The verdict store
+
+`verdicts.VerdictStore` keeps one table, `footprint_verdict`, in a project's own `jlcpcb/project.db`, beside the plugin's other project tables.
+
+- **The key** is `(lcsc, footprint_hash)`, and the hash is `kicad_adapter.verdict_key`: the footprint's `pad_hash` when no pad has a pin function, otherwise a hash of the pad hash together with each pad's number and normalised pin function (`K_1` reads `K`, `+_1` reads `+`). Pin functions are part of the key because two footprints with the same pads but swapped K/A functions need opposite rotations, as the corner-case board's D4 and D5 do (one LCSC, one footprint). So editing a footprint's pads or swapping its pin functions orphans its verdict and its override together, by design, and the same part on the top and on the bottom shares one row, its pads mirrored back.
+- **A row** holds the resolver's verdict (status, fit, rotation, method, confidence, the name's angle, the pin-1 light, the pad counts and the fit measurements, the courtyard overhang, JLC's package origin in the footprint frame, the notes, when it was resolved) and the user's override (`override_rotation`, `override_note`).
+- **Writing.** `save` stores a verdict and rewrites every column but the override's; a green or yellow verdict writes its package origin and anything else writes none. `mark_pending` records that a part waits for its EasyEDA data: a new row is created pending, and an existing one turns pending with its rotation, method, fit and notes cleared, while its override, its origin columns and its other measurements stay until the next `save`. `set_override` sets or clears the user's rotation; `delete` drops a row, override included.
+- **Reading.** `emitted_rotation` is the override, else the rotation of a green or yellow row, else None, which leaves the part at its raw angle; `source` says which (`override`, `derived`, `raw`). `origin` is JLC's package origin for a green or yellow row only, so a pending row reports none even though its columns are kept. `display_text` is the emitted rotation as text: `180°`, `90° !` for a yellow row, `270° set` for an override, or `raw`.
+- A table that lacks the courtyard-overhang or origin columns gains them when the store opens (`add_missing_columns`); two KiCad processes doing so at once is not an error.
+- Every call opens its own connection, with a five-second busy timeout, so a background thread may write while the main thread reads.
+
 ## What comes next
 
 The package arrives in parts. Still to come:
 
-- **Background fetch and storage**: the EasyEDA client, a paced worker, the response cache and per-project verdicts.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
 - **The UI**: a JLC column with a hover, a detail dialog with a pad overlay, overrides and actions.
 - **Variant boards**: the check on boards with KiCad design variants.

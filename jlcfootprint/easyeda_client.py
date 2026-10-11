@@ -1,15 +1,20 @@
-"""EasyEDA Pro client: the batch device lookup and per-uuid documents (spec 15).
+"""EasyEDA Pro client: the batch device lookup and the per-uuid documents.
 
 Three calls, all on ``pro.easyeda.com``.  ``search_by_codes`` posts up to 200 LCSC
 codes and gets each known part's symbol uuid, footprint uuid and package name;
-``fetch_footprint`` and ``fetch_symbol`` get one document by its uuid.  403/429/5xx
-back off with ``Retry-After`` when present, else 60, 120 and 240 s; network errors
-and malformed bodies are transient failures the cache retries next session; an
-HTTP 404 is ``none`` (nothing there).  Nothing here raises past the three calls.
+``fetch_footprint`` and ``fetch_symbol`` get one document by its uuid.
+
+HTTP 403, 429, 500, 502, 503 and 504 back off with ``Retry-After`` when present,
+else 60, 120 and 240 s, and fail transiently after the last.  Network errors and
+unreadable bodies are transient failures too, which a caller may ask again.  An
+HTTP 404 is ``none`` (nothing there), another 5xx a transient error and any other
+status a final one.  None of the three calls raises on a failed request;
+``search_by_codes`` refuses more than 200 codes with ``ValueError``.
+
 Pacing is the caller's: ``acquire`` is called before every request, retries
-included, so the worker's buckets count each one; ``wait(seconds)`` returns True to
-abandon a backoff when the plugin closes.  ``requests`` is imported on first use;
-the rest is stdlib.
+included, so the worker's buckets count each one; ``wait(seconds)`` returns True
+to abandon a backoff when the caller is stopping.  ``requests``, which the plugin
+already uses, is imported on first use; the rest is stdlib.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
 import time
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 from .easyeda_parse import (
     DevicesResult,
@@ -111,7 +116,7 @@ def _default_wait(seconds: float) -> bool:
     return False
 
 
-def retry_after_seconds(headers: Any) -> float | None:
+def retry_after_seconds(headers: Any) -> Optional[float]:
     """Return a numeric ``Retry-After`` header in seconds, capped, or None."""
     try:
         value = headers.get("Retry-After") if headers is not None else None
@@ -133,10 +138,10 @@ class EasyEdaClient:
 
     def __init__(
         self,
-        get: Callable[..., Any] | None = None,
-        post: Callable[..., Any] | None = None,
-        wait: Callable[[float], bool] | None = None,
-        acquire: Callable[[], bool] | None = None,
+        get: Optional[Callable[..., Any]] = None,
+        post: Optional[Callable[..., Any]] = None,
+        wait: Optional[Callable[[float], bool]] = None,
+        acquire: Optional[Callable[[], bool]] = None,
         backoff: tuple[float, ...] = BACKOFF_S,
         timeout: float = TIMEOUT_S,
     ) -> None:
@@ -200,11 +205,12 @@ class EasyEdaClient:
         raise AssertionError("unreachable: the last attempt returns or raises")
 
     def search_by_codes(self, codes: list[str]) -> Lookup:
-        """Look up one chunk of LCSC codes; never raises.
+        """Look up one chunk of at most 200 LCSC codes; a failed request never raises.
 
-        A failed request or an unreadable answer fails the whole chunk transiently,
-        so the caller asks again; a well-formed answer classifies every code as a hit
-        or a miss.
+        A refusal or an unreadable answer fails the whole chunk transiently, so the
+        caller may ask again, and so does a failed request unless its HTTP status
+        was a final one; a well-formed answer classifies every code as a hit or a
+        miss.
         """
         codes = list(codes)
         if len(codes) > BATCH_SIZE:

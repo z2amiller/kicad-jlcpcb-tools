@@ -1,16 +1,23 @@
-"""Background fetch worker: one daemon thread, two paced queues and a breaker (spec 15).
+"""Background fetch worker: one daemon thread, two paced queues and a breaker.
 
 The lookup queue holds LCSC codes and is served in chunks of up to 200 through the
 batch endpoint; the document queue holds footprint and symbol uuids, footprints
 first, served one per request.  Each queue has its own token bucket: lookups get a
-burst of two, then one every two seconds; documents a burst of ten, then one per
-second with a little jitter (the crawl ran the Pro host at 2.5 per second without a
-refusal).  Each pass serves the first queue, lookups then documents, that is
-non-empty and holds a token; when neither does the thread waits for the earliest
-refill.  A lookup waits half a second after the newest code arrived so a burst of
+burst of two, then one every two seconds; documents a burst of ten, then one every
+1 to 1.2 seconds.  That is well under the 2.5 document requests per second the Pro
+host has answered over long runs through EasyEDA's library without a refusal.
+
+Each pass serves the first queue, lookups then documents, that is non-empty and
+holds a token; when neither does, the thread waits for the earliest refill.  A
+lookup waits half a second after the newest code arrived, so a burst of
 assignments shares one call.  Three consecutive transient failures trip the
-session's breaker: both queues stay pending and one message is reported.  Each job
-is processed in isolation, so nothing raises out of the thread.  Stdlib only.
+worker's breaker: it serves neither queue again, what is queued stays pending and
+one message is reported.  Each job is processed in isolation, so nothing raises
+out of the thread.
+
+The queues and the in-flight slot are guarded by one lock, so the enqueue and
+query methods are safe from any thread; a job and its result handler run on the
+thread draining the queues, outside the lock.  Stdlib only.
 """
 
 from __future__ import annotations
@@ -23,7 +30,7 @@ import math
 import random
 import threading
 import time
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +62,7 @@ class TokenBucket:
     def __init__(
         self,
         clock: Callable[[], float] = time.monotonic,
-        wait: Callable[[float], bool] | None = None,
+        wait: Optional[Callable[[float], bool]] = None,
         jitter: Callable[[], float] = random.random,
         burst: int = DOCUMENT_BURST,
         interval: float = DOCUMENT_INTERVAL_S,
@@ -100,7 +107,7 @@ class TokenBucket:
                 return 0.0
             return max(0.0, self.next_refill - self.clock())
 
-    def take(self, wait: Callable[[float], bool] | None = None) -> bool:
+    def take(self, wait: Optional[Callable[[float], bool]] = None) -> bool:
         """Block until a token is available and spend it; False when asked to stop.
 
         ``wait`` is the caller's stop-aware sleep, so a bucket shared by successive
@@ -116,7 +123,11 @@ class TokenBucket:
 
 @dataclass
 class Buckets:
-    """The two request budgets, one per queue; shared across restarts of the check."""
+    """The two request budgets, one per queue.
+
+    Successive workers may share one pair, so starting a new worker does not reset
+    the pace.
+    """
 
     lookups: TokenBucket
     documents: TokenBucket
@@ -127,7 +138,7 @@ class Buckets:
         clock: Callable[[], float] = time.monotonic,
         jitter: Callable[[], float] = random.random,
     ) -> Buckets:
-        """Return the two queues' buckets at the paces one session may fetch at (spec 15.3)."""
+        """Return the two queues' buckets at the default paces (the module's constants)."""
         return cls(
             lookups=TokenBucket(
                 clock=clock,
@@ -167,10 +178,10 @@ class FetchWorker:
         fetch: Callable[[str, str], Any],
         on_lookup: Callable[[list[str], Any], None],
         on_document: Callable[[str, str, Any], None],
-        on_tripped: Callable[[str], None] | None = None,
+        on_tripped: Optional[Callable[[str], None]] = None,
         clock: Callable[[], float] = time.monotonic,
         jitter: Callable[[], float] = random.random,
-        buckets: Buckets | None = None,
+        buckets: Optional[Buckets] = None,
     ) -> None:
         self.lookup = lookup
         self.fetch = fetch
@@ -190,11 +201,11 @@ class FetchWorker:
         self.footprints: collections.deque = collections.deque()
         self.symbols: collections.deque = collections.deque()
         self.queued_documents: set[tuple[str, str]] = set()
-        self.in_flight: tuple[str, Any] | None = None
-        self.current_bucket: TokenBucket | None = None
+        self.in_flight: Optional[tuple[str, Any]] = None
+        self.current_bucket: Optional[TokenBucket] = None
         self.first_attempt_paid = False
         # The end of a backoff the job in flight is sleeping through (clock units).
-        self.backoff_until: float | None = None
+        self.backoff_until: Optional[float] = None
         self.consecutive_failures = 0
         self.tripped = False
         self.thread = threading.Thread(

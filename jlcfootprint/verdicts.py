@@ -1,9 +1,10 @@
-"""Per-project verdict store: table ``footprint_verdict`` in ``project.db`` (spec 5.3).
+"""Per-project verdict store: table ``footprint_verdict`` in ``project.db``.
 
-A verdict is keyed on the part and the KiCad pad geometry, ``(lcsc, footprint_hash)``,
-so editing a footprint orphans its verdict and its override together, by design.
-Stdlib only; every method opens its own connection, so the worker thread may write
-while the main thread reads.
+A verdict is keyed on the part and the footprint, ``(lcsc, footprint_hash)``, where
+the hash is ``kicad_adapter.verdict_key``: the KiCad pad geometry plus the pin
+functions.  Editing a footprint's pads or swapping its pin functions orphans its
+verdict and its override together, by design.  Stdlib only; every method opens
+its own connection, so the worker thread may write while the main thread reads.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from contextlib import closing
 from dataclasses import dataclass, fields
 import sqlite3
 import time
+from typing import Optional
 
 from .resolver import APPLIED_STATUSES, Verdict
 
@@ -56,30 +58,30 @@ class StoredVerdict:
 
     lcsc: str
     footprint_hash: str
-    footprint_name: str | None = None
-    puuid: str | None = None
+    footprint_name: Optional[str] = None
+    puuid: Optional[str] = None
     status: str = PENDING
-    fit: str | None = None
-    rotation: int | None = None
-    method: str | None = None
-    confidence: str | None = None
-    name_rotation: int | None = None
-    polarity_light: str | None = None
-    pad_count_kicad: int | None = None
-    pad_count_jlc: int | None = None
-    overlap_min: float | None = None
-    overlap_mean: float | None = None
-    angular_rms: float | None = None
-    residual_mm: float | None = None
-    # How far the JLC body overhangs the KiCad courtyard, in mm (spec 16.6).
-    body_excess_mm: float | None = None
-    # JLC's package origin in the KiCad footprint frame (spec 17.3), NULL without one.
-    origin_dx_mm: float | None = None
-    origin_dy_mm: float | None = None
-    override_rotation: int | None = None
-    override_note: str | None = None
-    notes: str | None = None
-    resolved_at: int | None = None
+    fit: Optional[str] = None
+    rotation: Optional[int] = None
+    method: Optional[str] = None
+    confidence: Optional[str] = None
+    name_rotation: Optional[int] = None
+    polarity_light: Optional[str] = None
+    pad_count_kicad: Optional[int] = None
+    pad_count_jlc: Optional[int] = None
+    overlap_min: Optional[float] = None
+    overlap_mean: Optional[float] = None
+    angular_rms: Optional[float] = None
+    residual_mm: Optional[float] = None
+    # How far the JLC body overhangs the KiCad courtyard, in mm.
+    body_excess_mm: Optional[float] = None
+    # JLC's package origin in the KiCad footprint frame, NULL without one.
+    origin_dx_mm: Optional[float] = None
+    origin_dy_mm: Optional[float] = None
+    override_rotation: Optional[int] = None
+    override_note: Optional[str] = None
+    notes: Optional[str] = None
+    resolved_at: Optional[int] = None
 
     @property
     def source(self) -> str:
@@ -91,8 +93,11 @@ class StoredVerdict:
         return "raw"
 
     @property
-    def emitted_rotation(self) -> int | None:
-        """Return the correction the CPL applies (spec 8), None for the raw angle."""
+    def emitted_rotation(self) -> Optional[int]:
+        """Return the correction the CPL applies: the override, else a green or yellow rotation.
+
+        None leaves the part at its raw angle.
+        """
         if self.override_rotation is not None:
             return self.override_rotation
         if self.source == "derived":
@@ -100,13 +105,14 @@ class StoredVerdict:
         return None
 
     @property
-    def origin(self) -> tuple[float, float] | None:
-        """Return the package origin the CPL may place this part at, or None (spec 17.3).
+    def origin(self) -> Optional[tuple[float, float]]:
+        """Return the package origin the CPL may place this part at, or None.
 
-        An override changes the rotation only, so an overridden green or yellow row
-        keeps its origin; a row marked pending keeps the two columns but reports no
-        origin until the re-resolve rewrites them, which is what keeps a part being
-        re-fetched on upstream's pad-box centre.
+        Only a green or yellow row has one.  An override changes the rotation only,
+        so an overridden green or yellow row keeps its origin.  A row marked pending
+        keeps the two columns but reports no origin until it is resolved again and
+        they are rewritten, so a part waiting for its data goes out at the CPL's
+        own pad-box centre, not at an origin it may no longer have.
         """
         if self.status not in APPLIED_STATUSES:
             return None
@@ -116,10 +122,11 @@ class StoredVerdict:
 
     @property
     def display_text(self) -> str:
-        """Return the Rotation column text: the angle, "set", "!" or "raw" (spec 16.3).
+        """Return the emitted rotation as text, or "raw" when the CPL keeps the raw angle.
 
-        A pending row reads "raw", which is what the CPL emits for it; the JLC
-        column's clock carries the fetch state instead.
+        A derived green rotation reads "180°", a yellow one "90° !" and an override
+        "270° set".  A pending row reads "raw", which is what the CPL emits for it
+        until it is resolved.
         """
         if self.override_rotation is not None:
             return f"{self.override_rotation}° set"
@@ -133,7 +140,7 @@ class StoredVerdict:
 
 
 _COLUMNS = tuple(field.name for field in fields(StoredVerdict))
-# Columns added after the first release, created on an existing table at open.
+# Columns an existing table may lack, added to it when the store opens.
 _ADDED_COLUMNS = (
     ("body_excess_mm", "REAL"),
     ("origin_dx_mm", "REAL"),
@@ -183,7 +190,7 @@ class VerdictStore:
     def _from_row(row: sqlite3.Row) -> StoredVerdict:
         return StoredVerdict(**{column: row[column] for column in _COLUMNS})
 
-    def get(self, lcsc: str, footprint_hash: str) -> StoredVerdict | None:
+    def get(self, lcsc: str, footprint_hash: str) -> Optional[StoredVerdict]:
         """Return the stored verdict for one part on one pad geometry, or None."""
         with closing(self.connect()) as con:
             row = con.execute(
@@ -205,9 +212,14 @@ class VerdictStore:
         lcsc: str,
         footprint_hash: str,
         footprint_name: str,
-        now: float | None = None,
+        now: Optional[float] = None,
     ) -> None:
-        """Record that a part is waiting for its EasyEDA data; an override is kept."""
+        """Record that a part is waiting for its EasyEDA data.
+
+        A new row is created pending.  An existing row turns pending with its
+        rotation, method, fit and notes cleared; its override, its origin columns
+        and its other measurements stay until the next ``save``.
+        """
         with closing(self.connect()) as con, con:
             con.execute(
                 "INSERT INTO footprint_verdict (lcsc, footprint_hash, footprint_name, status,"
@@ -231,13 +243,13 @@ class VerdictStore:
         footprint_name: str,
         puuid: str,
         verdict: Verdict,
-        now: float | None = None,
+        now: Optional[float] = None,
     ) -> StoredVerdict:
         """Store a resolver verdict, keeping any override already on the row.
 
-        The origin columns follow the verdict's own rule (spec 17.3): a green or
-        yellow verdict writes JLC's package origin, everything else writes NULL, so
-        a part that stops fitting loses the origin the CPL would have used.
+        The origin columns follow the verdict's own rule: a green or yellow verdict
+        writes JLC's package origin, everything else writes NULL, so a part that
+        stops fitting loses the origin the CPL would have used.
         """
         origin = verdict.origin
         stored = StoredVerdict(
@@ -281,7 +293,7 @@ class VerdictStore:
         return self._from_row(row)
 
     def set_override(
-        self, lcsc: str, footprint_hash: str, rotation: int | None, note: str = ""
+        self, lcsc: str, footprint_hash: str, rotation: Optional[int], note: str = ""
     ) -> None:
         """Set (or clear, with None) the user's rotation on an existing verdict row."""
         with closing(self.connect()) as con, con:
@@ -292,10 +304,10 @@ class VerdictStore:
             )
 
     def delete(self, lcsc: str, footprint_hash: str) -> None:
-        """Drop one verdict row outright, leaving nothing pending in its place.
+        """Drop one verdict row outright, its override included.
 
-        Unlike a refresh, which marks every row pending and keeps it (spec 16.5),
-        this removes the row entirely; the tests use it to orphan a row.
+        ``mark_pending`` keeps the row and its override; this removes both, so the
+        part's next verdict starts with no override.
         """
         with closing(self.connect()) as con, con:
             con.execute(

@@ -1,9 +1,4 @@
-"""Board parts, a fake EasyEDA client and a fake clock, for the fetch path and what runs on it.
-
-The board parts are KiCad library footprints with the pin functions a schematic
-would give them; the fake client answers the Pro host's three calls from the
-recorded classic responses; the clock only moves when something waits on it.
-"""
+"""Test doubles for the fetch path and for the code that runs on it; each says what it stands in for."""
 
 from __future__ import annotations
 
@@ -44,7 +39,7 @@ class Clock:
 
 
 def sot23(reference: str, lcsc: str = "C2132", is_bottom: bool = False) -> BoardPart:
-    """Return a SOT-23 board part from KiCad's library."""
+    """Return a SOT-23 board part from KiCad's library, with the pin functions a schematic gives it."""
     pads = with_functions(
         library_pads("Package_TO_SOT_SMD", "SOT-23"), {"1": "B", "2": "E", "3": "C"}
     )
