@@ -357,6 +357,14 @@ def _parse_footprint(fp_node: list[object]) -> Optional[KiCadFootprint]:
             and _LCSC_VALUE.match(prop_value.strip())
         ):
             lcsc = prop_value.strip()
+    # KiCad 7 and earlier write the reference and the value as fp_text items.
+    for text_node in _find_all_direct(fp_node, "fp_text"):
+        kind = _str_arg(text_node, 1)
+        text = _str_arg(text_node, 2) or ""
+        if kind == "reference" and not reference:
+            reference = text
+        elif kind == "value" and not value:
+            value = text
 
     # Pads
     pads: list[KiCadPad] = []

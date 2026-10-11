@@ -55,6 +55,23 @@ def test_footprints_positions_layers_and_lcsc_fields():
     assert (r9.reference, r9.lcsc) == ("R9", None)
 
 
+KICAD7_TEXT = """(kicad_pcb (version 20221018) (generator pcbnew)
+  (footprint "Resistor_SMD:R_0603_1608Metric" (layer "F.Cu") (at 5 5)
+    (property "LCSC" "C25804")
+    (fp_text reference "R7" (at 0 -1.4) (layer "F.SilkS"))
+    (fp_text value "10k" (at 0 1.4) (layer "F.Fab"))
+    (fp_text user "${REFERENCE}" (at 0 0) (layer "F.Fab"))
+    (pad "1" smd roundrect (at -0.8 0) (size 0.8 0.95) (layers "F.Cu" "F.Paste" "F.Mask"))
+  )
+)"""
+
+
+def test_kicad_7_reference_and_value_come_from_fp_text():
+    """KiCad 7 and earlier keep the reference and the value in fp_text items, not properties."""
+    (r7,) = parse_kicad_pcb_text(KICAD7_TEXT)
+    assert (r7.reference, r7.value, r7.lcsc) == ("R7", "10k", "C25804")
+
+
 def test_pads_carry_pin_functions_and_relative_rotation():
     """Pad angles in the file are absolute; the footprint frame removes the placed rotation."""
     d1, q1, _ = parse_kicad_pcb_text(BOARD)
