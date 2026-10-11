@@ -2,7 +2,7 @@
 
 JLC places each part by the EasyEDA footprint of the LCSC part number you picked, not by your KiCad footprint. This package works out a part's CPL rotation from that footprint: it aligns the KiCad footprint's pads onto JLC's pads, and the turn that aligns them is the rotation the CPL needs. The same alignment says whether the picked part fits the pads at all.
 
-Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx. `kicad_adapter.board_parts` imports pcbnew only when it is called without it; everything else is the standard library. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad: EasyEDA's answers and KiCad's library footprints are recorded under `tests/fixtures/jlcfootprint/`.
+Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. Nothing imports wx. `kicad_adapter.board_parts` imports pcbnew only when it is called without it, and `easyeda_client` imports `requests`, which the plugin already uses, only to make a request; everything else is the standard library. Their tests (`tests/test_jlcfootprint_*.py`) need no network and no KiCad: EasyEDA's answers and KiCad's library footprints are recorded under `tests/fixtures/jlcfootprint/`.
 
 | Module | What it holds |
 | --- | --- |
@@ -19,6 +19,8 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `resolver.py` | One part's verdict: its rotation, fit and polarity |
 | `resolving.py` | The resolver called on a parsed EasyEDA record |
 | `kicad_adapter.py` | A live pcbnew board read into `BoardPart`s: the resolver's inputs, the LCSC number and the verdict key |
+| `easyeda_client.py` | The EasyEDA Pro client: the batch lookup, the footprint and symbol documents, the backoff |
+| `worker.py` | The background fetch thread: two paced queues and a breaker |
 | `verdicts.py` | The per-project verdict store in `project.db` |
 
 ## Frames and units
@@ -195,6 +197,18 @@ $KPY $T/check_live_adapter.py $B/corner_case/corner_case.kicad_pcb
 $KPY $T/check_live_adapter.py $B/pin_functions_and_marks/pin_functions_and_marks.kicad_pcb --pro-fixtures $FX/easyeda_pro
 ```
 
+## Fetching from EasyEDA
+
+`easyeda_client.EasyEdaClient` makes the requests and `worker.FetchWorker` paces them on one daemon thread. Neither decides what to fetch: a caller queues LCSC numbers and uuids and handles each answer.
+
+- **One host.** Every request goes to EasyEDA's Pro host, `pro.easyeda.com`. The classic host answers one part per request and starts refusing after a short burst, so nothing here calls it; its answers appear only among the recorded fixtures. The two hosts serve the same library: the corner-case board's gate report, for one, is the same from either host's recorded answers.
+- **What is sent.** The batch lookup POSTs up to 200 LCSC numbers and the LCSC library's id on the Pro host (`LCSC_COMPANY_PATH`) to `/api/devices/searchByCodes`, and gets back each known part's symbol uuid, footprint uuid and package name. Each footprint and each symbol is then one GET of `/api/components/{uuid}`, with a uuid the lookup returned. The requests carry a browser-like `User-Agent` and an `Accept` header for JSON; there is no account, no cookie and nothing about the board beyond the part numbers. Each times out after 20 s.
+- **Pacing.** Each queue has a token bucket. Lookups get a burst of two, then one every two seconds; documents a burst of ten, then one every 1 to 1.2 seconds, well under the 2.5 document requests per second the Pro host has answered over long runs through EasyEDA's library without a refusal. A lookup waits half a second after the newest code arrives, so a burst of assignments shares one call; a settled lookup goes before the documents, and footprints before symbols. Successive workers may share one pair of buckets (`Buckets`), so starting a new worker does not reset the pace. `estimate_seconds` gives a rough wait for what is queued, counting two documents for every code still to be looked up.
+- **Backoff.** HTTP 403, 429, 500, 502, 503 and 504 wait for `Retry-After` when it is a number of seconds (at most ten minutes), otherwise 60, 120 and 240 s, and then fail. The client calls its `acquire` before every attempt, retries included, and its `wait` for each backoff; given the worker's `acquire` and `wait_for`, every attempt spends one of the worker's tokens and a stop request cuts any wait short.
+- **Failures.** A network error, an unreadable body, a refusal of the batch lookup and a status still failing after the backoff are transient: the request may be asked again later. HTTP 404 is `none` (EasyEDA has nothing there), another 5xx is transient, and any other status is final. A document EasyEDA refuses is `none` or a final error, by the status rules under "Reading EasyEDA's data". A lookup's failure fails its whole chunk. None of the calls raises.
+- **The breaker.** Three transient failures in a row, from either queue, trip the worker: it serves neither queue again, what is queued stays pending, and one message is logged and passed to `on_tripped`. A success in between resets the count.
+- **Threads.** One lock guards the queues and the in-flight slot, so queueing and the queries are safe from any thread; a job and its result handler run on the worker's thread, outside the lock. A job leaves the in-flight slot before its handler runs, so a handler that queues the same key again is heard. A job that raises counts as a transient failure, and a handler that raises is logged; neither stops the thread.
+
 ## Storage
 
 ### The verdict store
@@ -212,7 +226,7 @@ $KPY $T/check_live_adapter.py $B/pin_functions_and_marks/pin_functions_and_marks
 
 The package arrives in parts. Still to come:
 
-- **Background fetch and the cache**: the EasyEDA client, a paced worker, and EasyEDA's answers kept in one file for every project.
+- **The cache**: EasyEDA's answers kept in one file for every project, with the rules for fetching them again.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
 - **The UI**: a JLC column with a hover, a detail dialog with a pad overlay, overrides and actions.
 - **Variant boards**: the check on boards with KiCad design variants.
