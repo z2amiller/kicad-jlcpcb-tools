@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
+import math
 import time
 from typing import Any, Optional, Union
 
@@ -117,7 +118,11 @@ def _default_wait(seconds: float) -> bool:
 
 
 def retry_after_seconds(headers: Any) -> Optional[float]:
-    """Return a numeric ``Retry-After`` header in seconds, capped, or None."""
+    """Return a numeric ``Retry-After`` header in seconds, capped, or None.
+
+    None as well for a value that is not a positive finite number (``0``, ``-5``,
+    ``NaN``), which the caller replaces with its own backoff step.
+    """
     try:
         value = headers.get("Retry-After") if headers is not None else None
     except AttributeError:
@@ -128,7 +133,7 @@ def retry_after_seconds(headers: Any) -> Optional[float]:
         seconds = float(str(value).strip())
     except ValueError:
         return None
-    if seconds <= 0:
+    if not math.isfinite(seconds) or seconds <= 0:
         return None
     return min(seconds, MAX_RETRY_AFTER_S)
 
@@ -158,7 +163,11 @@ class EasyEdaClient:
     def _request(self, url: str, json_body: Any = None) -> Any:
         """Return the decoded body, retrying rate limits and server errors with backoff.
 
-        A POST when ``json_body`` is given, else a GET.
+        A POST when ``json_body`` is given, else a GET.  A body that is not JSON, or
+        not EasyEDA's envelope (an object with a boolean ``success`` flag), is a
+        transient failure like a network error: the part is asked again, and the
+        worker's breaker counts it.  What the envelope carries is the parsers' to
+        read.
         """
         for delay in (*self.backoff, None):
             if not self.acquire():
@@ -199,9 +208,18 @@ class EasyEdaClient:
                     f"HTTP {status}", transient=status >= 500, status=status
                 )
             try:
-                return response.json()
+                body = response.json()
             except ValueError as error:
                 raise FetchError(f"invalid JSON: {error}", transient=True) from error
+            if not isinstance(body, dict):
+                raise FetchError("response is not a JSON object", transient=True)
+            if not isinstance(body.get("success"), bool):
+                raise FetchError(
+                    "response has no boolean success flag"
+                    f" (success is {body.get('success')!r})",
+                    transient=True,
+                )
+            return body
         raise AssertionError("unreachable: the last attempt returns or raises")
 
     def search_by_codes(self, codes: list[str]) -> Lookup:

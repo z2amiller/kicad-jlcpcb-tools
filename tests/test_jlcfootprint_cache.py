@@ -3,6 +3,8 @@
 from contextlib import closing
 from pathlib import Path
 import sqlite3
+import threading
+import time
 
 import pytest
 
@@ -267,57 +269,49 @@ def test_a_file_from_another_layout_is_dropped_and_refilled(tmp_path, version):
     assert Cache(path).counts()["parts"] == 1
 
 
-class _OtherProcessDropsFirst:
-    """A connection that lets another process drop the old tables right after the layout check."""
-
-    def __init__(self, con, path):
-        self.con, self.path = con, path
-
-    def __enter__(self):
-        return self.con.__enter__()
-
-    def __exit__(self, *exc):
-        return self.con.__exit__(*exc)
-
-    def __getattr__(self, name):
-        return getattr(self.con, name)
-
-    def execute(self, sql, *args):
-        cursor = self.con.execute(sql, *args)
-        if "schema_version" in sql and sql.lstrip().upper().startswith("SELECT"):
-            row = cursor.fetchone()
-            cursor.close()
-            with closing(sqlite3.connect(self.path)) as other:
-                other.executescript("DROP TABLE lcsc_map; DROP TABLE package;")
-            return _Answered(row)
-        return cursor
-
-
-class _Answered:
-    """A cursor that has already been read: the layout check's one row."""
-
-    def __init__(self, row):
-        self.row = row
-
-    def fetchone(self):
-        """Return the row read before the other process dropped the tables."""
-        return self.row
-
-
-def test_a_rebuild_racing_another_process_does_not_fail(tmp_path, monkeypatch):
-    """Two processes open a file of another layout; the one that drops the tables second still opens it."""
+def test_a_second_process_opening_during_a_rebuild_waits_and_keeps_it(
+    tmp_path, monkeypatch
+):
+    """Two processes open a file of another layout: the second waits for the first's rebuild, then finds the new layout."""
     path = str(tmp_path / "jlcfootprint-cache.db")
     with closing(sqlite3.connect(path)) as con, con:
         con.executescript(
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
             "INSERT INTO meta VALUES ('schema_version', '1');"
         )
-    connect = Cache.connect
+    second: dict = {}
+
+    def open_second() -> None:
+        try:
+            second["cache"] = Cache(path)
+        except Exception as error:
+            second["error"] = error
+
+    thread = threading.Thread(target=open_second)
+    rebuild = Cache._create_or_rebuild
+    seen = []
+
+    def first_lets_the_second_in(con) -> None:
+        seen.append(
+            con.execute(
+                "SELECT value FROM meta WHERE key = 'schema_version'"
+            ).fetchone()[0]
+        )
+        if len(seen) == 1:
+            # The first holds the write lock: the second starts now and must wait.
+            thread.start()
+            time.sleep(0.3)
+        rebuild(con)
+
     monkeypatch.setattr(
-        Cache, "connect", lambda self: _OtherProcessDropsFirst(connect(self), path)
+        Cache, "_create_or_rebuild", staticmethod(first_lets_the_second_in)
     )
-    cache = Cache(path)
+    first = Cache(path)
+    first.store(recorded("C2132"), now=1)
+    thread.join(timeout=10)
     monkeypatch.undo()
-    assert cache.counts() == {"parts": 0, "packages": 0}
-    cache.store(recorded("C2132"), now=1)
-    assert cache.part("C2132").record.status == "ok"
+    assert "error" not in second
+    # The second read the layout only after the first had committed the new one.
+    assert seen == ["1", SCHEMA_VERSION]
+    assert first.part("C2132").record.status == "ok"
+    assert second["cache"].counts()["parts"] == 1
