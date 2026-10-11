@@ -195,6 +195,8 @@ def test_retry_after_parsing():
     assert retry_after_seconds({"Retry-After": "12"}) == 12.0
     assert retry_after_seconds({"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}) is None
     assert retry_after_seconds({"Retry-After": "0"}) is None
+    assert retry_after_seconds({"Retry-After": "NaN"}) is None
+    assert retry_after_seconds({"Retry-After": "inf"}) is None
     assert retry_after_seconds({}) is None
     assert retry_after_seconds(None) is None
     assert retry_after_seconds({"Retry-After": "99999"}) == 600.0
@@ -205,6 +207,9 @@ def test_retry_after_parsing():
     [
         (ConnectionError("reset"), True, "network error"),
         (Response(200, body=None), True, "invalid JSON"),
+        (Response(200, body=["not", "an", "object"]), True, "not a JSON object"),
+        (Response(200, body={"result": {}}), True, "no boolean success flag"),
+        (Response(200, body={"success": "true"}), True, "no boolean success flag"),
         (Response(418), False, "HTTP 418"),
     ],
 )
@@ -231,3 +236,14 @@ def test_stopping_interrupts_a_backoff_and_a_token_wait():
     lookup = network.client().search_by_codes(["C1"])
     assert "stopped before the request" in lookup.error and lookup.transient
     assert network.calls == []
+
+
+def test_a_nan_retry_after_falls_back_to_the_backoff_step():
+    """Retry-After: NaN is no delay: the client waits its own first step instead of raising."""
+    network = Network(
+        Response(429, headers={"Retry-After": "NaN"}),
+        Response(body=classic_footprint_body()),
+    )
+    document = network.client().fetch_footprint(CLASSIC_UUID)
+    assert document.record.status == "ok"
+    assert network.waits == [BACKOFF_S[0]]

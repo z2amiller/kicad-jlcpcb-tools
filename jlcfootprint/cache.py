@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS package (
   fetched_at       INTEGER NOT NULL
 );
 """
+# The schema one statement at a time, for running inside an explicit transaction:
+# executescript() would commit it first.
+_SCHEMA_STATEMENTS = [statement for statement in SCHEMA.split(";") if statement.strip()]
 
 _LCSC_COLUMNS = (
     "lcsc",
@@ -128,26 +131,42 @@ class Cache:
 
     def __init__(self, path: str) -> None:
         self.path = str(path)
-        with closing(self.connect()) as con, con:
-            con.executescript(SCHEMA)
-            row = con.execute(
-                "SELECT value FROM meta WHERE key = 'schema_version'"
-            ).fetchone()
-            if row is not None and row[0] != SCHEMA_VERSION:
-                # A file written under another layout, older or newer, is rebuilt
-                # rather than migrated: every row in it was fetched and can be
-                # fetched again, so a later change to these tables only has to
-                # raise SCHEMA_VERSION.  A second KiCad process opening the same
-                # file may have dropped the tables already, hence IF EXISTS.
-                con.executescript(
-                    "DROP TABLE IF EXISTS lcsc_map; DROP TABLE IF EXISTS package;"
-                    " DELETE FROM meta;"
-                )
-                con.executescript(SCHEMA)
-            con.execute(
-                "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
-                (SCHEMA_VERSION,),
-            )
+        with closing(self.connect()) as con:
+            # The layout check and any rebuild are one write transaction, taken
+            # before the check: a second KiCad process opening the same file waits
+            # for it, then finds the new layout, and never drops the tables the
+            # first has just built.
+            con.isolation_level = None
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                self._create_or_rebuild(con)
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+            con.execute("COMMIT")
+
+    @staticmethod
+    def _create_or_rebuild(con: sqlite3.Connection) -> None:
+        """Create the tables, or rebuild them when the file has another layout."""
+        for statement in _SCHEMA_STATEMENTS:
+            con.execute(statement)
+        row = con.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+        if row is not None and row[0] != SCHEMA_VERSION:
+            # A file written under another layout, older or newer, is rebuilt
+            # rather than migrated: every row in it was fetched and can be fetched
+            # again, so a later change to these tables only has to raise
+            # SCHEMA_VERSION.
+            con.execute("DROP TABLE IF EXISTS lcsc_map")
+            con.execute("DROP TABLE IF EXISTS package")
+            con.execute("DELETE FROM meta")
+            for statement in _SCHEMA_STATEMENTS:
+                con.execute(statement)
+        con.execute(
+            "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
+            (SCHEMA_VERSION,),
+        )
 
     def connect(self) -> sqlite3.Connection:
         """Open a connection with row access by name."""
