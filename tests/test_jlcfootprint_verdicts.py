@@ -204,6 +204,34 @@ def test_emitted_rotation_precedence_and_display(
     assert stored.display_text == text
 
 
+def test_a_development_builds_table_gains_all_three_columns(tmp_path):
+    """The table a development build wrote, without the overhang and origin columns, opens with its rows and override."""
+    path = tmp_path / "project.db"
+    older = (
+        SCHEMA.replace("  body_excess_mm    REAL,\n", "")
+        .replace("  origin_dx_mm      REAL,\n", "")
+        .replace("  origin_dy_mm      REAL,\n", "")
+    )
+    with closing(sqlite3.connect(path)) as con, con:
+        con.executescript(older)
+        con.execute(
+            "INSERT INTO footprint_verdict (lcsc, footprint_hash, status, rotation,"
+            " override_rotation, override_note) VALUES ('C1', 'h', 'green', 90, 180, 'n')"
+        )
+    store = VerdictStore(str(path))
+    with closing(sqlite3.connect(path)) as con:
+        columns = [
+            row[1] for row in con.execute("PRAGMA table_info(footprint_verdict)")
+        ]
+    assert len(columns) == 24
+    assert columns[-3:] == ["body_excess_mm", "origin_dx_mm", "origin_dy_mm"]
+    kept = store.get("C1", "h")
+    assert (kept.rotation, kept.override_rotation, kept.override_note) == (90, 180, "n")
+    assert (kept.body_excess_mm, kept.origin) == (None, None)
+    saved = store.save("C1", "h", "F", "p", green())
+    assert saved.origin is not None and saved.override_rotation == 180
+
+
 def test_a_second_process_adding_the_same_column_is_not_an_error(store):
     """Two KiCad processes add the same column to one project.db at once; the loser must not raise."""
     with closing(store.connect()) as con, con:

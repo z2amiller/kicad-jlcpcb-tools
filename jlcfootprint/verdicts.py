@@ -140,7 +140,9 @@ class StoredVerdict:
 
 
 _COLUMNS = tuple(field.name for field in fields(StoredVerdict))
-# Columns an existing table may lack, added to it when the store opens.
+# The columns a table written by a development build of the check lacks: those
+# builds kept neither the courtyard overhang nor JLC's package origin, and projects
+# opened with them still hold such a table.  They are added when the store opens.
 _ADDED_COLUMNS = (
     ("body_excess_mm", "REAL"),
     ("origin_dx_mm", "REAL"),
@@ -156,6 +158,8 @@ def _table_columns(con: sqlite3.Connection) -> set:
 def add_missing_columns(con: sqlite3.Connection, present: set) -> None:
     """Add the columns an older ``footprint_verdict`` lacks, tolerating a racing writer.
 
+    An older table is one a development build of the check wrote, without the
+    courtyard overhang and the package origin; its rows and overrides are kept.
     Two KiCad processes can open one project's database at the same moment, both
     read the same old column list and both try the same ``ALTER TABLE``; the loser
     must not fail the plugin on "duplicate column name".  A failure that leaves the
