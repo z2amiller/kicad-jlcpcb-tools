@@ -933,7 +933,7 @@ class SettingsDialog(wx.Dialog):
         )
         # After the value, because this one also enables or disables that checkbox.
         self.update_jlcfootprint_enabled(
-            self.parent.settings.get("jlcfootprint", {}).get("enabled", True)
+            self.parent.settings.get("jlcfootprint", {}).get("enabled", False)
         )
         self.update_tented_vias(
             self.parent.settings.get("gerber", {}).get("tented_vias", True)

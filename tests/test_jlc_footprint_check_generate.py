@@ -311,7 +311,7 @@ def _generate_window(module, check, corrections=()):
         _get_current_board=MagicMock(return_value=SimpleNamespace()),
         generate_button=MagicMock(),
         reset_gauge=MagicMock(),
-        settings={"general": {}, "gerber": {}},
+        settings={"general": {}, "gerber": {}, "jlcfootprint": {"enabled": True}},
         fabrication=fabrication,
         logger=MagicMock(),
         run_drc_before_gerber_export=MagicMock(return_value=True),

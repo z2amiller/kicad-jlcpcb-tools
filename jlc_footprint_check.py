@@ -52,7 +52,7 @@ def shared_buckets() -> Buckets:
 
 def is_footprint_check_enabled(settings: dict) -> bool:
     """Return the setting that switches the resolver path on (spec 9)."""
-    return bool(settings.get("jlcfootprint", {}).get("enabled", True))
+    return bool(settings.get("jlcfootprint", {}).get("enabled", False))
 
 
 def is_exact_origin_enabled(settings: dict) -> bool:

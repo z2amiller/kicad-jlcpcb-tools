@@ -35,7 +35,7 @@ from .wx_harness import (
 
 def jlcfootprint_enabled(settings: dict) -> bool:
     """Read the shipped setting the way the facade does (the harness stubs it off)."""
-    return bool(settings.get("jlcfootprint", {}).get("enabled", True))
+    return bool(settings.get("jlcfootprint", {}).get("enabled", False))
 
 
 @contextmanager

@@ -17,7 +17,7 @@ _PACKAGE = "jlc_footprint_check_upstream_hooks_tests"
 
 def _enabled(settings):
     """Read the shipped setting the way the facade does (the harness stubs it off)."""
-    return bool(settings.get("jlcfootprint", {}).get("enabled", True))
+    return bool(settings.get("jlcfootprint", {}).get("enabled", False))
 
 
 @pytest.fixture

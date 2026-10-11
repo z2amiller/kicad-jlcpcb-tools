@@ -54,10 +54,11 @@ def _window(tmp_path):
     return window, pcbnew
 
 
-def test_enabled_setting_defaults_on(facade):
-    """The fork ships the switch on; a stored False turns it off."""
+def test_enabled_setting_defaults_off(facade):
+    """The switch ships off; a stored True turns it on and a stored False keeps it off."""
     module, _, _ = facade
-    assert module.is_footprint_check_enabled({})
+    assert not module.is_footprint_check_enabled({})
+    assert module.is_footprint_check_enabled({"jlcfootprint": {"enabled": True}})
     assert not module.is_footprint_check_enabled({"jlcfootprint": {"enabled": False}})
 
 
@@ -127,7 +128,7 @@ def mainwindow():
 
 def _make_window(module):
     window = object.__new__(module.JLCPCBTools)
-    window.settings = {}
+    window.settings = {"jlcfootprint": {"enabled": True}}
     window.store = SimpleNamespace(dbfile="project.db")
     window.pcbnew = SimpleNamespace()
     window.logger = MagicMock()
@@ -164,7 +165,7 @@ def test_window_skips_the_check_when_disabled_or_without_storage(mainwindow):
     window.settings = {"jlcfootprint": {"enabled": False}}
     window._start_jlc_footprint_check()
     assert checks == []
-    window.settings = {}
+    window.settings = {"jlcfootprint": {"enabled": True}}
     window.store = None
     window._start_jlc_footprint_check()
     assert checks == []
@@ -202,6 +203,7 @@ def test_toggling_the_setting_starts_or_stops_the_check(mainwindow):
     """The settings event restarts the check when it turns on and stops it when it turns off."""
     module, checks = mainwindow
     window = _make_window(module)
+    window.settings = {}
     window.update_settings(
         SimpleNamespace(section="jlcfootprint", setting="enabled", value=True)
     )
@@ -221,7 +223,7 @@ def test_default_settings_ship_the_switch():
     from .test_settings_defaults import shipped_defaults
 
     assert shipped_defaults()["jlcfootprint"] == {
-        "enabled": True,
+        "enabled": False,
         "exact_origin": False,
     }
 

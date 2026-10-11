@@ -27,7 +27,7 @@
     "timeout_seconds": 30
   },
   "jlcfootprint": {
-    "enabled": true,
+    "enabled": false,
     "exact_origin": false
   },
   "library": {
