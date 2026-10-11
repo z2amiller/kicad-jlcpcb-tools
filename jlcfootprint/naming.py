@@ -28,9 +28,12 @@ Cathode-is-pin-1 exception (LEDs and standard diodes):
   use pin-1 = cathode (K), not anode.  EasyEDA's FD (anode on left) therefore places
   K on the right → 180° correction.  RD (anode on right) places K on the left → 0°.
   This inverts the FD/RD mapping relative to capacitors.
-  Affected families include LED, LED-SMD, LED-TH, the DO axial packages, SMA/SMB/SMC,
-  SOD-123/323/523/923 and MELF/MINIMELF/MICROMELF; ``CATHODE_PIN1_FAMILIES`` is the
-  full list.
+  Affected families include LED, LED-SMD, LED-TH, the chip diodes (D), the DO axial
+  packages, SMA/SMB/SMC, SOD-123/323/523/923 and MELF/MINIMELF/MICROMELF;
+  ``CATHODE_PIN1_FAMILIES`` is the full list.
+
+Which token wins: a corner token (TL/TR/BL/BR), then a polarity token (FD/RD/BI),
+then an edge token (L/R/T/B); ``parse_package_name`` gives the reasons.
 """
 
 from __future__ import annotations
@@ -74,6 +77,12 @@ _POLARITY_CORRECTION_LED: dict[str, int] = {
 # All recognised orientation tokens
 _ALL_ORIENTATION_TOKENS = set(_PIN1_CORRECTION) | set(_POLARITY_CORRECTION_STANDARD)
 
+# The positional tokens that name a corner of the outline.  A corner names where pin 1
+# is drawn, so it outranks a polarity token; an edge token (L/R/T/B) on a two-terminal
+# part is only as good as the library's choice of which terminal is pin 1, so a
+# polarity token outranks it.
+_CORNER_TOKENS = frozenset({"TL", "TR", "BL", "BR"})
+
 # ---------------------------------------------------------------------------
 # MPN-suffix family denylist
 # ---------------------------------------------------------------------------
@@ -84,7 +93,8 @@ _ALL_ORIENTATION_TOKENS = set(_PIN1_CORRECTION) | set(_POLARITY_CORRECTION_STAND
 # code, not an EasyEDA geometric orientation indicator.
 #
 # Matching is done on the first hyphen-separated word of the extracted family,
-# so "CONN-SMD", "CONN-TH", and "CONN" all map to root "CONN".
+# so "CONN-SMD", "CONN-TH", and "CONN" all map to root "CONN", or on its first two
+# words for a root that names one (MICRO-USB, not every MICRO-something).
 #
 # Source: EasyEDA Footprint Naming Rule Reference §§3.2, 4.2, 4.3, 5.x
 #
@@ -104,9 +114,14 @@ _MPN_SUFFIX_FAMILY_ROOTS: frozenset[str] = frozenset(
         "CONN",
         "IDC",
         # §4.3 Special Function Connector — _[SN/MPN] for all non-regular shapes
-        # Note: MICRO-USB-SMD → root "MICRO"; USB-C-SMD → root "USB".  Both are connectors.
+        # Note: MICRO-USB-SMD → root "MICRO-USB"; USB-C-SMD → root "USB".  Both are
+        # connectors.  MICRO alone would also take IC and diode packages (MICRO-8,
+        # MICRO-MELF), so only the connector and card-socket MICRO families are listed.
         "FPC",
-        "MICRO",
+        "MICRO-USB",
+        "MICRO-B",
+        "MICRO-SD",
+        "MICRO-SIM",
         "USB",
         "AUDIO",
         "DP",
@@ -161,7 +176,9 @@ _MPN_SUFFIX_FAMILY_ROOTS: frozenset[str] = frozenset(
 #
 # Standard diode packages: KiCad Diode_TH and Diode_SMD footprints also use
 #   pin-1 = K (cathode).  Aligning the pads of DO-15, SMA and SOD-323 parts agrees:
-#   an RD package's cathode, KiCad's pad 1, is on the left, at 0°.
+#   an RD package's cathode, KiCad's pad 1, is on the left, at 0°.  The chip-diode
+#   family D agrees as well: over EasyEDA's library, all nine of its horizontal
+#   two-pad drawings with an FD/RD token put pad 1 on the token's cathode side.
 _CATHODE_PIN1_FAMILIES = frozenset(
     {
         # LED families
@@ -180,6 +197,7 @@ _CATHODE_PIN1_FAMILIES = frozenset(
         "DO-201AD",
         "DO-201AE",
         # Generic EasyEDA diode family names
+        "D",  # chip diodes named by size (D0603-RD, D0402-BI)
         "DIO-TH",  # through-hole generic
         "DIO-SMD",  # SMD generic (same cathode-is-pin-1 convention as other SMD diodes)
         # SMD diodes — DO-214 variants with standardised numeric names
@@ -258,14 +276,25 @@ POLARIZED_CAP_FAMILIES: frozenset[str] = frozenset(
 
 
 # Families that must never be treated as cathode-is-pin-1 even when a caller says the part
-# is a diode: multi-LED arrays usually put the anode on pin 1.
+# is a diode: multi-LED arrays usually put the anode on pin 1.  A listed family covers
+# its hyphenated variants (LED-ARRAY-SMD, LED-ARRAY-TH).
 _NEVER_CATHODE_FAMILIES: frozenset[str] = frozenset({"LED-ARRAY"})
+
+
+def _never_cathode(family: str) -> bool:
+    """Return True when the family, or the family it is a variant of, is never cathode-first."""
+    return any(
+        family == root or family.startswith(root + "-")
+        for root in _NEVER_CATHODE_FAMILIES
+    )
+
 
 # ---------------------------------------------------------------------------
 # Dimensional token filter
 # ---------------------------------------------------------------------------
 
-# A token is dimensional (not an orientation) if it matches one of these patterns.
+# A segment is dimensional if it matches one of these patterns; the first dimensional
+# segment of a name ends its family (SMF-L2.9-W1.9-LS3.9-FD → SMF).
 # Note: bare "L" and "T" are orientation tokens — only "L{digit}" is dimensional.
 _DIMENSIONAL_RE = re.compile(
     r"^(?:"
@@ -280,8 +309,20 @@ _DIMENSIONAL_RE = re.compile(
 
 
 def _is_dimensional(token: str) -> bool:
-    """Return True for dimensional tokens such as L4.9, LS6.0 or EP."""
+    """Return True for dimensional segments such as L4.9, LS6.0 or EP."""
     return bool(_DIMENSIONAL_RE.match(token))
+
+
+def _before_dimensions(head: str) -> str:
+    """Return ``head`` up to its first dimensional segment: ``SMF-L2.9-W1.9-FD`` → ``SMF``.
+
+    The first segment always stays, so a family code such as ``L0603`` is never cut.
+    """
+    parts = head.split("-")
+    for index in range(1, len(parts)):
+        if _is_dimensional(parts[index]):
+            return "-".join(parts[:index])
+    return head
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +333,9 @@ def _is_dimensional(token: str) -> bool:
 # ("CAP-SMD_BD6.3-..." → "CAP-SMD"), unless that head carries its own tokens
 # (LED0603-RD_GREEN).  Then, as for a name without an underscore, the family is the
 # leading run of letters, hyphen-joined letter groups included, that ends at a digit
-# or at the end: "LED0603-RD" → "LED", "C0603" → "C".
+# or at the end: "LED0603-RD" → "LED", "C0603" → "C".  Either way the head is first
+# cut at its first dimensional segment, so "SMF-L2.9-W1.9-LS3.9-FD" and
+# "SMF_L2.9-W1.9-LS3.9-FD" read the same family.
 _LEADING_ALPHA_RE = re.compile(r"^([A-Z]+(?:-[A-Z]+)*)(?=\d|$)")
 # A head that carries its own orientation token looks like LED0603-RD: letters, digits, token.
 _HEAD_WITH_DIGITS_RE = re.compile(r"^[A-Z]+(?:-[A-Z]+)*\d")
@@ -307,12 +350,14 @@ def extract_family(package_name: str) -> str:
         "SOIC-8_L4.9-W3.9-P1.27-BL"    → "SOIC-8"
         "CAP-SMD_BD6.3-L6.6-W6.6-FD"   → "CAP-SMD"
         "QFN-48_L7.0-W7.0-P0.5-BL"     → "QFN-48"
+        "SMF-L2.9-W1.9-LS3.9-FD"       → "SMF"
 
     """
     package_name = package_name.upper()
     head = package_name.split("_", 1)[0]
     if "_" in package_name and not _head_tokens(head):
-        return head
+        return _before_dimensions(head)
+    head = _before_dimensions(head)
     m = _LEADING_ALPHA_RE.match(head)
     if m:
         return m.group(1).rstrip("-")
@@ -335,8 +380,17 @@ def _tokens_in(section: str) -> list[str]:
     return [
         tok.upper()
         for tok in section.split("-")
-        if tok.upper() in _ALL_ORIENTATION_TOKENS and not _is_dimensional(tok.upper())
+        if tok.upper() in _ALL_ORIENTATION_TOKENS
     ]
+
+
+def _is_mpn_suffix_family(family: str) -> bool:
+    """Return True for a family whose suffix is a free manufacturer part number."""
+    words = family.split("-")
+    return (
+        words[0] in _MPN_SUFFIX_FAMILY_ROOTS
+        or "-".join(words[:2]) in _MPN_SUFFIX_FAMILY_ROOTS
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -353,12 +407,15 @@ def extract_orientation_tokens(package_name: str) -> list[str]:
     For families in _MPN_SUFFIX_FAMILY_ROOTS (connectors, relays, etc.) the
     entire suffix is treated as a free-form manufacturer part number and no
     orientation tokens are extracted, avoiding false positives from product
-    codes that happen to look like EasyEDA orientation tokens.
+    codes that happen to look like EasyEDA orientation tokens.  A name with no
+    underscore is read only when it is shaped like the rule's names (a family code
+    with digits, LED0603-RD, or dimensional segments, SOP-5-L4.4-W3.6-P1.27-TL);
+    anything else is a bare manufacturer part number, whose -TR (tape and reel)
+    or -L is no orientation.
     """
     package_name = package_name.upper()
     family = extract_family(package_name)
-    family_root = family.split("-")[0]
-    if family_root in _MPN_SUFFIX_FAMILY_ROOTS:
+    if _is_mpn_suffix_family(family):
         return []
 
     # The naming rule uses a second underscore to separate the geometric suffix from a
@@ -372,7 +429,9 @@ def extract_orientation_tokens(package_name: str) -> list[str]:
         if tokens:
             return tokens
         return _head_tokens(head)
-    return _tokens_in(head)
+    if _HEAD_WITH_DIGITS_RE.match(head) or _before_dimensions(head) != head:
+        return _tokens_in(head)
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -404,29 +463,35 @@ def parse_package_name(
         cathode_is_pin1: A caller's knowledge that the part is a diode or LED whose
             KiCad footprint has pin 1 = cathode (for example from the part's catalog
             category, or from the schematic's pin functions).  Used only when the family
-            is not already listed, and never for families in _NEVER_CATHODE_FAMILIES.
+            is not already listed, and never for LED-ARRAY families
+            (_NEVER_CATHODE_FAMILIES, variants included).
 
     Lookup order:
-    1. A polarity token (FD/RD/BI) when one is present: it names a physical
-       direction, so it wins; cathode-is-pin-1 families (LEDs, standard diodes)
-       read it from the inverted table, at medium confidence.
-    2. A positional token (TL/TR/BL/BR/L/R/T/B) otherwise: it names where pin 1 is
-       drawn, which for a two-terminal part is only as good as the library's
-       choice of which terminal is pin 1.
-    3. No orientation token in a standard passive family (R, C, L, D, F): 0° with
+    1. A corner token (TL/TR/BL/BR) when one is present: a corner names where pin 1
+       is drawn, so it wins even over a polarity token.  Over EasyEDA's library, 81
+       of the 85 multi-pin drawings whose names carry both put pad 1 at the named
+       corner.
+    2. A polarity token (FD/RD/BI) otherwise: it names a physical direction, so it
+       beats an edge token; cathode-is-pin-1 families (LEDs, standard diodes) read
+       it from the inverted table, at medium confidence.
+    3. An edge token (L/R/T/B) otherwise.  On a two-terminal part it is only as
+       good as the library's choice of which terminal is pin 1, which is why a
+       polarity token outranks it.
+    4. No orientation token in a standard passive family (R, C, L, D, F): 0° with
        'family_default' source and low confidence.
-    4. No orientation token otherwise, MPN-suffix families included: 0° with
+    5. No orientation token otherwise, MPN-suffix families included: 0° with
        'none' source and no confidence.
 
-    When both kinds of token are present and disagree, a note records the
-    positional value.  The rotation is in the table's sense; the CPL correction is
-    its negative (module docstring).
+    When a lower-ranked token disagrees with the one used, a note records its
+    value.  The rotation is in the table's sense; the CPL correction is its
+    negative (module docstring).
 
     """
     family = extract_family(package_name)
     tokens = extract_orientation_tokens(package_name)
 
     positional = [t for t in tokens if t in _PIN1_CORRECTION]
+    corners = [t for t in positional if t in _CORNER_TOKENS]
     polarity = [t for t in tokens if t in _POLARITY_CORRECTION_STANDARD]
 
     if not tokens:
@@ -456,7 +521,7 @@ def parse_package_name(
     cathode_via_hint = (
         not cathode_via_family
         and bool(cathode_is_pin1)
-        and family_upper not in _NEVER_CATHODE_FAMILIES
+        and not _never_cathode(family_upper)
     )
     is_cathode_family = cathode_via_family or cathode_via_hint
     pol_table = (
@@ -468,7 +533,15 @@ def parse_package_name(
     confidence = "high"
     notes = None
 
-    if polarity:
+    if corners:
+        used_token = corners[-1]
+        rotation = _PIN1_CORRECTION[used_token]
+        if polarity and pol_table[polarity[-1]] != rotation:
+            notes = (
+                f"corner {used_token}→{rotation}° used; polarity "
+                f"{polarity[-1]}→{pol_table[polarity[-1]]}° disagrees"
+            )
+    elif polarity:
         used_token = polarity[-1]
         rotation = pol_table[used_token]
         if cathode_via_family:
