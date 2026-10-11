@@ -180,7 +180,7 @@ def test_corrupt_fixture_names_the_file(tmp_path):
 
 
 def test_axis_parts_compare_modulo_180():
-    """A resistor JLC shows at 180 where we emit 0 is the same placement; polarized parts are not."""
+    """A resistor JLC shows at 180 where we emit 0 is the same placement; polarized and shape-aligned parts are not."""
 
     def row(reference, method, rotation):
         return {
@@ -194,17 +194,19 @@ def test_axis_parts_compare_modulo_180():
                 status="green",
                 rotation=rotation,
                 method=method,
-                non_polar=method == "axis",
+                non_polar=method in ("axis", "shape"),
             ),
         }
 
-    rows = [row("R1", "axis", 0), row("D1", "polarity", 0)]
-    assert validator.compare(rows, {"R1": "180", "D1": "0"}) == []
+    rows = [row("R1", "axis", 0), row("D1", "polarity", 0), row("BT1", "shape", 180)]
+    assert validator.compare(rows, {"R1": "180", "D1": "0", "BT1": "180"}) == []
     assert [
-        r["reference"] for r, _ in validator.compare(rows, {"R1": "90", "D1": "180"})
+        r["reference"]
+        for r, _ in validator.compare(rows, {"R1": "90", "D1": "180", "BT1": "0"})
     ] == [
         "R1",
         "D1",
+        "BT1",
     ]
 
 

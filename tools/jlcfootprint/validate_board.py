@@ -357,10 +357,11 @@ def compare(
             failures.append((row, f"truth value {observed!r} is not a number"))
             continue
         expected = expected_cpl_rotation(row["placed"], row["bottom"], verdict.rotation)
-        # A non-polar part (aligned by axis or by pad shape, or a marked inductor
-        # whose token only places JLC's cosmetic pin-1 dot) has no polarity to get
-        # wrong, so it is compared modulo 180 degrees.
-        modulus = 180 if verdict.non_polar else 360
+        # A part aligned by its axis, or a marked inductor whose token only places
+        # JLC's cosmetic pin-1 dot, has no polarity to get wrong, so it is compared
+        # modulo 180 degrees.  A part aligned by pad shape is non-polar too, but its
+        # pads fit one way round only, so a half turn is a misplacement.
+        modulus = 180 if verdict.non_polar and verdict.method != "shape" else 360
         if expected % modulus != observed_angle % modulus:
             failures.append((row, f"would emit {expected:g}, JLC shows {observed}"))
     return failures
