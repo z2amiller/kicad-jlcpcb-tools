@@ -21,6 +21,7 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `kicad_adapter.py` | A live pcbnew board read into `BoardPart`s: the resolver's inputs, the LCSC number and the verdict key |
 | `easyeda_client.py` | The EasyEDA Pro client: the batch lookup, the footprint and symbol documents, the backoff |
 | `worker.py` | The background fetch thread: two paced queues and a breaker |
+| `cache.py` | The global cache of EasyEDA's answers |
 | `verdicts.py` | The per-project verdict store in `project.db` |
 
 ## Frames and units
@@ -211,6 +212,17 @@ $KPY $T/check_live_adapter.py $B/pin_functions_and_marks/pin_functions_and_marks
 
 ## Storage
 
+### The EasyEDA cache
+
+`cache.Cache` keeps EasyEDA's answers in one sqlite file for every project (`cache.FILENAME`, `jlcfootprint-cache.db`), so a part is fetched once, not once per project.
+
+- **`lcsc_map`**, one row per LCSC number: the status (`ok`, `none`, or `error` with its reason), the footprint uuid, the symbol uuid, the symbol's pins and its drawing, and when the row was written. Pin meaning is a per-part fact, so it is kept per part.
+- **`package`**, one row per footprint uuid, shared by every part that uses the footprint: the package name, the pads in the parsers' raw form, the footprint drawing and its origin, where the footprint came from, and the naming rule's reading of the name. Pads are converted to millimetres only when a part is judged, so a change to the frame conventions never invalidates the cache. A classic drawing keeps its own origin (its head x/y, already subtracted from the pads) because its body outline and marks are read against it; Pro text's is (0, 0). Drawings are stored as zlib-compressed JSON.
+- **Filled in steps.** What the batch lookup returns is stored first: a part's uuids (`store_lookup`; a part with no symbol gets an empty pin list) or a `none` row (`store_lookup_miss`). The footprint document then gives the package row (`store_footprint`, never one without pads) and the symbol document the pins (`store_symbol`). `needs(lcsc)` says what is still missing: `{"lookup"}`, some of `{"footprint", "symbol"}`, or nothing when the part can be judged from the cache. A footprint already stored for another part is not fetched again.
+- **Refresh rules.** No row expires on a timer; `needs` decides. A `none` row is looked up again after 30 days (`NONE_RETRY_S`), an `error` row the next time the part is checked, and an `ok` row never, until `forget` drops the part's row (its shared footprint row stays) or `clear` drops everything.
+- **The layout gate.** The file records `SCHEMA_VERSION` in its `meta` table. A file written under any other version, older or newer, is dropped and rebuilt when it is opened, not migrated: every row in it was fetched and can be fetched again, so a change to these tables only has to raise the version.
+- Every call opens its own connection, with a five-second busy timeout, so the worker thread may write while the main thread reads.
+
 ### The verdict store
 
 `verdicts.VerdictStore` keeps one table, `footprint_verdict`, in a project's own `jlcpcb/project.db`, beside the plugin's other project tables.
@@ -226,7 +238,6 @@ $KPY $T/check_live_adapter.py $B/pin_functions_and_marks/pin_functions_and_marks
 
 The package arrives in parts. Still to come:
 
-- **The cache**: EasyEDA's answers kept in one file for every project, with the rules for fetching them again.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
 - **The UI**: a JLC column with a hover, a detail dialog with a pad overlay, overrides and actions.
 - **Variant boards**: the check on boards with KiCad design variants.
