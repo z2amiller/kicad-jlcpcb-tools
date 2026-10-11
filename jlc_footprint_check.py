@@ -326,7 +326,7 @@ PROMPT_LIMIT = 10
 
 
 def log_rotation_summary(summary: GenerateSummary) -> None:
-    """Log the rotation summary line by line, worst first (spec 8).
+    """Log the rotation summary line by line, worst first.
 
     A part the CPL emits at the raw angle against the check
     (:func:`raw_angle_reason`) is logged as a warning, everything else at info.
@@ -342,14 +342,15 @@ def log_rotation_summary(summary: GenerateSummary) -> None:
 def confirm_cpl_rotations(
     window: Any, rows: list[CplRotation], legacy_available: bool
 ) -> bool:
-    """Log the CPL's rotations, then ask before writing if any part goes out raw (spec 8).
+    """Log the CPL's rotations, then ask before writing if any part goes out raw.
 
     Called once the placements are prepared and before any file is written.  The
     question comes only when the CPL would place at least one part at KiCad's raw
     angle because the check refused it or could not decide it; Cancel returns
-    False and the caller stops.  The window's own settings say whether the
-    positions came from JLC's package origin, so the summary can report the split
-    (spec 17.4) without the caller passing the setting down.
+    False and the caller stops.  The window's own settings say whether solved parts
+    are placed at JLC's package origin, so the summary can report how many parts
+    sit there and how many at the pad-box centre without the caller passing the
+    setting down.
     """
     exact_origin = is_exact_origin_enabled(getattr(window, "settings", {}) or {})
     log_rotation_summary(summarise(rows, legacy_available, exact_origin))
