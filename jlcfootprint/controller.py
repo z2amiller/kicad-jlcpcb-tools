@@ -384,7 +384,13 @@ class FootprintCheck:
                     self.cache.store_lookup_miss(code, self.now())
                     self._finish(code)
                     continue
-                self.cache.store_lookup(code, hit.symbol_uuid, hit.puuid, self.now())
+                self.cache.store_lookup(
+                    code,
+                    hit.symbol_uuid,
+                    hit.puuid,
+                    self.now(),
+                    package_name=hit.package_name,
+                )
                 needed = self.cache.needs(code, self.now())
                 if needed:
                     self._request(code, needed)

@@ -161,6 +161,25 @@ def test_a_shared_footprint_is_fetched_once(setup):
     assert events == [("C1", 1), ("C2", 1)]
 
 
+def test_a_footprint_document_without_a_title_keeps_the_lookup_package_name(setup):
+    """The lookup's package name reaches the cache, so an untitled footprint document loses nothing."""
+    check, board, _, _, client = setup
+    fetch_footprint = client.fetch_footprint
+
+    def untitled(puuid):
+        document = fetch_footprint(puuid)
+        document.record.package_name = ""
+        return document
+
+    client.fetch_footprint = untitled
+    check.scan_board()
+    check.worker.run_pending()
+    assert (
+        check.cache.part("C2132").record.package_name == recorded("C2132").package_name
+    )
+    assert check.decision(board["parts"][0]).rotation == 180
+
+
 def test_transient_failures_trip_the_breaker_and_leave_parts_pending(setup):
     """Three symbol failures in a row trip the breaker; those parts get error rows, the rest wait."""
     check, board, events, messages, client = setup
