@@ -194,10 +194,14 @@ def _is_soldered(pad_node: list[object]) -> bool:
     """Return True for a pad that is soldered: on a copper layer and not an NPTH hole.
 
     This is the rule the plugin applies when it reads a board through pcbnew, so a
-    board file and the live board give the same pads: a numbered NPTH hole and a
-    paste-only aperture are left out, and an unnumbered copper pad (a thermal or
-    shield tab) is kept.  Its number is then ``""``, and the alignment, which pairs
-    pads by name, leaves it out; the pad-box centre counts it.
+    board file and the live board give the same set of pads: a numbered NPTH hole
+    and a paste-only aperture are left out, and an unnumbered copper pad (a
+    thermal or shield tab) is kept.  Its number is then ``""``, and the alignment,
+    which pairs pads by name, leaves it out; the pad-box centre counts it.  That
+    centre is taken from each pad's position and size, so it is the centre of
+    pcbnew's pad bounding box except where the copper is not the pad's size at its
+    position: a custom pad's extra primitives, copper offset from its drill, or a
+    pad turned by an angle that is not a multiple of 90 degrees.
     """
     if len(pad_node) > 2 and pad_node[2] == "np_thru_hole":
         return False

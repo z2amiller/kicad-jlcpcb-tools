@@ -84,7 +84,7 @@ def test_the_soldered_pads_are_the_copper_pads_that_are_not_holes():
     """An unnumbered copper pad is kept; a numbered NPTH hole and a paste-only aperture are not.
 
     These are the pads the plugin keeps when it reads the board through pcbnew, so
-    both readings give the same pad-box centre; the unnumbered pads carry ``""``.
+    both readings give the same set of pads; the unnumbered pads carry ``""``.
     """
     (footprint,) = parse_kicad_pcb_text(SOLDERED_TEXT)
     assert [(p.number, p.x, p.y) for p in footprint_pads(footprint)] == [
