@@ -216,12 +216,6 @@ def test_pads_that_are_not_solder_joints_are_dropped():
     part = board_part(FakeFootprint("Q1", pads), to_mm=lambda v: v)
     assert [p.number for p in part.pads] == ["1", "2", "3", "4"]
     assert part.pads[3].shape == "custom"
-    counted = board_part(
-        FakeFootprint("Q1", pads),
-        to_mm=lambda v: v,
-        counts=lambda pad: pad.number != "4",
-    )
-    assert [p.number for p in counted.pads] == ["1", "2", "3"]
     assert counts_as_pad(FakePad("1", 0, 0, attribute=1))
     assert not counts_as_pad(FakePad("1", 0, 0, attribute=3))
     assert not counts_as_pad(FakePad("1", 0, 0, copper=False))

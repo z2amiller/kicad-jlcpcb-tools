@@ -144,17 +144,14 @@ def _relative_rotation(pad: Any, footprint: Any) -> float:
 
 
 def footprint_pads(
-    footprint: Any,
-    to_mm: Callable[[float], float],
-    pcbnew: Any = None,
-    counts: Optional[Callable[[Any], bool]] = None,
+    footprint: Any, to_mm: Callable[[float], float], pcbnew: Any = None
 ) -> list[Pad]:
     """Return the footprint's solderable pads in its own frame, un-mirrored on the bottom."""
     custom = getattr(pcbnew, "PAD_SHAPE_CUSTOM", CUSTOM_SHAPE)
     pads_fn = getattr(footprint, "Pads", None) or getattr(footprint, "GetPads")
     pads: list[Pad] = []
     for pad in pads_fn():
-        if not counts_as_pad(pad, pcbnew) or (counts is not None and not counts(pad)):
+        if not counts_as_pad(pad, pcbnew):
             continue
         x, y = _relative_position(pad, footprint)
         size = pad.GetSize()
@@ -234,11 +231,10 @@ def board_part(
     footprint: Any,
     to_mm: Callable[[float], float],
     pcbnew: Any = None,
-    counts: Optional[Callable[[Any], bool]] = None,
     lcsc_of: Callable[[Any], str] = lcsc_value,
 ) -> BoardPart:
     """Read one placed footprint."""
-    pads = footprint_pads(footprint, to_mm, pcbnew, counts)
+    pads = footprint_pads(footprint, to_mm, pcbnew)
     return BoardPart(
         reference=str(footprint.GetReference()),
         lcsc=lcsc_of(footprint),
@@ -256,17 +252,14 @@ def board_parts(
     board: Any,
     pcbnew: Any = None,
     to_mm: Optional[Callable[[float], float]] = None,
-    counts: Optional[Callable[[Any], bool]] = None,
     lcsc_of: Callable[[Any], str] = lcsc_value,
 ) -> list[BoardPart]:
     """Read every footprint on the board whose reference starts with a word character or a hyphen.
 
     ``pcbnew`` is imported here when not supplied; ``to_mm`` defaults to its
     ``ToMM``, or to the identity when pcbnew is absent (test doubles in millimetres).
-    ``counts`` is a pad filter applied on top of ``counts_as_pad``, and ``lcsc_of``
-    reads a footprint's part number (``lcsc_value`` by default); a caller that wants
-    the plugin's own rules passes ``footprint_metadata.count_pad`` and
-    ``footprint_helpers.get_lcsc_value``.
+    ``lcsc_of`` reads a footprint's part number (``lcsc_value`` by default); a caller
+    that wants the plugin's own reading passes ``footprint_helpers.get_lcsc_value``.
     """
     if pcbnew is None:
         try:
@@ -278,7 +271,7 @@ def board_parts(
     if to_mm is None:
         to_mm = getattr(pcbnew, "ToMM", None) or (lambda value: float(value))
     return [
-        board_part(footprint, to_mm, pcbnew, counts, lcsc_of)
+        board_part(footprint, to_mm, pcbnew, lcsc_of)
         for footprint in board.GetFootprints()
         if re.match(r"[\w\d-]+", str(footprint.GetReference()))
     ]
