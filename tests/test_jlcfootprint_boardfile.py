@@ -92,23 +92,3 @@ def test_courtyard_box_covers_lines_rectangles_circles_polygons_and_arcs():
         "\n".join(line for line in bare if "CrtYd" not in line)
     )
     assert plain.courtyard is None
-
-
-def test_corner_case_board_courtyards_match_the_library():
-    """C3 (CP_Elec_6.3x7.7) reads its 9.4 x 7.1 mm courtyard from the board file."""
-    from pathlib import Path
-
-    from jlcfootprint.boardfile import parse_kicad_pcb
-
-    board = (
-        Path(__file__).resolve().parents[1]
-        / "tests"
-        / "fixtures"
-        / "jlcfootprint"
-        / "boards"
-        / "corner_case"
-        / "corner_case.kicad_pcb"
-    )
-    by_reference = {fp.reference: fp for fp in parse_kicad_pcb(str(board))}
-    assert by_reference["C3"].courtyard == (-4.7, -3.55, 4.7, 3.55)
-    assert by_reference["Q5"].courtyard is not None

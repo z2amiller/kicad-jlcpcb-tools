@@ -2,7 +2,7 @@
 
 import pytest
 
-from .jlc_footprint_wx_support import load_script
+from .jlcfootprint_support import load_script
 
 
 def test_presses_add_to_the_uploaded_angle(tmp_path):

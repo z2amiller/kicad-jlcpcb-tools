@@ -1,23 +1,15 @@
-"""JLC's package origin: the pure function, the two stored columns and the gate (spec 17)."""
+"""JLC's package origin: the pure function, the origin on real parts and the gate (spec 17)."""
 
-from contextlib import closing
 import math
-import sqlite3
 
 import pytest
 
-from jlcfootprint.cache import Cache
-from jlcfootprint.controller import FootprintCheck
 from jlcfootprint.fit import Placement, align, package_origin, pair_by_name
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm, pad_box_centre
-from jlcfootprint.kicad_adapter import BoardPart, verdict_key
-from jlcfootprint.overlay import inverse
 from jlcfootprint.resolver import Verdict, resolve
-from jlcfootprint.verdicts import SCHEMA, VerdictStore
 from tools.jlcfootprint.kicad_library import footprints_available, library_pads
 
-from .jlc_footprint_wx_support import load_script
-from .jlcfootprint_support import recorded
+from .jlcfootprint_support import load_script, recorded
 from .test_jlcfootprint_validate import board_file, footprint_text
 
 TRUTH_HEADER = "reference,observed_rotation,origin_dx_mm,origin_dy_mm\n"
@@ -65,16 +57,6 @@ def test_the_origin_is_the_placement_run_backwards_from_the_drawing_origin(rotat
 def test_a_placement_with_no_translation_puts_the_origin_on_the_footprint_origin():
     """A drawing already centred on the footprint's origin derives (0, 0)."""
     assert package_origin(placement(90, 0.0, 0.0)) == (0.0, 0.0)
-
-
-@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
-def test_the_canvas_inverse_and_the_package_origin_are_one_definition(rotation):
-    """``overlay.inverse`` carries the origin as its offset, so there is one formula."""
-    solved = placement(rotation, -0.75, 2.0)
-
-    backwards = inverse(solved)
-
-    assert (backwards.offset_x, backwards.offset_y) == package_origin(solved)
 
 
 def test_a_verdict_without_a_placement_or_a_fit_has_no_origin():
@@ -173,116 +155,6 @@ def test_the_solver_and_the_origin_agree_on_a_hand_built_offset_drawing():
     origin = package_origin(align(matched_k, matched_j))
 
     assert origin == pytest.approx((0.2, 0.0), abs=1e-9)
-
-
-# ----------------------------------------------------------------------------
-# Storage (spec 17.3)
-# ----------------------------------------------------------------------------
-
-
-def green(**overrides) -> Verdict:
-    """Return a green verdict carrying a placement, with fields overridden."""
-    verdict = Verdict(
-        status="green", fit="fits", rotation=90, placement=placement(0, 0.4, -0.2)
-    )
-    for name, value in overrides.items():
-        setattr(verdict, name, value)
-    return verdict
-
-
-@pytest.fixture
-def store(tmp_path):
-    """Return a verdict store in a fresh project database."""
-    return VerdictStore(str(tmp_path / "project.db"))
-
-
-def test_saving_a_fitting_verdict_writes_the_origin_and_a_refusal_writes_null(store):
-    """Green and yellow rows carry the origin; red, unknown and pending rows do not."""
-    fitting = store.save("C1", "h", "F", "p", green())
-    assert (fitting.origin_dx_mm, fitting.origin_dy_mm) == pytest.approx(
-        package_origin(placement(0, 0.4, -0.2))
-    )
-    assert fitting.origin == (fitting.origin_dx_mm, fitting.origin_dy_mm)
-
-    refused = store.save("C1", "h", "F", "p", green(status="red", rotation=None))
-    assert (refused.origin_dx_mm, refused.origin_dy_mm, refused.origin) == (
-        None,
-        None,
-        None,
-    )
-
-
-def test_an_older_table_gains_the_two_origin_columns(tmp_path):
-    """A project.db written before M4 is migrated in place and keeps its rows."""
-    path = tmp_path / "project.db"
-    older = SCHEMA.replace("  origin_dx_mm      REAL,\n", "").replace(
-        "  origin_dy_mm      REAL,\n", ""
-    )
-    with closing(sqlite3.connect(path)) as con, con:
-        con.executescript(older)
-        con.execute(
-            "INSERT INTO footprint_verdict (lcsc, footprint_hash, status, rotation,"
-            " override_rotation) VALUES ('C1', 'h', 'green', 90, 180)"
-        )
-
-    store = VerdictStore(str(path))
-
-    kept = store.get("C1", "h")
-    assert (kept.rotation, kept.override_rotation, kept.origin) == (90, 180, None)
-    saved = store.save("C1", "h", "F", "p", green())
-    assert saved.origin is not None
-    assert saved.override_rotation == 180
-
-
-def test_marking_a_row_pending_keeps_the_columns_but_reports_no_origin(store):
-    """The columns survive a re-fetch, and the pending status keeps them out of the CPL."""
-    store.save("C1", "h", "F", "p", green())
-
-    store.mark_pending("C1", "h", "F")
-
-    pending = store.get("C1", "h")
-    assert (pending.origin_dx_mm, pending.origin_dy_mm) == pytest.approx(
-        package_origin(placement(0, 0.4, -0.2))
-    )
-    assert pending.origin is None
-
-
-def test_an_override_keeps_the_origin_because_it_only_changes_the_rotation(store):
-    """Setting and clearing an override leaves the two columns exactly as they were."""
-    saved = store.save("C1", "h", "F", "p", green())
-
-    store.set_override("C1", "h", 270, "by hand")
-    overridden = store.get("C1", "h")
-    store.set_override("C1", "h", None)
-
-    assert overridden.origin == saved.origin
-    assert overridden.emitted_rotation == 270
-    assert store.get("C1", "h").origin == saved.origin
-
-
-def test_a_decision_carries_the_origin_of_its_row(tmp_path):
-    """The CPL's decision reads the origin from the stored row, or None without one."""
-    store = VerdictStore(str(tmp_path / "project.db"))
-    pads = [Pad("1", -1.0, 0.0, 0.6, 0.6), Pad("2", 1.0, 0.0, 0.6, 0.6)]
-    part = BoardPart(
-        reference="C1",
-        lcsc="C123",
-        footprint_name="F",
-        is_bottom=False,
-        placed_rotation=0.0,
-        pads=pads,
-        footprint_hash=verdict_key(pads),
-    )
-    check = FootprintCheck(
-        Cache(str(tmp_path / "cache.db")), store, lambda: [part], lambda *_: None
-    )
-    check.parts = {part.reference: part}
-
-    assert check.decision(part).origin is None
-    store.save(part.lcsc, part.footprint_hash, "F", "p", green())
-    assert check.decision(part).origin == pytest.approx(
-        package_origin(placement(0, 0.4, -0.2))
-    )
 
 
 # ----------------------------------------------------------------------------

@@ -21,7 +21,7 @@ from jlcfootprint.presentation import (
 from jlcfootprint.verdicts import StoredVerdict
 from tools.jlcfootprint.kicad_library import footprints_available
 
-from .jlcfootprint_support import controller_setup
+from .jlcfootprint_controller_support import controller_setup
 
 RULE = SimpleNamespace(
     rotation=90, offset_x=0.0, offset_y=0.0, source="fpt", status="complete"

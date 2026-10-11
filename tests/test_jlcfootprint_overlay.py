@@ -5,7 +5,7 @@ import pytest
 from jlcfootprint.controller import PartDetail
 from jlcfootprint.drawing import DrawingMarks
 from jlcfootprint.easyeda_parse import SymbolPin
-from jlcfootprint.fit import Placement, align, pair_by_name
+from jlcfootprint.fit import Placement, align, package_origin, pair_by_name
 from jlcfootprint.geometry import Pad
 from jlcfootprint.overlay import (
     JLC_PLACED,
@@ -19,6 +19,8 @@ from jlcfootprint.overlay import (
 )
 from jlcfootprint.resolver import Verdict, resolve
 from jlcfootprint.verdicts import StoredVerdict
+
+from .test_jlcfootprint_origin import placement
 
 CANVAS = (420, 300)
 KICAD_0805 = [
@@ -434,3 +436,13 @@ def test_the_origin_cross_belongs_to_the_transformed_layer():
     assert overlay(polarized(), CANVAS, layers=(KICAD,)).by_role("jlc_origin") == []
     assert overlay(detail(), CANVAS).by_role("jlc_origin") == []
     assert overlay(polarized(), CANVAS, layers=(JLC_RAW,)).by_role("jlc_origin") == []
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_the_canvas_inverse_and_the_package_origin_are_one_definition(rotation):
+    """``overlay.inverse`` carries the origin as its offset, so there is one formula."""
+    solved = placement(rotation, -0.75, 2.0)
+
+    backwards = inverse(solved)
+
+    assert (backwards.offset_x, backwards.offset_y) == package_origin(solved)

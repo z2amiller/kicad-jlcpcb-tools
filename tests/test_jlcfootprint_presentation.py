@@ -573,3 +573,13 @@ def test_the_origin_line_reads_a_vertical_offset_alone():
     assert origin_text(detail, True) == (
         "0.25 mm above the pad-box centre; used in the CPL"
     )
+
+
+def test_the_help_says_a_shape_rotation_comes_from_the_pad_shapes():
+    """The hover names the new method the way it names the other three (spec 16.3)."""
+    text = verdict_text(
+        decision(
+            status="green", rotation=180, method="shape", confidence="high", fit="fits"
+        )
+    )
+    assert text == "Fits; rotation 180° derived from the pad shapes (high)."

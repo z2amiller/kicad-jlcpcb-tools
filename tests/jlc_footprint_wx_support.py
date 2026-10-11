@@ -1,11 +1,11 @@
-"""Builders the JLC footprint check's plugin-root and script tests share.
+"""Builders the JLC footprint check's plugin-root tests share.
 
-``jlcfootprint_support`` holds the pure package's fixtures; this module holds what
-the tests around the plugin root need and had each written for themselves: the
-fake-wx loaders for the facade and for the main window, the window double the
-column, dialog and generate tests build on, the storage doubles the two CPL tests
-run against, the duck-typed decision they pass through ``prepare_cpl``, and the
-importer three script tests use to load a ``tools/jlcfootprint/`` module without its CLI.
+``jlcfootprint_support`` and its fetch and controller siblings hold the pure
+package's helpers; this module holds what the tests around the plugin root need
+and had each written for themselves: the fake-wx loaders for the facade and for
+the main window, the window double the column, dialog and generate tests build on,
+the storage doubles the two CPL tests run against, and the duck-typed decision
+they pass through ``prepare_cpl``.
 
 Everything here is a builder, not a fixture, so a test file keeps naming its own
 fixtures and pytest keeps reporting them against that file.
@@ -15,14 +15,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-import importlib.util
 from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
 from .correction_test_support import make_library
 from .wx_harness import (
-    ROOT,
     load,
     load_correction_modules,
     load_mainwindow,
@@ -159,14 +157,3 @@ def fabrication_modules(package: str, point: Any) -> Iterator[SimpleNamespace]:
 def correction_library(modules: SimpleNamespace, tmp_path: Any) -> Any:
     """Create actual SQLite correction storage away from user databases."""
     return make_library(modules.library, tmp_path)
-
-
-def load_script(name: str) -> ModuleType:
-    """Import one ``tools/jlcfootprint/`` module as a module, without running its CLI."""
-    spec = importlib.util.spec_from_file_location(
-        name, ROOT / "tools" / "jlcfootprint" / f"{name}.py"
-    )
-    assert spec is not None and spec.loader is not None
-    loaded = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(loaded)
-    return loaded

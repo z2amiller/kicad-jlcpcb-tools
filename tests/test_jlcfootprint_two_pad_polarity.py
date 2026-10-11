@@ -2,7 +2,12 @@
 
 import pytest
 
-from jlcfootprint.drawing import DrawingMarks
+from jlcfootprint.drawing import (
+    DrawingMarks,
+    drawing_marks,
+    footprint_bars,
+    footprint_pads,
+)
 from jlcfootprint.easyeda_parse import (
     DeviceHit,
     SymbolPin,
@@ -11,8 +16,7 @@ from jlcfootprint.easyeda_parse import (
     parse_symbol_response,
 )
 from jlcfootprint.fit import SHAPE_MARGIN, FitReport, fits_clearly_better
-from jlcfootprint.geometry import Pad, pad_hash
-from jlcfootprint.kicad_adapter import verdict_key
+from jlcfootprint.geometry import Pad
 from jlcfootprint.naming import CATHODE_PIN1_FAMILIES
 from jlcfootprint.polarity import (
     POLARIZED_CAP_FAMILIES,
@@ -21,12 +25,10 @@ from jlcfootprint.polarity import (
     part_kind,
     terminal_of,
 )
-from jlcfootprint.presentation import verdict_text
 from jlcfootprint.resolver import SHAPE_NOTE, YELLOW_NOTE, resolve
 from jlcfootprint.resolving import resolve_record
 
 from .jlcfootprint_support import recorded_document
-from .test_jlcfootprint_presentation import decision
 
 # BT1 on a real board: a LianXin BS-CR2032-8 coin-cell holder (C7498149) on
 # LowPower:BatteryHolder_LianXin_BS-CR2032-8_1x2032, copied from the board file with
@@ -74,6 +76,36 @@ def bt1_record():
     return assemble_record(BT1_HIT.lcsc, BT1_HIT, footprint, symbol)
 
 
+# A CR123A holder on a real board (MYOUNG BH-123A, C5290177), placed on the bottom
+# side: its KiCad pads as the resolver receives them (mirrored the way
+# tools/jlcfootprint/validate_board.py mirrors a bottom-side part, pin functions as KiCad
+# stores them for Device:Battery), and the Pro host's uuids as the plugin's batch
+# lookup returned them.
+CR123A_FOOTPRINT = "LowPower:BatteryHolder_MYOUNG_BH-123A-A1CJ002_1xCR123A"
+CR123A_PADS = [
+    Pad("1", 0.0, 0.0, 3.0, 3.0, 0.0, "+_1", "roundrect"),
+    Pad("2", 37.5, 0.0, 3.0, 3.0, 0.0, "-_2", "circle"),
+]
+CR123A_COURTYARD = (-3.15, -9.65, 40.65, 9.35)
+CR123A_HIT = DeviceHit(
+    "C5290177",
+    "8dbed34387a44c64b8dc17b81b021710",
+    "daade0089f9e4abfb5edd463ca341595",
+    "BAT-TH_BH-123A-A5BJ002",
+)
+
+
+def cr123a_record():
+    """Assemble C5290177 from its recorded Pro footprint and symbol, as the cache holds it."""
+    footprint = parse_puuid_response(
+        recorded_document("footprint", CR123A_HIT.puuid), CR123A_HIT.puuid
+    )
+    symbol = parse_symbol_response(
+        recorded_document("symbol", CR123A_HIT.symbol_uuid), CR123A_HIT.symbol_uuid
+    )
+    return assemble_record(CR123A_HIT.lcsc, CR123A_HIT, footprint, symbol)
+
+
 def test_a_sign_with_kicads_pin_number_suffix_reads_as_the_sign():
     """``+_1`` and ``-_2`` read as ``+`` and ``-`` the way ``K_1`` reads as ``K`` (spec 19.3)."""
     assert normalise_function("+_1") == "+"
@@ -93,40 +125,10 @@ def test_a_supply_pin_named_v_plus_still_names_no_terminal():
     assert terminal_of(Pad("1", 0, 0, 1, 1, 0, "+_")) == ""
 
 
-def test_swapped_numbered_signs_are_stored_under_different_keys():
-    """The key reads ``+_1`` as ``+``: swapped signs on the same pads need opposite rotations.
-
-    This is the K/A protection of spec 5.3 (corner-case D4/D5 share one LCSC on one
-    footprint with swapped functions) for numbered signs: a battery with ``+`` on
-    pad 1 and one with ``+`` on pad 2 must not share a stored verdict, and neither
-    may share the key of the bare pads.
-    """
-    plus_first = [
-        Pad("1", -1, 0, 1, 0.5, 0, "+_1"),
-        Pad("2", 1, 0, 1, 0.5, 0, "-_2"),
-    ]
-    minus_first = [
-        Pad("1", -1, 0, 1, 0.5, 0, "-_1"),
-        Pad("2", 1, 0, 1, 0.5, 0, "+_2"),
-    ]
-    assert verdict_key(plus_first) != verdict_key(minus_first)
-    assert verdict_key(plus_first) != pad_hash(plus_first)
-
-
 def test_only_digits_after_the_underscore_make_a_numbered_sign():
     """``+1``, ``+_A`` and ``-_1A`` are not KiCad's ``+_N`` and name no terminal (spec 19.3)."""
     for text in ("+1", "+_A", "-_1A"):
         assert terminal_of(Pad("1", 0, 0, 1, 1, 0, text)) == "", text
-
-
-def test_the_verdict_key_follows_the_reading_of_a_numbered_sign():
-    """The key stores what ``+_1`` reads as, so it equals the key of a bare ``+`` (spec 5.3, 19.3)."""
-    numbered = [
-        Pad("1", -1, 0, 1, 0.5, 0, "+_1"),
-        Pad("2", 1, 0, 1, 0.5, 0, "-_2"),
-    ]
-    bare = [pad._replace(pin_function=pad.pin_function[0]) for pad in numbered]
-    assert verdict_key(numbered) == verdict_key(bare)
 
 
 def test_bt1_coin_cell_holder_resolves_yellow_at_180_from_the_footprint_mark():
@@ -148,6 +150,41 @@ def test_bt1_coin_cell_holder_resolves_yellow_at_180_from_the_footprint_mark():
 def test_polarized_cap_families_are_not_cathode_families():
     """Electrolytics and tantalums keep the standard FD/RD mapping."""
     assert not (POLARIZED_CAP_FAMILIES & CATHODE_PIN1_FAMILIES)
+
+
+def test_a_cr123a_holder_reads_its_footprint_plus_and_resolves_green():
+    """A real CR123A holder's 63-mil + on 1,482-mil pads is read: green, 0 degrees (spec 19.8).
+
+    Its Pro footprint draws the + beside pad 1 as two filled bars of 63 mil, 4.3 %
+    of the pad spacing, which the 5 % bound alone dropped: the part then read
+    "polarity unknown" under decision 4 of spec 19.2.  The raw angle was right.
+    """
+    record = cr123a_record()
+    pads = footprint_pads(record.footprint_shapes)
+    assert [number for number, _x, _y in pads] == ["1", "2"]
+    assert pads[1][1] - pads[0][1] == pytest.approx(1481.88)
+    plus = [
+        bar
+        for bar in footprint_bars(record.footprint_shapes)
+        if bar.layer == "document" and abs(bar.midpoint[0] + 740.0) < 2.0
+    ]
+    assert sorted(round(bar.length, 3) for bar in plus) == [62.992, 62.992]
+    marks = drawing_marks(
+        record.symbol_shapes, record.footprint_shapes, record.footprint_origin
+    )
+    assert (marks.positive_pin, marks.positive_pad) == (None, "1")
+    verdict = resolve_record(CR123A_PADS, CR123A_FOOTPRINT, record, CR123A_COURTYARD)
+    assert (verdict.status, verdict.rotation, verdict.method) == (
+        "green",
+        0,
+        "polarity",
+    )
+    assert verdict.confidence == "medium"
+    assert verdict.fit == "fits_larger_pads"
+    assert verdict.overlap_min == pytest.approx(1.0)
+    assert verdict.polarity_source == "drawing"
+    assert verdict.polarity_light == "green"
+    assert verdict.notes == ["polarity from the footprint's + mark"]
 
 
 @pytest.mark.parametrize(
@@ -463,13 +500,3 @@ def test_a_meaning_aligned_part_whose_swapped_pairing_misses_stays_green():
         "polarity",
     )
     assert verdict.notes == ["polarity from the footprint's + mark"]
-
-
-def test_the_help_says_a_shape_rotation_comes_from_the_pad_shapes():
-    """The hover names the new method the way it names the other three (spec 16.3)."""
-    text = verdict_text(
-        decision(
-            status="green", rotation=180, method="shape", confidence="high", fit="fits"
-        )
-    )
-    assert text == "Fits; rotation 180° derived from the pad shapes (high)."

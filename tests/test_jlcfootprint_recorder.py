@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from .jlc_footprint_wx_support import load_script
+from .jlcfootprint_support import load_script
 
 requests = pytest.importorskip("requests")
 

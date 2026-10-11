@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from .jlc_footprint_wx_support import load_script
+from .jlcfootprint_support import load_script
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"

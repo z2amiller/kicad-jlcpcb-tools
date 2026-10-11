@@ -1,10 +1,11 @@
-"""Tests for the per-project verdict store: round trips, overrides, emitted rotation, display."""
+"""Tests for the per-project verdict store: round trips, overrides, emitted rotation, display, origin."""
 
 from contextlib import closing
 import sqlite3
 
 import pytest
 
+from jlcfootprint.fit import package_origin
 from jlcfootprint.resolver import Verdict
 from jlcfootprint.verdicts import (
     PENDING,
@@ -13,6 +14,8 @@ from jlcfootprint.verdicts import (
     VerdictStore,
     add_missing_columns,
 )
+
+from .test_jlcfootprint_origin import placement
 
 SPEC_COLUMNS = [
     "lcsc",
@@ -218,3 +221,82 @@ def test_a_migration_failure_that_leaves_the_column_missing_still_raises(tmp_pat
         con.row_factory = sqlite3.Row
         with pytest.raises(sqlite3.OperationalError):
             add_missing_columns(con, set())
+
+
+# ---------------------------------------------------------------------------
+# JLC's package origin in the stored row
+# ---------------------------------------------------------------------------
+
+
+def green(**overrides) -> Verdict:
+    """Return a green verdict carrying a placement, with fields overridden."""
+    verdict = Verdict(
+        status="green", fit="fits", rotation=90, placement=placement(0, 0.4, -0.2)
+    )
+    for name, value in overrides.items():
+        setattr(verdict, name, value)
+    return verdict
+
+
+def test_saving_a_fitting_verdict_writes_the_origin_and_a_refusal_writes_null(store):
+    """Green and yellow rows carry the origin; red, unknown and pending rows do not."""
+    fitting = store.save("C1", "h", "F", "p", green())
+    assert (fitting.origin_dx_mm, fitting.origin_dy_mm) == pytest.approx(
+        package_origin(placement(0, 0.4, -0.2))
+    )
+    assert fitting.origin == (fitting.origin_dx_mm, fitting.origin_dy_mm)
+
+    refused = store.save("C1", "h", "F", "p", green(status="red", rotation=None))
+    assert (refused.origin_dx_mm, refused.origin_dy_mm, refused.origin) == (
+        None,
+        None,
+        None,
+    )
+
+
+def test_an_older_table_gains_the_two_origin_columns(tmp_path):
+    """A project.db written before M4 is migrated in place and keeps its rows."""
+    path = tmp_path / "project.db"
+    older = SCHEMA.replace("  origin_dx_mm      REAL,\n", "").replace(
+        "  origin_dy_mm      REAL,\n", ""
+    )
+    with closing(sqlite3.connect(path)) as con, con:
+        con.executescript(older)
+        con.execute(
+            "INSERT INTO footprint_verdict (lcsc, footprint_hash, status, rotation,"
+            " override_rotation) VALUES ('C1', 'h', 'green', 90, 180)"
+        )
+
+    store = VerdictStore(str(path))
+
+    kept = store.get("C1", "h")
+    assert (kept.rotation, kept.override_rotation, kept.origin) == (90, 180, None)
+    saved = store.save("C1", "h", "F", "p", green())
+    assert saved.origin is not None
+    assert saved.override_rotation == 180
+
+
+def test_marking_a_row_pending_keeps_the_columns_but_reports_no_origin(store):
+    """The columns survive a re-fetch, and the pending status keeps them out of the CPL."""
+    store.save("C1", "h", "F", "p", green())
+
+    store.mark_pending("C1", "h", "F")
+
+    pending = store.get("C1", "h")
+    assert (pending.origin_dx_mm, pending.origin_dy_mm) == pytest.approx(
+        package_origin(placement(0, 0.4, -0.2))
+    )
+    assert pending.origin is None
+
+
+def test_an_override_keeps_the_origin_because_it_only_changes_the_rotation(store):
+    """Setting and clearing an override leaves the two columns exactly as they were."""
+    saved = store.save("C1", "h", "F", "p", green())
+
+    store.set_override("C1", "h", 270, "by hand")
+    overridden = store.get("C1", "h")
+    store.set_override("C1", "h", None)
+
+    assert overridden.origin == saved.origin
+    assert overridden.emitted_rotation == 270
+    assert store.get("C1", "h").origin == saved.origin

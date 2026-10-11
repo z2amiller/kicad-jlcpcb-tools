@@ -20,23 +20,7 @@ from jlcfootprint.worker import (
     estimate_seconds,
 )
 
-
-class Clock:
-    """A clock that only advances when something waits on it."""
-
-    def __init__(self):
-        self.now = 1000.0
-        self.waits = []
-
-    def __call__(self):
-        """Return the current fake time."""
-        return self.now
-
-    def wait(self, seconds):
-        """Advance by the pause and report that nobody asked to stop."""
-        self.waits.append(seconds)
-        self.now += seconds
-        return False
+from .jlcfootprint_fetch_support import Clock
 
 
 def _bucket(clock, **kwargs):

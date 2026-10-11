@@ -320,6 +320,36 @@ def test_verdict_key_includes_the_pin_functions():
     ) == verdict_key([Pad("2", 1, 0, 1, 0.5, 0, "a"), Pad("1", -1, 0, 1, 0.5, 0, "k")])
 
 
+def test_swapped_numbered_signs_are_stored_under_different_keys():
+    """The key reads ``+_1`` as ``+``: swapped signs on the same pads need opposite rotations.
+
+    This is the K/A protection of spec 5.3 (corner-case D4/D5 share one LCSC on one
+    footprint with swapped functions) for numbered signs: a battery with ``+`` on
+    pad 1 and one with ``+`` on pad 2 must not share a stored verdict, and neither
+    may share the key of the bare pads.
+    """
+    plus_first = [
+        Pad("1", -1, 0, 1, 0.5, 0, "+_1"),
+        Pad("2", 1, 0, 1, 0.5, 0, "-_2"),
+    ]
+    minus_first = [
+        Pad("1", -1, 0, 1, 0.5, 0, "-_1"),
+        Pad("2", 1, 0, 1, 0.5, 0, "+_2"),
+    ]
+    assert verdict_key(plus_first) != verdict_key(minus_first)
+    assert verdict_key(plus_first) != pad_hash(plus_first)
+
+
+def test_the_verdict_key_follows_the_reading_of_a_numbered_sign():
+    """The key stores what ``+_1`` reads as, so it equals the key of a bare ``+`` (spec 5.3, 19.3)."""
+    numbered = [
+        Pad("1", -1, 0, 1, 0.5, 0, "+_1"),
+        Pad("2", 1, 0, 1, 0.5, 0, "-_2"),
+    ]
+    bare = [pad._replace(pin_function=pad.pin_function[0]) for pad in numbered]
+    assert verdict_key(numbered) == verdict_key(bare)
+
+
 class FakeBox:
     """A BOX2I stand-in."""
 

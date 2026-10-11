@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from .jlcfootprint_support import alias
+from .jlcfootprint_fetch_support import alias
 from .test_jlcfootprint_kicad_adapter import FakePad
 
 # KiCad's Package_TO_SOT_SMD:SOT-23 pads, in the double's nanometres.

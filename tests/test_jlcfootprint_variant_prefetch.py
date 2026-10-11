@@ -13,7 +13,8 @@ import pytest
 from jlcfootprint.verdicts import PENDING
 from tools.jlcfootprint.kicad_library import footprints_available
 
-from .jlcfootprint_support import alias, controller_setup
+from .jlcfootprint_controller_support import controller_setup
+from .jlcfootprint_fetch_support import alias
 
 pytestmark = pytest.mark.skipif(
     not footprints_available(), reason="KiCad library footprints unavailable"

@@ -102,3 +102,23 @@ def test_pin_functions_and_marks_board_matches_jlc_from_the_pro_fixtures():
     assert by_reference["C9"].body_excess_mm == pytest.approx(0.9, abs=0.01)
     assert by_reference["C10"].body_excess_mm is None
     assert by_reference["C11"].rotation == 0
+
+
+def test_corner_case_board_courtyards_match_the_library():
+    """C3 (CP_Elec_6.3x7.7) reads its 9.4 x 7.1 mm courtyard from the board file."""
+    from pathlib import Path
+
+    from jlcfootprint.boardfile import parse_kicad_pcb
+
+    board = (
+        Path(__file__).resolve().parents[1]
+        / "tests"
+        / "fixtures"
+        / "jlcfootprint"
+        / "boards"
+        / "corner_case"
+        / "corner_case.kicad_pcb"
+    )
+    by_reference = {fp.reference: fp for fp in parse_kicad_pcb(str(board))}
+    assert by_reference["C3"].courtyard == (-4.7, -3.55, 4.7, 3.55)
+    assert by_reference["Q5"].courtyard is not None
