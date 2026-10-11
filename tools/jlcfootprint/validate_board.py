@@ -256,15 +256,21 @@ def load_truth_origins(
 ) -> Optional[dict[str, Optional[tuple[float, float]]]]:
     """Return ``{reference: (dx, dy)}`` from the truth CSV, or None without the columns.
 
-    The two columns are optional, so a truth file without them still gates the
-    rotations; an empty pair means the part must derive no origin, and a
-    half-filled pair is a mistake in the file rather than a silent pass.
+    The two columns are optional as a pair, so a truth file without them still
+    gates the rotations; an empty pair means the part must derive no origin, and a
+    half-filled pair, in a row or in the header, is a mistake in the file rather
+    than a silent pass.
     """
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         columns = {name.strip().lower(): name for name in reader.fieldnames or []}
-        if "origin_dx_mm" not in columns or "origin_dy_mm" not in columns:
+        present = [name for name in ("origin_dx_mm", "origin_dy_mm") if name in columns]
+        if not present:
             return None
+        if len(present) == 1:
+            raise SystemExit(
+                f"{path}: the origin columns come as a pair, but only {present[0]} is there"
+            )
         origins: dict[str, Optional[tuple[float, float]]] = {}
         for row in reader:
             reference = (row.get(columns["reference"]) or "").strip()
