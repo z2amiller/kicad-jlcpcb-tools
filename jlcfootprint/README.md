@@ -94,7 +94,7 @@ When any of this fails, no terminal is named. The footprint's body outline (Pro 
 
 ## Reading KiCad files
 
-The plugin reads a board through pcbnew. The development tools and the tests read KiCad files from plain Python instead: `boardfile.py` parses the footprints of a `.kicad_pcb` or `.kicad_mod` file into their pads (in the footprint's own frame, with the placed rotation taken off), pin functions, LCSC field and courtyard box.
+The plugin reads a board through pcbnew. The development tools and the tests read KiCad files from plain Python instead: `boardfile.py` parses the footprints of a `.kicad_pcb` or `.kicad_mod` file into their pads (in the footprint's own frame, with the placed rotation taken off), pin functions, LCSC field and courtyard box. The pads are the soldered ones, the same the plugin keeps when it reads a board through pcbnew: every copper pad that is not an NPTH hole, numbered or not. A paste-only aperture is left out. The alignment pairs pads by name, so an unnumbered pad only counts in the pad-box centre.
 
 `tools/jlcfootprint/kicad_library.py` reads a named KiCad library footprint for the tests. It uses the snapshot recorded under `tests/fixtures/jlcfootprint/kicad/` when there is one, so the tests see the same pads on every machine and run without KiCad. `tools/jlcfootprint/snapshot_kicad_footprints.py` records the snapshots from an installed KiCad, and `test_jlcfootprint_snapshots.py` compares them with the installed library where there is one.
 

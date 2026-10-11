@@ -32,7 +32,7 @@ _LCSC_VALUE = re.compile(r"^C\d+$")
 class KiCadPad:
     """One pad as stored in the file: local position, size, absolute angle, pin function."""
 
-    number: str  # pad number as string, e.g. "1", "A1"
+    number: str  # pad number as string, e.g. "1", "A1"; "" for an unnumbered pad
     x: float  # footprint-local x in mm (pre-rotation of the placed footprint)
     y: float  # footprint-local y in mm
     width: float  # pad width in mm
@@ -190,6 +190,23 @@ def _float_arg(node: object, idx: int = 1) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 
+def _is_soldered(pad_node: list[object]) -> bool:
+    """Return True for a pad that is soldered: on a copper layer and not an NPTH hole.
+
+    This is the rule the plugin applies when it reads a board through pcbnew, so a
+    board file and the live board give the same pads: a numbered NPTH hole and a
+    paste-only aperture are left out, and an unnumbered copper pad (a thermal or
+    shield tab) is kept.  Its number is then ``""``, and the alignment, which pairs
+    pads by name, leaves it out; the pad-box centre counts it.
+    """
+    if len(pad_node) > 2 and pad_node[2] == "np_thru_hole":
+        return False
+    layers = _find_direct(pad_node, "layers")
+    return any(
+        isinstance(layer, str) and layer.endswith(".Cu") for layer in _children(layers)
+    )
+
+
 def _parse_pad(pad_node: list[object]) -> Optional[KiCadPad]:
     """Parse a (pad ...) node into a KiCadPad, or None if it should be skipped."""
     # pad_node[0] = "pad", [1] = number, [2] = type, [3] = shape, ...
@@ -197,8 +214,8 @@ def _parse_pad(pad_node: list[object]) -> Optional[KiCadPad]:
         return None
 
     number = pad_node[1]
-    if not isinstance(number, str) or number == "":
-        return None  # skip unnamed pads (paste stencil, mech)
+    if not isinstance(number, str) or not _is_soldered(pad_node):
+        return None
 
     at_node = _find_direct(pad_node, "at")
     if at_node is None:

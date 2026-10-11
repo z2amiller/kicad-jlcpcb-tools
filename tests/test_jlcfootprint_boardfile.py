@@ -69,6 +69,32 @@ def test_pads_carry_pin_functions_and_relative_rotation():
     assert q1_pads[0].rotation == 0.0
 
 
+SOLDERED_TEXT = """(kicad_pcb (footprint "Lib:Part" (layer "F.Cu") (at 0 0)
+  (property "Reference" "U9")
+  (pad "1" smd rect (at -1 0) (size 0.6 0.6) (layers "F.Cu" "F.Paste" "F.Mask"))
+  (pad "2" smd rect (at 1 0) (size 0.6 0.6) (layers "F.Cu" "F.Paste" "F.Mask"))
+  (pad "" smd rect (at 0 2) (size 3 1) (layers "F.Cu" "F.Mask"))
+  (pad "3" np_thru_hole circle (at 0 -4) (size 1 1) (drill 1) (layers "*.Cu" "*.Mask"))
+  (pad "4" smd rect (at 0 0.5) (size 0.4 0.4) (layers "F.Paste"))
+  (pad "" thru_hole circle (at 3 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask"))
+))"""
+
+
+def test_the_soldered_pads_are_the_copper_pads_that_are_not_holes():
+    """An unnumbered copper pad is kept; a numbered NPTH hole and a paste-only aperture are not.
+
+    These are the pads the plugin keeps when it reads the board through pcbnew, so
+    both readings give the same pad-box centre; the unnumbered pads carry ``""``.
+    """
+    (footprint,) = parse_kicad_pcb_text(SOLDERED_TEXT)
+    assert [(p.number, p.x, p.y) for p in footprint_pads(footprint)] == [
+        ("1", -1.0, 0.0),
+        ("2", 1.0, 0.0),
+        ("", 0.0, 2.0),
+        ("", 3.0, 0.0),
+    ]
+
+
 COURTYARD_TEXT = """(kicad_pcb (footprint "Lib:Part" (layer "F.Cu") (at 10 20 90)
   (property "Reference" "C9")
   (fp_line (start -1 -2) (end 1 -2) (layer "F.CrtYd"))
