@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 import re
 import sys
@@ -284,11 +285,18 @@ def load_truth_origins(
                 origins[reference] = None
                 continue
             try:
-                origins[reference] = (float(values[0]), float(values[1]))
+                origin = (float(values[0]), float(values[1]))
             except ValueError as error:
                 raise SystemExit(
                     f"{path}: {reference} has a non-numeric origin {values}"
                 ) from error
+            # float() reads "nan" and "inf", and a NaN compares as within any
+            # tolerance, so it would pass every origin check it took part in.
+            if not all(math.isfinite(value) for value in origin):
+                raise SystemExit(
+                    f"{path}: {reference} has a non-finite origin {values}"
+                )
+            origins[reference] = origin
         return origins
 
 

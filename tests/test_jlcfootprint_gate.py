@@ -39,7 +39,8 @@ def test_corner_case_board_matches_jlc():
     rows = validator.evaluate(BOARD, FIXTURES)
     truth = validator.load_truth(TRUTH)
     origins = validator.load_truth_origins(TRUTH)
-    assert len(truth) >= 40
+    # compare() passes a part the truth leaves out, so coverage is pinned here.
+    assert set(truth) == {row["reference"] for row in rows}
     assert sum(value is not None for value in origins.values()) == 45
     assert validator.compare(rows, truth, origins) == []
     by_reference = {row["reference"]: row["verdict"] for row in rows}
@@ -55,6 +56,7 @@ def test_corner_case_board_matches_jlc_from_the_pro_fixtures():
     validator = load_validator()
     rows = validator.evaluate(BOARD, FIXTURES, pro_fixtures=PRO_FIXTURES)
     truth = validator.load_truth(TRUTH)
+    assert set(truth) == {row["reference"] for row in rows}
     assert validator.compare(rows, truth, validator.load_truth_origins(TRUTH)) == []
     by_reference = {row["reference"]: row["verdict"] for row in rows}
     assert all(row["verdict"] is not None for row in rows), "every part is recorded"
@@ -81,6 +83,7 @@ def test_pin_functions_and_marks_board_matches_jlc_from_the_pro_fixtures():
     )
     truth = validator.load_truth(TRUTH_FUNCTIONS_AND_MARKS)
     assert len(truth) == 16  # C8 (C1969735) included, read from JLC's preview
+    assert set(truth) == {row["reference"] for row in rows}
     assert (
         validator.compare(
             rows, truth, validator.load_truth_origins(TRUTH_FUNCTIONS_AND_MARKS)
