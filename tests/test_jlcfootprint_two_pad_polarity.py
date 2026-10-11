@@ -19,6 +19,10 @@ from jlcfootprint.fit import SHAPE_MARGIN, FitReport, fits_clearly_better
 from jlcfootprint.geometry import Pad
 from jlcfootprint.naming import CATHODE_PIN1_FAMILIES
 from jlcfootprint.polarity import (
+    DIODE,
+    OTHER,
+    POLAR,
+    POLAR_CAP,
     POLARIZED_CAP_FAMILIES,
     is_no_function,
     normalise_function,
@@ -202,7 +206,7 @@ def test_battery_and_buzzer_footprints_are_polarized_on_the_positive_terminal(
     footprint,
 ):
     """KiCad's Battery..., Buzzer_... and MagneticBuzzer_... footprints are ``polar``."""
-    assert part_kind("X", footprint, PLAIN_KICAD, NUMBERED_PINS) == "polar"
+    assert part_kind("X", footprint, PLAIN_KICAD, NUMBERED_PINS) is POLAR
 
 
 @pytest.mark.parametrize(
@@ -223,7 +227,7 @@ def test_battery_and_buzzer_footprints_are_polarized_on_the_positive_terminal(
 )
 def test_battery_buzzer_and_microphone_families_are_polarized(package):
     """These spellings of the three families, all from EasyEDA's library, classify as ``polar``."""
-    assert part_kind(package, "Custom:Part", PLAIN_KICAD, NUMBERED_PINS) == "polar"
+    assert part_kind(package, "Custom:Part", PLAIN_KICAD, NUMBERED_PINS) is POLAR
 
 
 @pytest.mark.parametrize(
@@ -231,7 +235,7 @@ def test_battery_buzzer_and_microphone_families_are_polarized(package):
 )
 def test_microsmp_and_micro_melf_are_not_microphones(package):
     """``MIC-`` keeps its hyphen: the diode packages MICROSMP and MICRO-MELF never match."""
-    assert part_kind(package, "Custom:Part", PLAIN_KICAD, NUMBERED_PINS) != "polar"
+    assert part_kind(package, "Custom:Part", PLAIN_KICAD, NUMBERED_PINS) is not POLAR
 
 
 def test_the_families_rank_after_the_capacitor_names_and_before_the_symbol_labels():
@@ -243,10 +247,10 @@ def test_the_families_rank_after_the_capacitor_names_and_before_the_symbol_label
             PLAIN_KICAD,
             [],
         )
-        == "polar_cap"
+        is POLAR_CAP
     )
     labelled = [SymbolPin("1", "A"), SymbolPin("2", "K")]
-    assert part_kind("BAT-TH_BS-2-1", "Custom:Part", PLAIN_KICAD, labelled) == "polar"
+    assert part_kind("BAT-TH_BS-2-1", "Custom:Part", PLAIN_KICAD, labelled) is POLAR
 
 
 def test_a_diode_family_outranks_a_battery_footprint_and_labels_outrank_a_drawn_plus():
@@ -254,13 +258,11 @@ def test_a_diode_family_outranks_a_battery_footprint_and_labels_outrank_a_drawn_
     battery = "Battery:Battery_CR1225"
     assert (
         part_kind("SOD-123F_L2.8-W1.8-LS3.7-RD", battery, PLAIN_KICAD, NUMBERED_PINS)
-        == "diode"
+        is DIODE
     )
     labelled = [SymbolPin("1", "K"), SymbolPin("2", "A")]
     marks = DrawingMarks(positive_pad="2")
-    assert (
-        part_kind("CONN-TH_2P", "Custom:Part", PLAIN_KICAD, labelled, marks) == "diode"
-    )
+    assert part_kind("CONN-TH_2P", "Custom:Part", PLAIN_KICAD, labelled, marks) is DIODE
 
 
 @pytest.mark.parametrize(
@@ -272,7 +274,7 @@ def test_a_drawn_plus_sends_an_unclassified_two_pad_part_to_the_meaning_path(mar
     """JLC's ``+`` on pin 2 turns the part 180 degrees with KiCad pad 1 assumed ``+``."""
     assert (
         part_kind("CONN-TH_2P", "Custom:Part", PLAIN_KICAD, NUMBERED_PINS, marks)
-        == "polar"
+        is POLAR
     )
     verdict = resolve(
         PLAIN_KICAD,
@@ -296,7 +298,7 @@ def test_a_drawn_plus_sends_an_unclassified_two_pad_part_to_the_meaning_path(mar
 
 def test_without_a_drawn_plus_the_same_part_keeps_the_axis_rule():
     """No mark, no token, no family: the part is non-polar and 180 degrees stays irrelevant."""
-    assert part_kind("CONN-TH_2P", "Custom:Part", PLAIN_KICAD, NUMBERED_PINS) == "other"
+    assert part_kind("CONN-TH_2P", "Custom:Part", PLAIN_KICAD, NUMBERED_PINS) is OTHER
     verdict = resolve(
         PLAIN_KICAD,
         "Custom:Part",

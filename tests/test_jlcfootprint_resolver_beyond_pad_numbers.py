@@ -5,7 +5,13 @@ import pytest
 from jlcfootprint.drawing import DrawingMarks, drawing_marks
 from jlcfootprint.easyeda_parse import SymbolPin
 from jlcfootprint.geometry import Pad, easyeda_pads_to_mm
-from jlcfootprint.polarity import function_terminals, is_no_function, part_kind
+from jlcfootprint.polarity import (
+    DIODE,
+    OTHER,
+    function_terminals,
+    is_no_function,
+    part_kind,
+)
 from jlcfootprint.resolver import YELLOW_NOTE, body_threshold_mm, resolve
 from tests.jlcfootprint_support import pro_record
 from tools.jlcfootprint.kicad_library import library_footprint, with_functions
@@ -409,11 +415,11 @@ def test_no_connection_functions_carry_no_terminal_and_disqualify_nothing():
         Pad("3", 0.0, 1.5, 1.0, 0.5, 0.0, "NC"),
     ]
     assert function_terminals(pads) == {"cathode", "anode"}
-    assert part_kind("MPN-3PAD", "Custom:Three", pads, []) == "diode"
+    assert part_kind("MPN-3PAD", "Custom:Three", pads, []) is DIODE
     switch = [Pad("1", -1, 0, 1, 1, 0, "A"), Pad("2", 1, 0, 1, 1, 0, "B")]
     assert function_terminals(switch) == set()
     c_and_a = [Pad("1", -1, 0, 1, 1, 0, "C"), Pad("2", 1, 0, 1, 1, 0, "A")]
-    assert part_kind("MPN-2PAD", "Custom:Two", c_and_a, []) == "other"
+    assert part_kind("MPN-2PAD", "Custom:Two", c_and_a, []) is OTHER
 
 
 # --- the body caveat ------------------------------------------------------

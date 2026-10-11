@@ -40,8 +40,7 @@ from .fit import (
 from .geometry import Pad, ccw_correction, named_pads, naming_rule_to_cpl
 from .naming import parse_package_name
 from .polarity import (
-    CONVENTION,
-    REFERENCE_TERMINAL,
+    PartKind,
     drawing_reference_pads,
     kicad_reference_pad,
     label_reference_pad,
@@ -416,7 +415,7 @@ def _resolve_polarized(
     kicad_named: list[Pad],
     jlc_named: list[Pad],
     verdict: Verdict,
-    kind: str,
+    kind: PartKind,
     package_name: str,
     symbol_pins: list[SymbolPin],
     marks: Optional[DrawingMarks] = None,
@@ -430,8 +429,7 @@ def _resolve_polarized(
     """
     if _coincident(kicad_named) or _coincident(jlc_named):
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
-    reference = REFERENCE_TERMINAL[kind]
-    diode = kind == "diode"
+    reference = kind.reference
     side = token_reference_side(package_name, reference)
     if side == "none":
         # A bidirectional TVS has no reference terminal; KiCad's D_TVS symbol names its
@@ -439,7 +437,7 @@ def _resolve_polarized(
         verdict.notes.append("bidirectional part; aligned by axis")
         return _resolve_axis(kicad_named, jlc_named, verdict)
     kicad_ref, assumed, note = kicad_reference_pad(
-        kicad_named, reference, diode, CONVENTION[kind]
+        kicad_named, reference, kind.diode, kind.convention
     )
     if kicad_ref is None:
         return verdict.unresolved("unknown", "no_data", note)
@@ -461,7 +459,7 @@ def _resolve_polarized(
         verdict.method = "none"
         return verdict
     verdict.polarity_source = source
-    if kind != "other":
+    if kind.polarized:
         # The vote settles which EasyEDA pad carries the reference terminal and with it
         # what JLC's pad 1 means, so the pin-1 light does not need a symbol label: the
         # token and the marks tell it too, and an outvoted label is overruled.
@@ -495,7 +493,7 @@ def _resolve_polarized(
         verdict.notes.append(
             f"KiCad footprint drawn non-standard; name says {verdict.name_rotation}°"
         )
-    kicad_pin1 = pin1_meaning(kicad_named, kind, diode)
+    kicad_pin1 = pin1_meaning(kicad_named, kind)
     if polarity is None or kicad_pin1 is None:
         verdict.polarity_light = "unknown"
         verdict.status = "green"
@@ -659,14 +657,14 @@ def resolve(
     verdict.pad_count_kicad = len({pad.number for pad in kicad_named})
     verdict.pad_count_jlc = len({pad.number for pad in jlc_named})
     kind = part_kind(package_name, kicad_footprint_name, kicad_pads, symbol_pins, marks)
-    parsed = parse_package_name(package_name, True if kind == "diode" else None)
+    parsed = parse_package_name(package_name, True if kind.diode else None)
     if parsed.rotation_source == "naming_rule":
         verdict.name_rotation = naming_rule_to_cpl(parsed.rotation_correction)
     if min(len(kicad_named), len(jlc_named)) < 2:
         return verdict.unresolved("unknown", "no_data", SINGLE_PAD_NOTE)
     # A polarized kind (a drawn + among its reasons) or an FD/RD token sends a two-pad
     # part to alignment by meaning.
-    marked = kind != "other" or token_reference_side(package_name, "positive") in (
+    marked = kind.polarized or token_reference_side(package_name, "positive") in (
         "left",
         "right",
     )
@@ -686,7 +684,7 @@ def resolve(
                     "two-terminal part on a footprint whose pads do not pair with it",
                 )
             kicad_named = shared
-        if kind == "other":
+        if not kind.polarized:
             verdict.non_polar = True
             verdict.notes.append(
                 "orientation token on a non-polar part: KiCad pad 1 goes where the token puts pin 1, which need not be JLC's pad 1"

@@ -11,6 +11,7 @@ terminal: an LED whose symbol says ``+``/``-`` and a capacitor whose symbol says
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 from typing import Optional
 
@@ -70,24 +71,35 @@ _NUMBERED_SIGN = re.compile(r"([+-])_\d+")
 POSITIVE_REFERENCE_FOOTPRINTS = ("BATTERY", "BUZZER_", "MAGNETICBUZZER_")
 POSITIVE_REFERENCE_FAMILIES = ("BAT-", "BATT-", "BATTERY-", "BUZ", "BEEP-", "MIC-")
 
-# The two terminal names, unified: the reference terminal of a diode is its cathode,
-# of a capacitor and of the other polarized parts (``polar``) its positive terminal,
-# and each name's opposite.
-REFERENCE_TERMINAL = {
-    "diode": "cathode",
-    "polar_cap": "positive",
-    "polar": "positive",
-    "other": "positive",
-}
-# What pad 1 is assumed to be when the KiCad side says nothing, per kind, for the note.
-# A part of no polarized kind reaches the meaning path only through an FD/RD token,
-# which says where pin 1 goes as it does for a capacitor's positive terminal.
-CONVENTION = {
-    "diode": "K",
-    "polar_cap": "+",
-    "polar": "+",
-    "other": "the token's pin 1",
-}
+
+@dataclass(frozen=True)
+class PartKind:
+    """What a two-pad part is, as far as its polarity goes, and how that polarity is read.
+
+    ``reference`` is the terminal a polarized alignment is anchored on: a diode's
+    cathode, the positive terminal of anything else.  ``convention`` is what KiCad's
+    pad 1 is taken to be when no pin function says, for the note recording that
+    assumption.  ``diode`` lets ``C`` read as a cathode (see the token note above) and
+    turns the naming rule's FD/RD tokens cathode-first.  A part of no polarized kind
+    (:data:`OTHER`) reaches the polarized alignment only through an FD/RD token, which
+    says where pin 1 goes as it does for a capacitor's positive terminal.
+    """
+
+    name: str
+    reference: str
+    convention: str
+    diode: bool = False
+    polarized: bool = True
+
+
+DIODE = PartKind("diode", reference="cathode", convention="K", diode=True)
+POLAR_CAP = PartKind("polar_cap", reference="positive", convention="+")
+# A battery, buzzer or microphone: polarized, neither a diode nor a capacitor.
+POLAR = PartKind("polar", reference="positive", convention="+")
+OTHER = PartKind(
+    "other", reference="positive", convention="the token's pin 1", polarized=False
+)
+
 OPPOSITE = {
     "cathode": "anode",
     "anode": "cathode",
@@ -182,14 +194,14 @@ def part_kind(
     kicad_pads: list[Pad],
     symbol_pins: list[SymbolPin],
     marks: Optional[DrawingMarks] = None,
-) -> str:
-    """Return ``diode``, ``polar_cap``, ``polar`` or ``other``.
+) -> PartKind:
+    """Return :data:`DIODE`, :data:`POLAR_CAP`, :data:`POLAR` or :data:`OTHER`.
 
     Evidence is weighed from the most to the least reliable: the KiCad footprint's name
     and its pads' functions, then EasyEDA's package family, then the symbol's pin
     labels.  LED symbols labelled ``+``/``-`` are common, so labels alone never outrank
     a diode family, and ``+``/``-`` pad functions name a capacitor only when nothing
-    else says diode.  ``polar`` is a polarized part whose reference is its positive
+    else says diode.  :data:`POLAR` is a polarized part whose reference is its positive
     terminal although it is neither a diode nor a capacitor: a battery, buzzer or
     microphone by its footprint name or family, ranked after the diode and capacitor
     names and families, or a part nothing else classifies whose EasyEDA symbol or
@@ -203,29 +215,29 @@ def part_kind(
         t for t in extract_orientation_tokens(package_name) if t in ("FD", "RD")
     }
     if footprint.startswith(("D_", "LED_")) or terminals & {"cathode", "anode"}:
-        return "diode"
+        return DIODE
     if footprint.startswith(("CP_", "C_ELEC", "TANTALUM")):
-        return "polar_cap"
+        return POLAR_CAP
     if family in CATHODE_PIN1_FAMILIES:
-        return "diode"
+        return DIODE
     if family in POLARIZED_CAP_FAMILIES or (
         family.startswith("CAP") and polarity_tokens
     ):
-        return "polar_cap"
+        return POLAR_CAP
     # Batteries, buzzers and microphones, after the diode and capacitor rules and
     # before the symbol labels.
     if footprint.startswith(POSITIVE_REFERENCE_FOOTPRINTS) or family.startswith(
         POSITIVE_REFERENCE_FAMILIES
     ):
-        return "polar"
+        return POLAR
     if labels & _DIODE_LABELS:
-        return "diode"
+        return DIODE
     if terminals & {"positive", "negative"} or labels & _CAP_LABELS:
-        return "polar_cap"
+        return POLAR_CAP
     # A drawn + marks an otherwise unclassified part as polarized.
     if marks is not None and (marks.positive_pin or marks.positive_pad):
-        return "polar"
-    return "other"
+        return POLAR
+    return OTHER
 
 
 def kicad_reference_pad(
@@ -354,7 +366,7 @@ def drawing_reference_pads(
     return carrying(marks.positive_pin), carrying(marks.positive_pad)
 
 
-def pin1_meaning(pads: list[Pad], kind: str, diode: bool = False) -> Optional[str]:
+def pin1_meaning(pads: list[Pad], kind: PartKind) -> Optional[str]:
     """Return 'A' or 'K' for what the KiCad side means by pad 1.
 
     Pad 1's own function decides; failing that, the other pad's function implies it;
@@ -363,12 +375,12 @@ def pin1_meaning(pads: list[Pad], kind: str, diode: bool = False) -> Optional[st
     pad1 = next((p for p in pads if p.number == "1"), None)
     if pad1 is None:
         return None
-    terminal = terminal_of(pad1, diode)
+    terminal = terminal_of(pad1, kind.diode)
     if not terminal and len(pads) == 2:
-        other = terminal_of(next(p for p in pads if p is not pad1), diode)
+        other = terminal_of(next(p for p in pads if p is not pad1), kind.diode)
         terminal = OPPOSITE.get(other, "")
     if terminal in ("cathode", "negative"):
         return "K"
     if terminal in ("anode", "positive"):
         return "A"
-    return "K" if kind == "diode" else "A"
+    return "K" if kind.diode else "A"
