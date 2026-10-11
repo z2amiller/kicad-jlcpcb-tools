@@ -1,4 +1,4 @@
-"""The M0 gate as a test: the committed corner-case board must reproduce JLC's observed rotations."""
+"""The gate as a test: the two committed gate boards must reproduce JLC's observed rotations."""
 
 import importlib.util
 from pathlib import Path
@@ -32,7 +32,7 @@ def load_validator():
 def test_corner_case_board_matches_jlc():
     """Every observed rotation is reproduced and the wrong picks derive nothing."""
     if not TRUTH.exists():
-        pytest.skip("truth.csv not recorded yet (plan Task 12)")
+        pytest.skip("truth.csv is missing")
     validator = load_validator()
     rows = validator.evaluate(BOARD, FIXTURES)
     truth = validator.load_truth(TRUTH)
@@ -47,9 +47,9 @@ def test_corner_case_board_matches_jlc():
 
 
 def test_corner_case_board_matches_jlc_from_the_pro_fixtures():
-    """Read the way the plugin fetches live (spec 15), the board reproduces the same truth."""
+    """Read from the Pro host's recorded answers, the board reproduces the same truth."""
     if not TRUTH.exists():
-        pytest.skip("truth.csv not recorded yet (plan Task 12)")
+        pytest.skip("truth.csv is missing")
     validator = load_validator()
     rows = validator.evaluate(BOARD, FIXTURES, pro_fixtures=PRO_FIXTURES)
     truth = validator.load_truth(TRUTH)
@@ -72,13 +72,13 @@ def test_corner_case_board_matches_jlc_from_the_pro_fixtures():
 
 
 def test_pin_functions_and_marks_board_matches_jlc_from_the_pro_fixtures():
-    """The M3 board (spec 16.6) reproduces its truth: function pairing, the drawings' marks, the body caveat."""
+    """The second gate board reproduces its truth: function pairing, the drawings' marks, the body caveat."""
     validator = load_validator()
     rows = validator.evaluate(
         BOARD_FUNCTIONS_AND_MARKS, FIXTURES, pro_fixtures=PRO_FIXTURES
     )
     truth = validator.load_truth(TRUTH_FUNCTIONS_AND_MARKS)
-    assert len(truth) == 16  # C8 (C1969735) settled by JLC's preview on 2026-09-17
+    assert len(truth) == 16  # C8 (C1969735) included, read from JLC's preview
     assert (
         validator.compare(
             rows, truth, validator.load_truth_origins(TRUTH_FUNCTIONS_AND_MARKS)

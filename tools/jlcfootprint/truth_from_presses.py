@@ -19,6 +19,7 @@ import argparse
 import csv
 from pathlib import Path
 import sys
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "tests" / "fixtures" / "jlcfootprint" / "truth.csv"
@@ -54,7 +55,7 @@ def read_presses(path: Path) -> list[tuple[str, str, str]]:
     return rows
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """Write truth.csv from the presses log and the uploaded CPL."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter

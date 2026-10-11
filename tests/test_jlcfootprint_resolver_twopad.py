@@ -81,8 +81,8 @@ def test_led_with_plus_minus_functions_is_a_diode_read_by_meaning():
     """C84256-style: LED0805-RD, KiCad pads labelled - (pad 1) and + (pad 2).
 
     The footprint name says diode, so ``-`` is the cathode on pad 1: the same terminal
-    JLC's pin 1 = K names, so the rotation is 0.  Reading the part as a capacitor and
-    ignoring the functions gave 180 before.
+    JLC's pin 1 = K names, so the rotation is 0.  Read as a capacitor, with the
+    functions ignored, the part would come out at 180.
     """
     led = [
         Pad("1", -1.05, 0.0, 1.0, 1.2, 0.0, "-"),
@@ -277,7 +277,7 @@ def test_vertical_jlc_drawing_uses_the_label_when_the_token_cannot_apply():
     )
     assert verdict.rotation == 270  # cathode (pad 2) at the bottom of JLC's drawing
     assert any("vertical" in note for note in verdict.notes)
-    # The token was noted, not applied, so it cannot accuse the footprint (kicad-z9y4).
+    # The token was noted, not applied, so it cannot accuse the footprint.
     assert verdict.confidence == "high"
     assert "drawn non-standard" not in verdict.note_text
     cathode_on_top = resolve(
@@ -329,8 +329,8 @@ def test_0402_pads_under_an_0603_part_are_tight():
 def test_led_family_with_plus_minus_labels_and_no_kicad_evidence_is_a_diode():
     """An LED package whose symbol says +/- on a custom-named footprint without functions.
 
-    Reading it as a capacitor assumed KiCad pad 1 = + and gave 180 on a part at 0; the
-    package family outranks the symbol labels.
+    Read as a capacitor it would assume KiCad pad 1 = + and give 180 on a part that
+    sits at 0; the package family outranks the symbol labels.
     """
     plain = [Pad("1", -1.05, 0.0, 1.0, 1.2), Pad("2", 1.05, 0.0, 1.0, 1.2)]
     jlc = [Pad("1", -1.05, 0.0, 1.0, 1.2), Pad("2", 1.05, 0.0, 1.0, 1.2)]

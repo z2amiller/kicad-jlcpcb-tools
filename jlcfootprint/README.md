@@ -14,6 +14,10 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `records.py` | The small records judging a part needs without the parsers: symbol pins, the pin-1 labels, the drawings' marks |
 | `drawing.py` | The `+` marks and the body outline read from EasyEDA's symbol and footprint drawings |
 | `boardfile.py` | Footprints, pads and courtyards read from KiCad board and footprint files, without pcbnew |
+| `polarity.py` | What kind of two-pad part a part is, and which of its pads is the cathode or the positive terminal |
+| `fit.py` | Pad pairing, the placement, the fit grades, JLC's package origin and the courtyard overhang |
+| `resolver.py` | One part's verdict: its rotation, fit and polarity |
+| `resolving.py` | The resolver called on a parsed EasyEDA record |
 
 ## Frames and units
 
@@ -98,11 +102,91 @@ The plugin reads a board through pcbnew. The development tools and the tests rea
 
 `tools/jlcfootprint/kicad_library.py` reads a named KiCad library footprint for the tests. It uses the snapshot recorded under `tests/fixtures/jlcfootprint/kicad/` when there is one, so the tests see the same pads on every machine and run without KiCad. `tools/jlcfootprint/snapshot_kicad_footprints.py` records the snapshots from an installed KiCad, and `test_jlcfootprint_snapshots.py` compares them with the installed library where there is one.
 
+## Judging a part
+
+`resolver.resolve` takes one footprint's KiCad pads (in the footprint's own frame, a bottom-side part mirrored back), its KiCad footprint name, EasyEDA's package name, pads in millimetres and symbol pins, and optionally the drawings' marks and the KiCad courtyard. It returns a `Verdict`: a status, a fit grade, the CPL rotation when one can be derived, how it was found (`method`), a confidence and notes that say why. `resolving.resolve_record` makes the same call from a parsed EasyEDA record.
+
+A part EasyEDA has nothing for, a failed fetch, a pad with a non-numeric coordinate and a side with fewer than two named pads all give `unknown` with no rotation. Otherwise the part takes one of three paths.
+
+### Parts with more than two pads
+
+The pads pair by name and `solver.solve_transform` aligns them; the turn, snapped to 90 degrees, is the rotation (`method` `geometry`).
+
+- A name that covers several pads on one side (KiCad numbers a SOT-223's tab as a second pad 2, and a DPAK's tab and the stub of its cut lead both as 2) pairs by closest area, so a pin meets a pin and a tab meets a tab. All KiCad pads that carry one number are one terminal and are graded together.
+- When the numbers do not line up (fewer than two shared names, a mirrored order, or a pad that misses), the pads pair by the schematic's pin functions against the symbol's pin names instead: a name found once on each side pairs, at least two must pair, and one pad left on each side pairs by elimination. KiCad's `TO-252-3_TabPin2` numbers the tab 2 where JLC's DPAK drawing numbers it 3; its `D` function pairs it all the same. A pairing by function is medium confidence and its note lists every number that differs.
+- Without that, a mirrored pin order is red (`mirror`), never solved. A part with as many pads as JLC's whose pads all land at some angle when their names are ignored is red (`numbering`), with the angle the package itself would take: the numbering differs from JLC's part, so the package's angle would put the wrong pins on the wrong pads.
+- Only two shared names, or a rotation the package name's token disagrees with, lowers the confidence to medium, with a note.
+
+### Two-pad parts by meaning
+
+A part with two JLC pads that is polarized, or whose package name carries an FD/RD token, aligns by terminal meaning and never by pad number (`method` `polarity`).
+
+- **The kind.** `polarity.part_kind` reads the evidence from the most to the least reliable: the KiCad footprint's name (`D_`, `LED_`; `CP_`, `C_Elec`, `Tantalum`) and its pin functions (`K`/`A`), EasyEDA's family (the cathode-first diode families, the polarized capacitor families), the battery, buzzer and microphone footprints and families, the symbol's pin labels, and last a `+` drawn in either drawing. A diode's reference terminal is its cathode; a capacitor's and any other polarized part's is its positive terminal.
+- **The KiCad side.** A pin function naming the reference terminal, or naming the other terminal on the other pad, gives the reference pad (`K_1`, `+_1` and `anode` all count). Two pads claiming one terminal are contradictory and the part is unknown. With no usable function pad 1 is assumed (K on a diode, + on the other polarized parts), at medium confidence, and a note says so.
+- **The EasyEDA side: the vote.** Up to four sources each name the pad that carries the reference terminal: the package name's FD/RD token (forward direction puts the marking band, the cathode or the negative end, on the right of JLC's drawing), the symbol's pin-1 label, the symbol's `+` and the footprint's `+`. The majority decides. A tie, such as one token against one mark, is red: "EasyEDA data inconsistent", and no guess. No source at all is unknown: "polarity unknown". A vote that loses is named in a note and lowers the confidence to medium, and so does a decision by the marks alone or an unchecked token on the molded-chip tantalums, the one family whose token is least reliable (over EasyEDA's library it agrees with the marks on 39 of 45 of them, against 201 of 203 electrolytic cans). A bidirectional (`BI`) part has no reference terminal and aligns by axis.
+- Once both reference pads are known the two pads align like any pair, and that pairing must fit; a polarized part is never turned to fit by shape.
+- **The pin-1 light.** The vote also says what JLC's pad 1 is. When it is not what KiCad's pad 1 is, the rotation is still right but JLC's pin-1 marker will sit on the other terminal, so the part is yellow with a note saying not to renumber the footprint.
+- An FD/RD token on a part that is not polarized (a marked inductor) keeps pin 1 where JLC draws it, and the part is flagged non-polar.
+
+### Two-pad parts without polarity
+
+A non-polar part with two pads on each side aligns by its axis, and 180 degrees is irrelevant: the rotation is given modulo 180 (`method` `axis`).
+
+### The second pairing
+
+Two pads pair two ways, so both are graded: KiCad's two pads against JLC's, and against JLC's swapped. One pairing fits clearly better when it fits and the other does not, or when both fit and its worst pad's overlap is at least `fit.SHAPE_MARGIN` (0.1) higher. Mirror-symmetric pads give exactly 0, and so does every two-pad part on the gate boards; a coin-cell holder whose two pads differ in shape gives 0.263.
+
+- A non-polar part whose pads fit one pairing clearly better takes that pairing and a full turn (`method` `shape`).
+- A polarized part keeps its meaning's rotation, but when the swapped pairing fits clearly better it is yellow: one of the two footprints may draw its terminals at the other end.
+
+### Fit and status
+
+After the placement every JLC pad must land on KiCad copper of its number, overlapping it by at least half the smaller pad's area; a pad whose centre falls outside the inner 80 % of the KiCad pad lands tight. A JLC pad no name pairs is graded against the nearest KiCad pad; extra KiCad copper is never a misfit, and a custom-shaped KiCad pad is not judged.
+
+| `fit` | Meaning |
+| --- | --- |
+| `fits` | Every JLC pad lands on KiCad copper |
+| `fits_larger_pads` | It fits, and KiCad's pads are at least 1.5 times JLC's (hand-solder pads) |
+| `fits_tight` | The pads overlap, but a JLC pad's centre sits at the edge of its KiCad pad |
+| `count`, `pitch` | A JLC pad misses: `count` when the pad counts differ, `pitch` when they are equal |
+| `numbering`, `mirror` | The package fits but the numbering differs, or runs the other way |
+| `no_data` | Nothing to align |
+
+The status is **green** when the part fits and its rotation is known, **yellow** when it fits with a caveat (tight pads, a central pad the KiCad footprint lacks, JLC's pin-1 marker on the other terminal, the shapes preferring the other pairing), **red** when it does not fit or EasyEDA's data contradicts itself, and **unknown** when there is nothing to judge. Only green and yellow carry a rotation.
+
+- **The body caveat.** When the footprint drawing has a body outline and the KiCad footprint a courtyard, the courtyard is moved by the placement and compared with JLC's body. An overhang of more than 10 % of the courtyard's shorter side (never less than 0.15 mm nor more than 1.5 mm) is noted; the status and the rotation stand.
+- **The package origin.** `Verdict.origin` is the point the placement carries onto the drawing's own origin: where JLC's package origin sits in the footprint frame, for green and yellow verdicts only.
+
+## The gate
+
+Two KiCad boards under `tests/fixtures/jlcfootprint/boards/` were uploaded to JLC, and for each part checked the rotation JLC's placement preview settled on was written down (D5's by construction, as its note says: it is D4 with the anode wired to pad 1, which the preview cannot show). The gate is that the resolver, run offline on the same boards and the recorded EasyEDA answers, reproduces every one of them.
+
+- `corner_case/` has 47 footprints from KiCad's own library: SOT-23s at all four rotations and on both sides, SOIC-8, QFN, SOT-223, DPAK, DIP-8, USB-C, diodes, LEDs, electrolytic and tantalum capacitors, resistors, a 0603 part on 0402 pads, a wrong pick (SOT-23-5 on SOT-23-6 pads) and a SOT-23 whose JLC drawing numbers its pins clockwise (`-CW`). `tools/jlcfootprint/make_corner_case_board.py` builds it with pcbnew from `cases.csv` and `blank.kicad_pcb`.
+- `pin_functions_and_marks/` has 16: DPAKs, most of whose JLC drawings number the tab differently, paired by pin function; tantalums whose polarity comes from their `+` marks and tokens, one on the bottom side; and an electrolytic on a footprint too small for its body, beside the same part on one that fits.
+
+**The truth files.** `tests/fixtures/jlcfootprint/truth.csv` belongs to the corner-case board and `truth_pin_functions_and_marks.csv` to the second. Each row is one part:
+
+- `observed_rotation` is JLC's angle for the part after it was aligned in the preview. Blank means the part must get no derived rotation (a wrong pick, or a refusal by design).
+- `origin_dx_mm` and `origin_dy_mm`, where present, pin JLC's package origin in the footprint frame, within 5 µm; blank means no origin.
+- `note` says why, and is not read.
+
+The preview does not show an angle. It turns a part 90 degrees counter-clockwise per press of the space bar, so the corner-case board was uploaded with the raw placed angles and the presses were written down per part (`truth_presses.csv`); `tools/jlcfootprint/truth_from_presses.py` adds them to the uploaded CPL's angles.
+
+**The validator.** `tools/jlcfootprint/validate_board.py` reads the board with `boardfile`, without pcbnew, and each part's recorded EasyEDA answer: the classic responses by default, or the Pro host's batch, footprint and symbol documents with `--pro-fixtures`. It resolves every part, works out the CPL rotation the plugin's `Fabrication` would write (a bottom-side angle mirrored as 180 minus the angle, then the correction added), and compares it with the truth. A non-polar part compares modulo 180. Any disagreement, or a truth row for a part that is not on the board, exits 1. `--report` writes the per-part table; the committed `pre_upload_report.txt` beside each board is that table, so a change in any verdict, note or origin shows up as a diff.
+
+```bash
+B=tests/fixtures/jlcfootprint/boards; FX=tests/fixtures/jlcfootprint; T=tools/jlcfootprint
+python3 $T/validate_board.py $B/corner_case/corner_case.kicad_pcb --truth $FX/truth.csv --report /tmp/r.txt && cmp /tmp/r.txt $B/corner_case/pre_upload_report.txt
+python3 $T/validate_board.py $B/corner_case/corner_case.kicad_pcb --truth $FX/truth.csv --pro-fixtures $FX/easyeda_pro --report /tmp/r.txt && cmp /tmp/r.txt $B/corner_case/pre_upload_report.txt
+python3 $T/validate_board.py $B/pin_functions_and_marks/pin_functions_and_marks.kicad_pcb --truth $FX/truth_pin_functions_and_marks.csv --pro-fixtures $FX/easyeda_pro --report /tmp/r.txt && cmp /tmp/r.txt $B/pin_functions_and_marks/pre_upload_report.txt
+```
+
+All 46 parts with a truth row on the corner-case board agree, from the classic answers and from the Pro host's, with the same report; on the second board all 16 agree. `tests/test_jlcfootprint_gate.py` runs the same comparisons in the test suite and pins a few of the verdicts.
+
 ## What comes next
 
 The package arrives in parts. Still to come:
 
-- **The resolver and its gate**: rotation, fit and polarity per part, checked offline against parts whose rotations were read from JLC's placement preview.
 - **Background fetch and storage**: the EasyEDA client, a paced worker, the response cache and per-project verdicts.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
 - **The UI**: a JLC column with a hover, a detail dialog with a pad overlay, overrides and actions.

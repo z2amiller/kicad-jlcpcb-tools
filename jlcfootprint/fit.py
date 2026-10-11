@@ -1,4 +1,4 @@
-"""Pad pairing, placement and fit grading (spec 7.2).
+"""Pad pairing, placement and fit grading.
 
 Pure geometry: pair pads by name, solve the placement, transform KiCad pads into
 JLC's frame, grade how each JLC pad lands on KiCad copper, and align by shape
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
+from typing import Optional
 
 from .geometry import Pad, centroid, named_pads, pad_geom, rotate
 from .polarity import is_no_function, normalise_function
@@ -25,13 +26,14 @@ from .solver import solve_transform
 # pads.
 CENTRE_TOLERANCE = 0.8
 MIN_OVERLAP = 0.5
-# Pads this much bigger on one side are reported as "fits, KiCad pads larger/smaller".
+# Pads this much bigger on one side are reported: KiCad's larger as the grade
+# ``fits_larger_pads``, JLC's larger as a note that KiCad's pads are smaller.
 SIZE_RATIO = 1.5
 # One pairing of a two-pad part's pads fits clearly better than the swapped one when
-# its worst pad overlaps by at least this much more (spec 19.4).  Mirror-symmetric
-# pads give exactly 0.  Measured 2026-10-07 on the gate boards and on 2,525 two-pad
-# alignments of real boards whose pairings both fit: every gap was 0 except one
-# coin-cell holder's 0.263 (0.947 against 0.684), so 0.1 sits well clear of both.
+# its worst pad overlaps by at least this much more.  Mirror-symmetric pads give
+# exactly 0, and so does every two-pad part on the two gate boards.  The coin-cell
+# holder in test_jlcfootprint_two_pad_polarity.py (C7498149), whose pads differ in
+# shape, gives 0.263 (0.947 against 0.684), so 0.1 sits well clear of both.
 SHAPE_MARGIN = 0.1
 
 
@@ -79,7 +81,7 @@ class FunctionPairing:
     jlc: dict[str, Pad]
     leftovers: list[Pad]
     differences: list[tuple[str, str, str]]
-    eliminated: tuple[str, str] | None = None
+    eliminated: Optional[tuple[str, str]] = None
 
 
 def _area(pad: Pad) -> float:
@@ -114,7 +116,7 @@ def _pair_groups(
 
 def pair_by_function(
     kicad_pads: list[Pad], jlc_pads: list[Pad], symbol_pins: list[SymbolPin]
-) -> FunctionPairing | None:
+) -> Optional[FunctionPairing]:
     """Pair pads by pin function when the numbers do not line up, or return None.
 
     A KiCad pad's function is the schematic pin name it carries (``D_2`` reads as
@@ -223,9 +225,8 @@ def align(kicad: dict[str, Pad], jlc: dict[str, Pad]) -> Placement:
     # An underdetermined solve has no rotation worth checking the bearings against,
     # and a non-finite pad coordinate (which is how the solver reaches that flag
     # without raising) would make the RMS NaN.  The resolver copies the placement
-    # into the verdict before it refuses on ``is_underdetermined``, so that NaN
-    # would reach the stored ``angular_rms`` column; the assessment this call
-    # replaced reported 0.0 for exactly these transforms.
+    # into the verdict before it refuses on ``is_underdetermined``, so the RMS is
+    # 0.0 there rather than a NaN that would reach everything that reads the verdict.
     rms = (
         0.0
         if transform.is_underdetermined
@@ -251,7 +252,7 @@ def align(kicad: dict[str, Pad], jlc: dict[str, Pad]) -> Placement:
 
 
 def package_origin(placement: Placement) -> tuple[float, float]:
-    """Return JLC's package origin in the KiCad footprint frame (spec 17.2).
+    """Return JLC's package origin in the KiCad footprint frame.
 
     The placement maps KiCad pads onto the JLC drawing in the solver's frame,
     ``jlc = R(theta) * kicad + offset``; JLC's package origin is the drawing's
@@ -259,9 +260,10 @@ def package_origin(placement: Placement) -> tuple[float, float]:
     applied to the origin, ``-R(-theta) * offset``.  That point is where JLC's
     Mid X/Y must be for JLC's pads to land on the footprint's pads, which is
     what the placement preview checks.  The frame is the one the pad hash uses:
-    millimetres, KiCad's Y down, bottom-side parts already un-mirrored by the
-    adapter, so the caller mirrors it back for a bottom part exactly as
-    ``Fabrication.reposition`` mirrors a rule's offset.
+    millimetres, KiCad's Y down, a bottom-side footprint's pads already mirrored
+    back into its own frame (``geometry.mirror_y``), so a caller placing a
+    bottom-side part mirrors the point back, as ``Fabrication.reposition``
+    mirrors a correction's offset.
     """
     x, y = -placement.offset_x, -placement.offset_y
     return rotate(x, y, -placement.rotation_deg)
@@ -332,7 +334,7 @@ def assess_fit(
     Matched pads pair by key, and each is graded against every KiCad pad in
     ``kicad_all`` that shares its partner's number, because every KiCad pad
     carrying one number is one terminal: a DPAK's tab and the stub of its cut
-    lead are both pad 2 and are graded together (spec 16.6).  Each remaining JLC
+    lead are both pad 2 and are graded together.  Each remaining JLC
     pad (a tab numbered differently, a merged connector pin) pairs with the
     nearest transformed KiCad pad, which may be
     reused; extra KiCad copper is never a misfit.  An unmatched JLC pad that lands on
@@ -417,7 +419,7 @@ def fits(report: FitReport) -> bool:
 
 
 def fits_clearly_better(report: FitReport, other: FitReport) -> bool:
-    """Return True when ``report``'s pairing fits clearly better than ``other``'s (spec 19.4).
+    """Return True when ``report``'s pairing fits clearly better than ``other``'s.
 
     A pairing fits clearly better when it fits and the other does not, or when both
     fit and its worst-pad overlap exceeds the other's by at least SHAPE_MARGIN.
@@ -467,11 +469,12 @@ def shape_alignment(kicad: list[Pad], jlc: list[Pad]) -> tuple[int, int]:
 
     Used only after a by-name alignment failed with equal pad counts: when the
     package fits at some angle but the numbers do not line up, the KiCad footprint's
-    pin numbering differs from JLC's part (the multi-pin form of "correct by accident").
+    pin numbering differs from JLC's part, so a rotation read off the package shape
+    alone would put the wrong pins on the wrong pads.
     """
     kx, ky = centroid(kicad)
     jx, jy = centroid(jlc)
-    best: tuple[int, int, float] | None = None
+    best: Optional[tuple[int, int, float]] = None
     for rotation in (0, 90, 180, 270):
         placed = []
         for pad in kicad:

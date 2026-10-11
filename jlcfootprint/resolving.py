@@ -1,4 +1,4 @@
-"""One way to resolve a cached record: the resolver call three callers assembled by hand.
+"""Resolve a part from its parsed EasyEDA record.
 
 This module is the join above the package's two halves.  It imports the parsers
 (:mod:`jlcfootprint.easyeda_parse` for the record type,
@@ -8,6 +8,8 @@ the package's import graph stays a tree with no deferred import in it.
 """
 
 from __future__ import annotations
+
+from typing import Optional
 
 from .drawing import drawing_marks
 from .easyeda_parse import ComponentRecord
@@ -19,13 +21,13 @@ def resolve_record(
     kicad_pads: list[Pad],
     kicad_footprint_name: str,
     record: ComponentRecord,
-    kicad_courtyard: tuple[float, float, float, float] | None = None,
+    kicad_courtyard: Optional[tuple[float, float, float, float]] = None,
 ) -> Verdict:
-    """Resolve one footprint against a cached record (spec 7).
+    """Resolve one footprint against a part's EasyEDA record.
 
-    Builds the two arguments every caller assembled from a ``ComponentRecord`` by
-    hand: the raw pads converted to millimetres and the drawings' polarity marks
-    and body box, then calls :func:`jlcfootprint.resolver.resolve` with all eight.
+    Builds the two arguments a ``ComponentRecord`` does not hold ready, the raw
+    pads converted to millimetres and the drawings' polarity marks and body box,
+    then calls :func:`jlcfootprint.resolver.resolve` with all eight.
     """
     return resolve(
         kicad_pads,

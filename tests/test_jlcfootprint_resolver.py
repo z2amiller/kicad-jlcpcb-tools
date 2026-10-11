@@ -127,7 +127,7 @@ def test_sot23_against_the_recorded_c2132_footprint_gives_180():
 
 
 def test_soic8_bl_gives_270_and_agrees_with_the_name():
-    """A -BL SOIC is KiCad's pattern turned 270 degrees CCW on screen; the table says 90."""
+    """A -BL SOIC is KiCad's pattern turned 90 degrees CCW on screen: the CPL takes 270, the name's table says 90."""
     jlc = rotated_on_screen_ccw(KICAD_SOIC8, 90)
     verdict = resolve(
         KICAD_SOIC8,
@@ -235,7 +235,7 @@ def test_two_versus_three_pads_is_red_count():
 
 
 def test_fetch_error_is_unknown_and_will_retry():
-    """A failed fetch is not a verdict about the part; the next enrichment retries it."""
+    """A failed fetch is not a verdict about the part; the part is asked for again later."""
     verdict = resolve(KICAD_SOT23, "Package_TO_SOT_SMD:SOT-23", "error", "", [], [])
     assert (verdict.status, verdict.rotation, verdict.method) == (
         "unknown",

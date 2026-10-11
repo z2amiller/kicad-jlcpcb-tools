@@ -2,18 +2,18 @@ r"""Check the live pcbnew adapter against the board-file parser on one board.
 
 Needs KiCad's bundled Python (it imports pcbnew):
 
-    /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \\
+    /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \
         tools/jlcfootprint/check_live_adapter.py tests/fixtures/jlcfootprint/boards/corner_case/corner_case.kicad_pcb
 
-For every footprint the adapter's pads (footprint frame, bottom parts un-mirrored,
+For every footprint the adapter's pads (footprint frame, bottom parts mirrored back,
 pad rotation modulo 180) and its courtyard box must equal the validator's file pads
 and box and give the same verdict key; where a recorded EasyEDA response exists the
 resolver must return the same status, fit, rotation and package origin from both,
 the last to 1 nanometre, because the origin is read out of the same frame the pads
-are (spec 17.6).  ``--pro-fixtures`` reads the parts from the Pro recordings instead, which
-is how the boards whose parts have no classic fixture reach the resolver.  Exits 1 on
-any difference.  This is how the adapter's frame was confirmed on 2026-09-16 (47 of 47
-parts) and its courtyard reader on 2026-09-17.
+are.  ``--pro-fixtures`` reads the parts from the Pro recordings instead, which is
+how a board whose parts have no classic recording reaches the resolver.  Exits 1 on
+any difference.  On the corner-case board all 47 footprints agree, and so do the 16
+of the second gate board.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -68,7 +69,7 @@ def origin_differs(from_file: Verdict, from_live: Verdict) -> bool:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """Compare the live adapter with the file parser on every footprint of the board."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("board", type=Path)

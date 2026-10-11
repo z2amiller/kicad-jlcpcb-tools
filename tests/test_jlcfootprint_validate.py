@@ -67,7 +67,7 @@ def test_sot23_at_every_placement_emits_the_same_correction(tmp_path):
 
 
 def test_expected_cpl_rotation_matches_upstream():
-    """Upstream mirrors bottom parts as 180 minus the angle, then adds the correction."""
+    """Fabrication mirrors a bottom part's angle as 180 minus the angle, then adds the correction."""
     assert validator.expected_cpl_rotation(90, False, 180) == 270
     assert validator.expected_cpl_rotation(90, True, 180) == 270
     assert validator.expected_cpl_rotation(0, True, 180) == 0

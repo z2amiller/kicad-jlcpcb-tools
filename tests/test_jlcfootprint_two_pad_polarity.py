@@ -1,4 +1,4 @@
-"""Tests for spec 19: two-pad polarity read from numbered signs, families and marks, and the pad shapes."""
+"""Two-pad polarity read from numbered signs, part families and drawn marks, and two-pad alignment by pad shape."""
 
 import pytest
 
@@ -52,8 +52,8 @@ PLAIN_KICAD = [Pad("1", -2.0, 0.0, 1.5, 1.5), Pad("2", 2.0, 0.0, 1.5, 1.5)]
 PLAIN_JLC = [Pad("1", -2.0, 0.0, 1.5, 1.5), Pad("2", 2.0, 0.0, 1.5, 1.5)]
 NUMBERED_PINS = [SymbolPin("1", "1"), SymbolPin("2", "2")]
 # JLC's pads for C7498149 in millimetres (its Pro footprint), and BT1's KiCad pads
-# without their pin functions: paired by number the worst pad overlaps 0.684, paired
-# the other way round 0.947.
+# without their pin functions: the worst pad overlaps 0.684 when the pads pair by
+# number and 0.947 when they pair the other way round.
 BT1_JLC = [
     Pad("1", -11.575034, 0.0, 6.999986, 2.7999944),
     Pad("2", 11.575034, 0.0, 3.499993, 3.7999924),
@@ -66,7 +66,7 @@ WIDE_RIGHT = Pad("2", 2.0, 0.0, 2.0, 0.6)
 
 
 def bt1_record():
-    """Assemble C7498149 from its recorded Pro footprint and symbol, as the cache holds it."""
+    """Assemble C7498149 from its recorded Pro footprint and symbol, as ``assemble_record`` joins them."""
     footprint = parse_puuid_response(
         recorded_document("footprint", BT1_HIT.puuid), BT1_HIT.puuid
     )
@@ -96,7 +96,7 @@ CR123A_HIT = DeviceHit(
 
 
 def cr123a_record():
-    """Assemble C5290177 from its recorded Pro footprint and symbol, as the cache holds it."""
+    """Assemble C5290177 from its recorded Pro footprint and symbol, as ``assemble_record`` joins them."""
     footprint = parse_puuid_response(
         recorded_document("footprint", CR123A_HIT.puuid), CR123A_HIT.puuid
     )
@@ -107,7 +107,7 @@ def cr123a_record():
 
 
 def test_a_sign_with_kicads_pin_number_suffix_reads_as_the_sign():
-    """``+_1`` and ``-_2`` read as ``+`` and ``-`` the way ``K_1`` reads as ``K`` (spec 19.3)."""
+    """``+_1`` and ``-_2`` read as ``+`` and ``-`` the way ``K_1`` reads as ``K``."""
     assert normalise_function("+_1") == "+"
     assert normalise_function("-_2") == "-"
     assert normalise_function(" +_12 ") == "+"
@@ -126,13 +126,13 @@ def test_a_supply_pin_named_v_plus_still_names_no_terminal():
 
 
 def test_only_digits_after_the_underscore_make_a_numbered_sign():
-    """``+1``, ``+_A`` and ``-_1A`` are not KiCad's ``+_N`` and name no terminal (spec 19.3)."""
+    """``+1``, ``+_A`` and ``-_1A`` are not KiCad's ``+_N`` and name no terminal."""
     for text in ("+1", "+_A", "-_1A"):
         assert terminal_of(Pad("1", 0, 0, 1, 1, 0, text)) == "", text
 
 
 def test_bt1_coin_cell_holder_resolves_yellow_at_180_from_the_footprint_mark():
-    """The false green of spec 19.1: BT1 is yellow at 180 degrees, its polarity from JLC's ``+``."""
+    """BT1 is yellow at 180 degrees, its polarity from the ``+`` JLC's footprint draws beside pad 2."""
     verdict = resolve_record(BT1_PADS, BT1_FOOTPRINT, bt1_record(), BT1_COURTYARD)
     assert (verdict.status, verdict.rotation, verdict.method) == (
         "yellow",
@@ -153,11 +153,12 @@ def test_polarized_cap_families_are_not_cathode_families():
 
 
 def test_a_cr123a_holder_reads_its_footprint_plus_and_resolves_green():
-    """A real CR123A holder's 63-mil + on 1,482-mil pads is read: green, 0 degrees (spec 19.8).
+    """A real CR123A holder's 63-mil + on 1,482-mil pads is read: green, 0 degrees.
 
     Its Pro footprint draws the + beside pad 1 as two filled bars of 63 mil, 4.3 %
-    of the pad spacing, which the 5 % bound alone dropped: the part then read
-    "polarity unknown" under decision 4 of spec 19.2.  The raw angle was right.
+    of the pad spacing.  That is under the footprint's 5 % lower bound, which the
+    0.75 mm floor lowers to about 30 mil on pads this far apart, so the mark is read
+    and the part keeps its raw angle, which is right.
     """
     record = cr123a_record()
     pads = footprint_pads(record.footprint_shapes)
@@ -200,7 +201,7 @@ def test_a_cr123a_holder_reads_its_footprint_plus_and_resolves_green():
 def test_battery_and_buzzer_footprints_are_polarized_on_the_positive_terminal(
     footprint,
 ):
-    """KiCad's Battery..., Buzzer_... and MagneticBuzzer_... footprints are ``polar`` (spec 19.3)."""
+    """KiCad's Battery..., Buzzer_... and MagneticBuzzer_... footprints are ``polar``."""
     assert part_kind("X", footprint, PLAIN_KICAD, NUMBERED_PINS) == "polar"
 
 
@@ -221,7 +222,7 @@ def test_battery_and_buzzer_footprints_are_polarized_on_the_positive_terminal(
     ],
 )
 def test_battery_buzzer_and_microphone_families_are_polarized(package):
-    """Every crawl spelling of the three families classifies as ``polar`` (spec 19.3)."""
+    """These spellings of the three families, all from EasyEDA's library, classify as ``polar``."""
     assert part_kind(package, "Custom:Part", PLAIN_KICAD, NUMBERED_PINS) == "polar"
 
 
@@ -249,7 +250,7 @@ def test_the_families_rank_after_the_capacitor_names_and_before_the_symbol_label
 
 
 def test_a_diode_family_outranks_a_battery_footprint_and_labels_outrank_a_drawn_plus():
-    """The families rank after the diode families, and a drawn ``+`` after the symbol labels (spec 19.3)."""
+    """The families rank after the diode families, and a drawn ``+`` after the symbol labels."""
     battery = "Battery:Battery_CR1225"
     assert (
         part_kind("SOD-123F_L2.8-W1.8-LS3.7-RD", battery, PLAIN_KICAD, NUMBERED_PINS)
@@ -268,7 +269,7 @@ def test_a_diode_family_outranks_a_battery_footprint_and_labels_outrank_a_drawn_
     ids=["footprint_mark", "symbol_mark"],
 )
 def test_a_drawn_plus_sends_an_unclassified_two_pad_part_to_the_meaning_path(marks):
-    """JLC's ``+`` on pin 2 turns the part 180 degrees with KiCad pad 1 assumed ``+`` (spec 19.2, decision 1)."""
+    """JLC's ``+`` on pin 2 turns the part 180 degrees with KiCad pad 1 assumed ``+``."""
     assert (
         part_kind("CONN-TH_2P", "Custom:Part", PLAIN_KICAD, NUMBERED_PINS, marks)
         == "polar"
@@ -310,7 +311,7 @@ def test_without_a_drawn_plus_the_same_part_keeps_the_axis_rule():
 
 
 def test_a_polarized_family_part_with_no_polarity_source_is_unknown():
-    """A battery JLC marks nowhere gets "polarity unknown" and the raw angle, never a green (decision 4)."""
+    """A battery JLC marks nowhere gets "polarity unknown" and the raw angle, never a green."""
     verdict = resolve(
         PLAIN_KICAD,
         "Custom:Part",
@@ -370,7 +371,7 @@ def test_a_polarized_family_part_with_no_polarity_source_is_unknown():
 def test_a_pairing_fits_clearly_better_by_a_fit_or_by_the_margin(
     better, worse, expected
 ):
-    """It fits and the other misses, or both fit and its worst pad leads by SHAPE_MARGIN (spec 19.4)."""
+    """It fits and the other misses, or both fit and its worst pad leads by SHAPE_MARGIN."""
     assert fits_clearly_better(better, worse) is expected
 
 
@@ -378,7 +379,7 @@ def test_a_pairing_fits_clearly_better_by_a_fit_or_by_the_margin(
     "jlc", [BT1_JLC, BT1_JLC[::-1]], ids=["jlc_pads_in_order", "jlc_pads_reversed"]
 )
 def test_a_non_polar_part_takes_the_pairing_its_pad_shapes_fit_better(jlc):
-    """BT1's shapes without any polarity: the better pairing wins, whichever is tried first (decision 2)."""
+    """BT1's shapes without any polarity: the better pairing wins, whichever is tried first."""
     verdict = resolve(
         BT1_BARE,
         "Custom:Holder",
@@ -413,7 +414,7 @@ def test_a_non_polar_part_whose_pads_fit_one_way_only_is_turned_to_fit():
 
 
 def test_a_non_polar_part_whose_listed_pairing_alone_fits_takes_its_full_turn():
-    """Paired in list order the pads fit at 180 degrees and swapped they miss: a full turn (decision 2)."""
+    """Paired in list order the pads fit at 180 degrees and swapped they miss: a full turn."""
     kicad = [TALL_LEFT, WIDE_RIGHT]
     jlc = [TALL_LEFT._replace(x=2.0), WIDE_RIGHT._replace(x=-2.0)]
     verdict = resolve(kicad, "Custom:Part", "ok", "CONN-SMD_2P", jlc, NUMBERED_PINS)
@@ -426,7 +427,7 @@ def test_a_non_polar_part_whose_listed_pairing_alone_fits_takes_its_full_turn():
 
 
 def test_symmetric_pads_keep_the_axis_result_modulo_180():
-    """Mirror-symmetric pads fit both pairings alike, so 180 degrees stays irrelevant (spec 7.4)."""
+    """Mirror-symmetric pads fit both pairings alike, so 180 degrees stays irrelevant."""
     turned = [PLAIN_JLC[0]._replace(number="2"), PLAIN_JLC[1]._replace(number="1")]
     verdict = resolve(
         PLAIN_KICAD, "Custom:Part", "ok", "CONN-SMD_2P", turned, NUMBERED_PINS
@@ -436,7 +437,7 @@ def test_symmetric_pads_keep_the_axis_result_modulo_180():
 
 
 def test_a_meaning_aligned_part_that_fits_clearly_worse_goes_yellow_and_keeps_its_rotation():
-    """BT1 drawn with ``+`` on pad 2: the + lands on JLC's +, and the shapes say the other way (decision 3)."""
+    """BT1 drawn with ``+`` on pad 2: the + lands on JLC's +, and the shapes say the other way."""
     flipped = [
         BT1_PADS[0]._replace(pin_function="-_1"),
         BT1_PADS[1]._replace(pin_function="+_2"),
@@ -479,7 +480,7 @@ def test_a_meaning_aligned_part_whose_own_pairing_misses_stays_red():
 
 
 def test_a_meaning_aligned_part_whose_swapped_pairing_misses_stays_green():
-    """A swapped pairing that misses is not clearly better, so the meaning's green stands (spec 19.4)."""
+    """A swapped pairing that misses is not clearly better, so the meaning's green stands."""
     kicad = [
         TALL_LEFT._replace(pin_function="+_1"),
         WIDE_RIGHT._replace(pin_function="-_2"),

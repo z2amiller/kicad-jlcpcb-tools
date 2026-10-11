@@ -114,9 +114,8 @@ def test_an_underdetermined_solve_reports_no_angular_error():
 
     ``solve_transform`` answers "underdetermined" for a NaN coordinate instead of
     raising, and the resolver copies the placement into the verdict before it
-    refuses on that flag, so a NaN here would reach the stored ``angular_rms``
-    column and the detail dialog.  The quality assessment ``align`` used to call
-    guarded exactly this case; ``angular_rms`` on its own cannot see the flag.
+    refuses on that flag, so a NaN here would reach the verdict's ``angular_rms``.
+    ``angular_rms`` on its own cannot see the flag, so ``align`` checks it first.
     """
     nan = float("nan")
     kicad = {"1": Pad("1", nan, 0.0, 1.0, 1.0), "2": Pad("2", 1.0, 0.0, 1.0, 1.0)}

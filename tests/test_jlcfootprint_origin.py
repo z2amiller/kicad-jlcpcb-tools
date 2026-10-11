@@ -1,4 +1,4 @@
-"""JLC's package origin: the pure function, the origin on real parts and the gate (spec 17)."""
+"""JLC's package origin: the pure function, the origin on real parts and the gate."""
 
 import math
 
@@ -38,7 +38,7 @@ def turned(rotation_deg: int, x: float, y: float) -> tuple:
 
 
 # ----------------------------------------------------------------------------
-# The pure origin (spec 17.2)
+# The pure origin
 # ----------------------------------------------------------------------------
 
 
@@ -71,7 +71,7 @@ def test_a_verdict_without_a_placement_or_a_fit_has_no_origin():
 
 
 # ----------------------------------------------------------------------------
-# The origin on real parts (spec 17.7)
+# The origin on real parts
 # ----------------------------------------------------------------------------
 
 
@@ -158,7 +158,7 @@ def test_the_solver_and_the_origin_agree_on_a_hand_built_offset_drawing():
 
 
 # ----------------------------------------------------------------------------
-# The gate (spec 17.6)
+# The gate
 # ----------------------------------------------------------------------------
 
 
@@ -176,7 +176,7 @@ def sot23_rows(validator, tmp_path):
 
 
 def test_the_report_prints_the_origin_offset_from_the_pad_box_centre(tmp_path):
-    """The two new columns say how far the CPL position moves, to two decimals."""
+    """The two origin columns say how far the CPL position would move, to two decimals."""
     rows = sot23_rows(validator, tmp_path)
 
     table = validator.format_rows(rows)
@@ -208,7 +208,7 @@ def test_the_report_leaves_the_origin_columns_blank_without_a_verdict(tmp_path):
 
 
 def test_truth_origins_are_optional_and_blank_means_no_origin(tmp_path):
-    """A truth file written before M4 gates nothing new; an empty pair expects none."""
+    """A truth file without the origin columns gates no origin; an empty pair expects none."""
     without = truth_file(tmp_path, "Q1,180\n", header="reference,observed_rotation\n")
     assert validator.load_truth_origins(without) is None
 

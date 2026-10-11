@@ -1,24 +1,27 @@
-"""Terminal vocabulary for polarized two-pad parts (spec 7.3).
+"""Terminal vocabulary for polarized two-pad parts.
 
-Which pad is the cathode or the positive terminal, on the KiCad side from the
-schematic's pin functions and on the EasyEDA side from the footprint name's
-FD/RD token, the symbol's pin-1 label and the drawings' ``+`` marks.  Anode and positive terminal are the
-same idea here, as are cathode and negative terminal: an LED whose symbol says
-``+``/``-`` and a capacitor whose symbol says ``A``/``K`` must both resolve.
+What kind of part a two-pad part is (diode, polarized capacitor, another polarized
+part, or none of these), and which pad is its cathode or its positive terminal: on
+the KiCad side from the schematic's pin functions, and on the EasyEDA side from the
+package name's FD/RD token, the symbol's pin-1 label and the drawings' ``+`` marks.
+Anode and positive terminal are the same idea here, as are cathode and negative
+terminal: an LED whose symbol says ``+``/``-`` and a capacitor whose symbol says
+``A``/``K`` must both resolve.
 """
 
 from __future__ import annotations
 
 import re
+from typing import Optional
 
 from .geometry import Pad
 from .naming import CATHODE_PIN1_FAMILIES, extract_family, extract_orientation_tokens
 from .records import PIN1_ANODE_LABELS, PIN1_CATHODE_LABELS, DrawingMarks, SymbolPin
 
-# Polarized capacitor families — aluminum electrolytic and tantalum.  A part in one of
+# Polarized capacitor families: aluminum electrolytic and tantalum.  A part in one of
 # them is a polarized capacitor (:func:`part_kind`).  Their pin 1 is the positive
-# terminal, so they read FD/RD with the naming rule's STANDARD table and must NOT
-# appear in naming.CATHODE_PIN1_FAMILIES.
+# terminal, so they read FD/RD the standard way and must not appear in
+# naming.CATHODE_PIN1_FAMILIES.
 #
 # CP-* prefix = "Capacitor Polarized" in EasyEDA naming conventions.
 # CASE-* = EIA standard tantalum case codes (A=3216, B=3528, C=6032, D=7343, E=7360).
@@ -50,12 +53,11 @@ _DIODE_LABELS = (PIN1_CATHODE_LABELS | PIN1_ANODE_LABELS) - _CAP_LABELS
 # terminal and do not disqualify the other pads' functions.
 _NO_FUNCTION_TEXTS = frozenset({"NC", "N/C", "N.C.", "~", "DNC", "NP", "NU"})
 # The molded-chip tantalum drawings (``CAP-SMD_L3.2-W1.6-RD``), as against the cans
-# (``CAP-SMD_BD5.0-L5.3``): the family whose FD/RD token the crawl found least
-# reliable (spec 16.9), read by :func:`token_is_weak`.
+# (``CAP-SMD_BD5.0-L5.3``): the family whose FD/RD token disagrees most often with its
+# own drawings' ``+`` marks over EasyEDA's library, read by :func:`token_is_weak`.
 _MOLDED_CHIP_NAME = re.compile(r"CAP-SMD_L[\d.]", re.IGNORECASE)
 # A sign carrying the pin number KiCad appends to a pin's name on the board (``+_1``,
-# ``-_2``), the same suffix as ``K_1``; matched whole, so ``V+_8`` is not a sign
-# (spec 19.3).
+# ``-_2``), the same suffix as ``K_1``; matched whole, so ``V+_8`` is not a sign.
 _NUMBERED_SIGN = re.compile(r"([+-])_\d+")
 
 # Polarized two-terminal parts that are neither diodes nor capacitors and take the
@@ -63,8 +65,8 @@ _NUMBERED_SIGN = re.compile(r"([+-])_\d+")
 # names their footprints Battery... (BatteryHolder_... among them), Buzzer_... and
 # MagneticBuzzer_...; EasyEDA's families are BAT-..., BUZ... and MIC-..., where MIC-
 # keeps its hyphen so that the diode packages MICROSMP and MICRO-MELF stay diodes.
-# BATT-, BATTERY- and BEEP- are the crawl's other spellings of the same parts
-# (spec 19.3).
+# BATT-, BATTERY- and BEEP- are other spellings of the same parts in EasyEDA's
+# library.
 POSITIVE_REFERENCE_FOOTPRINTS = ("BATTERY", "BUZZER_", "MAGNETICBUZZER_")
 POSITIVE_REFERENCE_FAMILIES = ("BAT-", "BATT-", "BATTERY-", "BUZ", "BEEP-", "MIC-")
 
@@ -98,7 +100,7 @@ def normalise_function(text: str) -> str:
 
     The letters before the first other character are the token, so ``K_1`` reads as
     ``K`` and ``V+_8`` as ``V``.  A sign, bare or with KiCad's pin-number suffix
-    (``+_1``, ``-_2``), reads as the sign itself (spec 19.3).
+    (``+_1``, ``-_2``), reads as the sign itself.
     """
     token = text.strip().upper()
     if token in ("+", "-"):
@@ -172,9 +174,9 @@ def part_kind(
     kicad_footprint_name: str,
     kicad_pads: list[Pad],
     symbol_pins: list[SymbolPin],
-    marks: DrawingMarks | None = None,
+    marks: Optional[DrawingMarks] = None,
 ) -> str:
-    """Return ``diode``, ``polar_cap``, ``polar`` or ``other`` (spec 7.1, 19.3).
+    """Return ``diode``, ``polar_cap``, ``polar`` or ``other``.
 
     Evidence is weighed from the most to the least reliable: the KiCad footprint's name
     and its pads' functions, then EasyEDA's package family, then the symbol's pin
@@ -204,7 +206,7 @@ def part_kind(
     ):
         return "polar_cap"
     # Batteries, buzzers and microphones, after the diode and capacitor rules and
-    # before the symbol labels (spec 19.3).
+    # before the symbol labels.
     if footprint.startswith(POSITIVE_REFERENCE_FOOTPRINTS) or family.startswith(
         POSITIVE_REFERENCE_FAMILIES
     ):
@@ -213,15 +215,18 @@ def part_kind(
         return "diode"
     if terminals & {"positive", "negative"} or labels & _CAP_LABELS:
         return "polar_cap"
-    # A drawn + marks an otherwise unclassified part as polarized (spec 19.3).
+    # A drawn + marks an otherwise unclassified part as polarized.
     if marks is not None and (marks.positive_pin or marks.positive_pad):
         return "polar"
     return "other"
 
 
 def kicad_reference_pad(
-    pads: list[Pad], reference: str, diode: bool = False, convention: str | None = None
-) -> tuple[Pad | None, bool, str]:
+    pads: list[Pad],
+    reference: str,
+    diode: bool = False,
+    convention: Optional[str] = None,
+) -> tuple[Optional[Pad], bool, str]:
     """Return (pad, assumed, note) for the KiCad pad carrying ``reference``.
 
     A pin function naming the reference terminal, or its opposite on the other of two
@@ -248,7 +253,7 @@ def kicad_reference_pad(
     return None, True, "no pad 1 on the KiCad side"
 
 
-def side_of(pad: Pad, pads: list[Pad]) -> str | None:
+def side_of(pad: Pad, pads: list[Pad]) -> Optional[str]:
     """Return ``left`` or ``right`` for one of two pads, or None when their axis is not horizontal."""
     other = next(p for p in pads if p is not pad)
     dx, dy = pad.x - other.x, pad.y - other.y
@@ -257,16 +262,16 @@ def side_of(pad: Pad, pads: list[Pad]) -> str | None:
     return "left" if dx < 0 else "right"
 
 
-def token_reference_side(package_name: str, reference: str) -> str | None:
+def token_reference_side(package_name: str, reference: str) -> Optional[str]:
     """Return ``left``, ``right``, ``none`` (bidirectional) or None (no token) from FD/RD/BI.
 
     Forward direction puts the part's marking band on the right of the EasyEDA
     drawing (JLC's zero orientation) and reverse direction on the left.  The band
     is the cathode of a diode and the negative end of a capacitor, so FD means
-    cathode right and positive left.  That reading held on the crawl's 203 marked
-    electrolytic and 39 of 45 marked molded-chip drawings (2026-09-17); the six
-    others, C7171's among them, are decided by the drawings' ``+`` marks in the
-    resolver, which outvote the token.
+    cathode right and positive left.  Over EasyEDA's library that reading agrees
+    with the drawings' ``+`` marks on 201 of 203 electrolytic cans and on 39 of 45
+    molded-chip tantalums.  Where the two disagree (C7171 is one), the resolver
+    counts the marks as votes of their own, and two marks outvote the token.
     """
     polarity = [
         t for t in extract_orientation_tokens(package_name) if t in ("FD", "RD", "BI")
@@ -286,18 +291,18 @@ def token_is_weak(package_name: str) -> bool:
     """Return True where an unchallenged FD/RD token deserves only medium confidence.
 
     The molded-chip tantalum family (``CAP-SMD_L…``, as against the ``CAP-SMD_BD…``
-    cans) is the one family whose token disagreed with its drawings' ``+`` marks on a
-    measurable share of the crawl: 39 of 45 agreed, against 201 of 203 cans and
-    effectively every diode (spec 16.9).  A part of that family whose drawings carry
-    no mark to check the token against -- a drawing without a ``+`` -- is therefore
-    resolved, but not with high confidence.  Cans and diodes keep theirs.
+    cans) is the one family whose token disagrees with its drawings' ``+`` marks on a
+    measurable share of EasyEDA's library: 39 of 45 agree, against 201 of 203 cans and
+    effectively every diode.  A part of that family whose drawings carry no mark to
+    check the token against -- a drawing without a ``+`` -- is therefore resolved, but
+    not with high confidence.  Cans and diodes keep theirs.
     """
     return bool(_MOLDED_CHIP_NAME.match(package_name.strip()))
 
 
 def label_reference_pad(
-    jlc_pads: list[Pad], polarity: str | None, reference: str
-) -> Pad | None:
+    jlc_pads: list[Pad], polarity: Optional[str], reference: str
+) -> Optional[Pad]:
     """Return the EasyEDA pad carrying ``reference`` from the symbol's pin-1 label, if known.
 
     ``polarity`` is 'K' (pin 1 is the cathode or negative terminal) or 'A' (anode or
@@ -316,22 +321,22 @@ def label_reference_pad(
 
 
 def drawing_reference_pads(
-    jlc_pads: list[Pad], marks: DrawingMarks | None, reference: str
-) -> tuple[Pad | None, Pad | None]:
+    jlc_pads: list[Pad], marks: Optional[DrawingMarks], reference: str
+) -> tuple[Optional[Pad], Optional[Pad]]:
     """Return the EasyEDA pad carrying ``reference`` per the symbol's and the footprint's ``+``.
 
     The symbol's ``+`` names a pin number and the footprint's ``+`` a pad number
     (:mod:`jlcfootprint.drawing`); both name the positive terminal, the anode of a
     diode.  A drawing without a mark gives None.  The two come back apart so that
-    each casts its own vote in the resolver (spec 16.6): two marks naming
-    different pads are one disagreement more, outvoted when the token and the
-    label side with one of them and a tie otherwise.
+    each casts its own vote in the resolver: two marks naming different pads are
+    one disagreement more, outvoted when the token and the label side with one of
+    them and a tie otherwise.
     """
     if marks is None:
         return None, None
     by_number = {pad.number: pad for pad in jlc_pads}
 
-    def carrying(number: str | None) -> Pad | None:
+    def carrying(number: Optional[str]) -> Optional[Pad]:
         positive = by_number.get(number) if number else None
         if positive is None:
             return None
@@ -342,7 +347,7 @@ def drawing_reference_pads(
     return carrying(marks.positive_pin), carrying(marks.positive_pad)
 
 
-def pin1_meaning(pads: list[Pad], kind: str, diode: bool = False) -> str | None:
+def pin1_meaning(pads: list[Pad], kind: str, diode: bool = False) -> Optional[str]:
     """Return 'A' or 'K' for what the KiCad side means by pad 1.
 
     Pad 1's own function decides; failing that, the other pad's function implies it;

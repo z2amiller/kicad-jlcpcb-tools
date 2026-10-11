@@ -1,4 +1,4 @@
-"""Validate the resolver against a board and recorded EasyEDA responses (spec 11).
+"""Validate the resolver against a board and recorded EasyEDA responses.
 
 Usage:
     python3 tools/jlcfootprint/validate_board.py BOARD.kicad_pcb [--fixtures DIR] [--truth truth.csv]
@@ -6,18 +6,19 @@ Usage:
 
 Without --truth it prints one verdict per part that has an LCSC field.  With
 --truth it compares the CPL rotation the resolver would emit against the
-rotation JLC's preview settled on, and exits 1 on any disagreement.  This is
-the M0 gate.  With --pro-fixtures the parts are read the way the plugin fetches
-them live (spec 15): the recorded batch answers ``devices_*.json`` give
-each part's uuids, ``footprint_<uuid>.json`` its pads and ``symbol_<uuid>.json``
-its pins; the classic fixtures are not consulted.
+rotation JLC's preview settled on, and exits 1 on any disagreement: this is the
+gate.  With --pro-fixtures the parts are read the way EasyEDA's Pro host serves
+them: the recorded batch answers ``devices_*.json`` give each part's uuids,
+``footprint_<uuid>.json`` its pads and ``symbol_<uuid>.json`` its pins; the
+classic fixtures are not consulted.
 
 truth.csv columns: reference,observed_rotation, optionally origin_dx_mm and
 origin_dy_mm.  observed_rotation is JLC's final rotation for the part after it
 was aligned in the placement preview.  Leave it blank for parts that must NOT
 get a derived rotation (wrong picks, checkerboard parts).  The origin columns
-pin JLC's package origin in the KiCad footprint frame (spec 17.6), compared
-within ORIGIN_TOLERANCE_MM; blank means no derived origin is expected.
+pin JLC's package origin in the KiCad footprint frame, compared within
+ORIGIN_TOLERANCE_MM; blank means no derived origin is expected.  Any other
+column, such as a note, is not read.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ import json
 from pathlib import Path
 import re
 import sys
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -58,19 +60,19 @@ from jlcfootprint.resolver import Verdict, resolve  # noqa: E402
 from jlcfootprint.resolving import resolve_record  # noqa: E402
 
 DEFAULT_FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
-# How far a derived origin may sit from the truth row before the gate fails (spec 17.6).
+# How far a derived origin may sit from the truth row before the gate fails.
 ORIGIN_TOLERANCE_MM = 0.005
 
 
 def expected_cpl_rotation(placed: float, is_bottom: bool, correction: int) -> float:
-    """Reproduce upstream Fabrication: bottom parts mirror first, the correction is added after."""
+    """Reproduce Fabrication's CPL rotation: bottom parts mirror first, the correction is added after."""
     rotation = placed % 360
     if is_bottom:
         rotation = (180 - rotation) % 360
     return (rotation + correction % 360) % 360
 
 
-def load_record(fixtures: Path, lcsc: str) -> ComponentRecord | None:
+def load_record(fixtures: Path, lcsc: str) -> Optional[ComponentRecord]:
     """Parse the recorded response for one part, or None when no fixture exists."""
     path = fixtures / f"{lcsc}.json"
     if not path.exists():
@@ -84,9 +86,9 @@ def load_record(fixtures: Path, lcsc: str) -> ComponentRecord | None:
     return parse_component_response(body, lcsc)
 
 
-def load_pro_index(pro_dir: Path) -> dict[str, DeviceHit | None]:
+def load_pro_index(pro_dir: Path) -> dict[str, Optional[DeviceHit]]:
     """Return every code a recorded batch answer asked, mapped to its hit or None for a miss."""
-    index: dict[str, DeviceHit | None] = {}
+    index: dict[str, Optional[DeviceHit]] = {}
     for path in sorted(pro_dir.glob("devices_*.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -105,9 +107,9 @@ def load_pro_index(pro_dir: Path) -> dict[str, DeviceHit | None]:
 
 
 def load_pro_record(
-    pro_dir: Path, index: dict[str, DeviceHit | None], lcsc: str
-) -> ComponentRecord | None:
-    """Assemble one part from the Pro fixtures as the plugin's cache would, or None when unrecorded.
+    pro_dir: Path, index: dict[str, Optional[DeviceHit]], lcsc: str
+) -> Optional[ComponentRecord]:
+    """Assemble one part from the Pro recordings with ``assemble_record``, or None when unrecorded.
 
     A code the batch was asked about but did not know is ``none``; a footprint that
     answered nothing makes the part ``none`` too; a missing symbol file leaves the
@@ -140,8 +142,8 @@ def load_pro_record(
 def evaluate_footprints(
     footprints: list[KiCadFootprint],
     fixtures: Path,
-    flip_y: bool | None = None,
-    pro_fixtures: Path | None = None,
+    flip_y: Optional[bool] = None,
+    pro_fixtures: Optional[Path] = None,
 ) -> list[dict]:
     """Resolve every footprint with an LCSC field; each row keeps the board facts and the verdict.
 
@@ -181,9 +183,9 @@ def evaluate_footprints(
                     pads, fp.footprint_name, record, kicad_courtyard=courtyard
                 )
             else:
-                # resolve_record has no flip_y override; --flip-y is a calibration
-                # escape hatch (pinned by test_jlcfootprint_validate.py's direct
-                # flip_y=False call), so that path keeps building the call by hand.
+                # resolve_record always converts with FLIP_EASYEDA_Y, so the --flip-y
+                # calibration path (test_jlcfootprint_validate.py also calls it with
+                # flip_y=False) builds the resolver call itself.
                 row["verdict"] = resolve(
                     pads,
                     fp.footprint_name,
@@ -212,8 +214,8 @@ def reference_key(reference: str) -> tuple:
 def evaluate(
     board: Path,
     fixtures: Path,
-    flip_y: bool | None = None,
-    pro_fixtures: Path | None = None,
+    flip_y: Optional[bool] = None,
+    pro_fixtures: Optional[Path] = None,
 ) -> list[dict]:
     """Parse the board file and evaluate it, rows in reference order.
 
@@ -249,19 +251,21 @@ def load_truth(path: Path) -> dict[str, str]:
         return truth
 
 
-def load_truth_origins(path: Path) -> dict[str, tuple[float, float] | None] | None:
+def load_truth_origins(
+    path: Path,
+) -> Optional[dict[str, Optional[tuple[float, float]]]]:
     """Return ``{reference: (dx, dy)}`` from the truth CSV, or None without the columns.
 
-    The two columns are optional (spec 17.6), so a truth file written before M4
-    still gates the rotations; an empty pair means the part must derive no origin,
-    and a half-filled pair is a mistake in the file rather than a silent pass.
+    The two columns are optional, so a truth file without them still gates the
+    rotations; an empty pair means the part must derive no origin, and a
+    half-filled pair is a mistake in the file rather than a silent pass.
     """
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         columns = {name.strip().lower(): name for name in reader.fieldnames or []}
         if "origin_dx_mm" not in columns or "origin_dy_mm" not in columns:
             return None
-        origins: dict[str, tuple[float, float] | None] = {}
+        origins: dict[str, Optional[tuple[float, float]]] = {}
         for row in reader:
             reference = (row.get(columns["reference"]) or "").strip()
             if not reference:
@@ -282,13 +286,14 @@ def load_truth_origins(path: Path) -> dict[str, tuple[float, float] | None] | No
         return origins
 
 
-def origin_offset(row: dict) -> tuple[float, float] | None:
+def origin_offset(row: dict) -> Optional[tuple[float, float]]:
     """Return the derived origin's offset from the part's pad-box centre, or None.
 
-    This is how far the CPL position moves when ``jlcfootprint.exact_origin`` is on,
-    because upstream's ``get_position`` is that same pad box in board coordinates.
+    This is how far a CPL position would move from the pad-box centre, which
+    ``Fabrication.get_position`` writes (the same pad box in board coordinates),
+    to JLC's package origin.
     """
-    verdict: Verdict | None = row["verdict"]
+    verdict: Optional[Verdict] = row["verdict"]
     origin = None if verdict is None else verdict.origin
     centre = row.get("centre")
     if origin is None or centre is None:
@@ -299,7 +304,7 @@ def origin_offset(row: dict) -> tuple[float, float] | None:
 def compare(
     rows: list[dict],
     truth: dict[str, str],
-    origins: dict[str, tuple[float, float] | None] | None = None,
+    origins: Optional[dict[str, Optional[tuple[float, float]]]] = None,
 ) -> list[tuple[dict, str]]:
     """Return ``(row, reason)`` for every part whose emitted rotation would disagree with JLC.
 
@@ -324,7 +329,7 @@ def compare(
         if row["reference"] not in truth:
             continue
         observed = truth[row["reference"]]
-        verdict: Verdict | None = row["verdict"]
+        verdict: Optional[Verdict] = row["verdict"]
         if origins is not None and row["reference"] in origins:
             reason = _origin_reason(
                 origins[row["reference"]],
@@ -352,8 +357,9 @@ def compare(
             failures.append((row, f"truth value {observed!r} is not a number"))
             continue
         expected = expected_cpl_rotation(row["placed"], row["bottom"], verdict.rotation)
-        # A non-polar part (aligned by axis, or a marked inductor whose token only
-        # places JLC's cosmetic pin-1 dot) is the same placement 180 degrees apart.
+        # A non-polar part (aligned by axis or by pad shape, or a marked inductor
+        # whose token only places JLC's cosmetic pin-1 dot) has no polarity to get
+        # wrong, so it is compared modulo 180 degrees.
         modulus = 180 if verdict.non_polar else 360
         if expected % modulus != observed_angle % modulus:
             failures.append((row, f"would emit {expected:g}, JLC shows {observed}"))
@@ -361,7 +367,7 @@ def compare(
 
 
 def _origin_reason(
-    expected: tuple[float, float] | None, derived: tuple[float, float] | None
+    expected: Optional[tuple[float, float]], derived: Optional[tuple[float, float]]
 ) -> str:
     """Return why a derived origin disagrees with its truth row, or "" when it agrees."""
     if expected is None:
@@ -400,7 +406,7 @@ def format_rows(rows: list[dict]) -> str:
         name = "" if verdict.name_rotation is None else str(verdict.name_rotation)
         offset = origin_offset(row)
         # The origin as the preview sees it: how far it sits from the pad-box centre
-        # the CPL emits today (spec 17.6), two decimals, blank without one.
+        # Fabrication writes to the CPL, two decimals, blank without one.
         # -0.0 normalised to 0.0, so a sign of rounding noise cannot change the file.
         dx, dy = (
             ("", "")
@@ -414,7 +420,7 @@ def format_rows(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """Run the validator from the command line."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -425,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--flip-y",
         action="store_true",
-        help="flip EasyEDA Y before matching, which the gate calibrates (spec 6)",
+        help="flip EasyEDA Y before matching, to check the gate against the other Y convention",
     )
     parser.add_argument(
         "--report",

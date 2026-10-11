@@ -1,19 +1,28 @@
-"""Per-part rotation, fit and polarity verdicts (spec 7).
+"""Per-part rotation, fit and polarity verdicts.
 
 Pure and stdlib only.  The caller supplies KiCad pads in the footprint's own
 frame, EasyEDA pads already converted to millimetres, and the symbol pins.
-Multi-pin parts align by pad name (``fit``), or by pin function when the numbers
-do not line up; polarized two-pad parts align by terminal meaning (``polarity``)
-and never by pad number; non-polar two-pad parts align by axis, or by the one
-pairing their pad shapes fit (``shape``, spec 19.4).  Fit is graded per JLC pad
-after the placement, and a fitting part's body is compared with the KiCad
-courtyard (spec 16.6).
+There are three alignment paths:
+
+- a part with two JLC pads that is polarized, or whose package name carries an
+  FD/RD token, aligns by terminal meaning (``polarity``) and never by pad number:
+  the KiCad side's reference pad comes from its pin functions or pad 1, and the
+  EasyEDA side's from a vote of the package name's token, the symbol's pin-1 label
+  and the drawings' ``+`` marks;
+- a non-polar part with two pads on each side aligns by axis, or by the one
+  pairing its pad shapes fit (``shape``);
+- every other part aligns by pad name (``geometry``), or by pin function when the
+  numbers do not line up.
+
+Fit is graded per JLC pad after the placement, and a fitting part's body is
+compared with the KiCad courtyard.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
+from typing import Optional
 
 from .fit import (
     FitReport,
@@ -66,10 +75,10 @@ YELLOW_NOTE = (
     "not a rotation error; do not renumber the footprint"
 )
 # A non-polar two-pad part whose pads fit one pairing clearly better than the other
-# takes that pairing, a full turn and method ``shape`` (spec 19.4).
+# takes that pairing, a full turn and method ``shape``.
 SHAPE_NOTE = "pads fit one way round only"
 # A side with fewer than two named pads (a test point, a one-pad shield or spring)
-# gives no alignment; the generate-time question leaves these parts to the log.
+# gives no alignment, so the part is unknown with this note and no derived rotation.
 SINGLE_PAD_NOTE = "fewer than two named pads on one side"
 DRAWING_NOTES = {
     "both": "polarity from the + marks of the symbol and the footprint",
@@ -78,28 +87,27 @@ DRAWING_NOTES = {
 }
 # The body caveat: the JLC body may overhang the KiCad courtyard by this fraction of
 # the courtyard's shorter side, never less than the floor (drawing noise on an 0201)
-# nor more than the ceiling (a DIP-40 still flags a wide body) (spec 16.6).
+# nor more than the ceiling (a DIP-40 still flags a wide body).
 BODY_EXCESS_FRACTION = 0.10
 BODY_EXCESS_MIN_MM = 0.15
 BODY_EXCESS_MAX_MM = 1.5
 
-# The statuses whose row carries a derived rotation and a placement, so the CPL may
-# use the rotation for its angle and the placement for its position (spec 8, 17.3).
-# ``verdicts.py`` imports this name from here for its own row logic.
+# The statuses whose verdict carries a derived rotation and a placement, so a CPL may
+# use the rotation for its angle and the placement for its position.
 APPLIED_STATUSES = ("green", "yellow")
 
 
 @dataclass
 class Verdict:
-    """One part's verdict; mirrors the footprint_verdict columns in the spec."""
+    """One part's verdict: the status, fit and rotation, how they were found, and the notes."""
 
     status: str = "unknown"  # green | yellow | red | unknown
     fit: str = "no_data"  # fits | fits_larger_pads | fits_tight | count | pitch | numbering | mirror | no_data
-    rotation: int | None = None
+    rotation: Optional[int] = None
     method: str = "none"  # geometry | polarity | axis | shape | none
     confidence: str = "none"  # high | medium | low | none
-    name_rotation: int | None = None
-    polarity_light: str | None = None  # green | yellow | unknown; None for non-polar
+    name_rotation: Optional[int] = None
+    polarity_light: Optional[str] = None  # green | yellow | unknown; None for non-polar
     polarity_source: str = ""  # token | label | drawing | ""
     non_polar: bool = False  # True when nothing names a polarity (axis, shape, marked)
     pad_count_kicad: int = 0
@@ -110,9 +118,9 @@ class Verdict:
     overlap_mean: float = 0.0
     angular_rms: float = 0.0
     residual_mm: float = 0.0
-    body_excess_mm: float | None = None  # the caveat: how far the JLC body overhangs
+    body_excess_mm: Optional[float] = None  # the caveat: how far the JLC body overhangs
     notes: list[str] = field(default_factory=list)
-    placement: Placement | None = field(default=None, repr=False, compare=False)
+    placement: Optional[Placement] = field(default=None, repr=False, compare=False)
 
     @property
     def note_text(self) -> str:
@@ -129,12 +137,11 @@ class Verdict:
         return self
 
     @property
-    def origin(self) -> tuple[float, float] | None:
-        """Return JLC's package origin in the footprint frame, or None (spec 17.2).
+    def origin(self) -> Optional[tuple[float, float]]:
+        """Return JLC's package origin in the footprint frame, or None.
 
         Only a verdict the resolver settled as green or yellow carries one: a red,
-        unknown or unfinished verdict has no placement the CPL may trust, and the
-        stored row keeps NULL for it.
+        unknown or unfinished verdict has no placement a CPL may trust.
         """
         if self.placement is None or self.status not in APPLIED_STATUSES:
             return None
@@ -170,10 +177,9 @@ def _finish_multi_pin(
 ) -> Verdict:
     """Set the rotation and status of a multi-pin part whose pads fit.
 
-    ``by_name`` says how the pads were paired: on their numbers (spec 7.2) or, when
-    that fails, by the pin functions the schematic gave them (spec 16.6).  Only a
-    by-name alignment can rest on "shared pad names", so the notes that say so are
-    its own.
+    ``by_name`` says how the pads were paired: on their numbers or, when that
+    fails, by the pin functions the schematic gave them.  Only a by-name alignment
+    can rest on "shared pad names", so the notes that say so are its own.
     """
     verdict.rotation = ccw_correction(placement.rotation_deg)
     verdict.method = "geometry"
@@ -208,12 +214,12 @@ def _resolve_by_function(
     jlc_pads: list[Pad],
     verdict: Verdict,
     symbol_pins: list[SymbolPin],
-) -> Verdict | None:
+) -> Optional[Verdict]:
     """Align by pin function when the pad numbers failed; None when that fails too.
 
     KiCad's ``TO-252-3_TabPin2`` numbers the tab 2 where JLC's DPAK drawing numbers
     it 3: the numbers differ but the schematic's ``D`` and the symbol's ``D`` are the
-    same physical pin, so the part fits once the pads pair by function (spec 16.6).
+    same physical pin, so the part fits once the pads pair by function.
     """
     pairing = pair_by_function(kicad_pads, jlc_pads, symbol_pins)
     if pairing is None:
@@ -255,7 +261,7 @@ def _resolve_multi_pin(
     verdict: Verdict,
     symbol_pins: list[SymbolPin],
 ) -> Verdict:
-    """Align by pad name (spec 7.2), or by pin function when the names fail."""
+    """Align by pad name, or by pin function when the names fail."""
     kicad, jlc, jlc_rest = pair_by_name(kicad_pads, jlc_pads)
     if len(kicad) < 2:
         by_function = _resolve_by_function(kicad_pads, jlc_pads, verdict, symbol_pins)
@@ -270,7 +276,7 @@ def _resolve_multi_pin(
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
     if placement.is_mirrored:
         # A numbering that runs the other way is a by-number failure like any
-        # other: the schematic's pin functions may still pair the pins (spec 16.6).
+        # other: the schematic's pin functions may still pair the pins.
         by_function = _resolve_by_function(kicad_pads, jlc_pads, verdict, symbol_pins)
         if by_function is not None:
             return by_function
@@ -338,26 +344,29 @@ def _reference_vote(
     jlc_named: list[Pad],
     package_name: str,
     symbol_pins: list[SymbolPin],
-    marks: DrawingMarks | None,
+    marks: Optional[DrawingMarks],
     reference: str,
     notes: list[str],
-) -> tuple[Pad | None, str, list[str], str | None, bool]:
+) -> tuple[Optional[Pad], str, list[str], Optional[str], bool]:
     """Vote for the EasyEDA pad carrying ``reference`` and what pin 1 means there.
 
     The EasyEDA side's reference terminal has up to four sources: the name's FD/RD
     token, the symbol's pin-1 label, and the ``+`` marks of the symbol and of the
-    footprint (spec 16.6).  Each names a pad; the majority decides and a tie is
-    inconsistent data.  Calibrated on 2026-09-17: the marks named the right pad on
-    all 22 parts with a known truth, the token on all diodes and electrolytics but
-    on a minority of the molded-chip tantalums, where the two marks outvote it.
+    footprint.  Each names a pad; the majority decides and a tie is inconsistent
+    data.  On the two gate boards the marks agree with the truth on every
+    polarized part they vote on, and they outvote the token once (C7171, a
+    molded-chip tantalum) and the label once (D12).  Over EasyEDA's library the
+    token agrees with the marks on nearly every diode and electrolytic can, but
+    less often on the molded-chip tantalums.
 
     Returns ``(jlc_ref, source, outvoted, polarity, weak_token)``: the winning JLC
     pad and where it came from (``token``, ``label`` or ``drawing``); the
     names of the votes it outvoted; the pin-1 polarity the symbol's label
     implies (``None`` once outvoted or disagreeing); and whether an
-    unchallenged token is from the one family the crawl found weak.  When nothing
-    votes, or the vote ties, ``jlc_ref`` is ``None`` and ``source`` carries the
-    verdict status to use instead -- the reason is already appended to ``notes``.
+    unchallenged token is from the one family whose token is weak
+    (:func:`jlcfootprint.polarity.token_is_weak`).  When nothing votes, or the
+    vote ties, ``jlc_ref`` is ``None`` and ``source`` carries the verdict status
+    to use instead -- the reason is already appended to ``notes``.
     """
     side = token_reference_side(package_name, reference)
     polarity = pin1_polarity(symbol_pins)
@@ -412,8 +421,8 @@ def _reference_vote(
         if not outvoted:
             drawn_by = [name.split(" ")[0] for name in winners]  # symbol, footprint
             notes.append(DRAWING_NOTES["both" if len(drawn_by) == 2 else drawn_by[0]])
-    # A token nothing checked, on the one family whose token the crawl found weak,
-    # is resolved at medium confidence (spec 16.9).
+    # A token nothing checked, on the one family whose token is weak, is resolved at
+    # medium confidence.
     weak_token = source == "token" and len(votes) == 1 and token_is_weak(package_name)
     return jlc_ref, source, outvoted, polarity, weak_token
 
@@ -425,9 +434,9 @@ def _resolve_polarized(
     kind: str,
     package_name: str,
     symbol_pins: list[SymbolPin],
-    marks: DrawingMarks | None = None,
+    marks: Optional[DrawingMarks] = None,
 ) -> Verdict:
-    """Align a polarized two-pad part by terminal meaning, never by pad number (spec 7.3).
+    """Align a polarized two-pad part by terminal meaning, never by pad number.
 
     The KiCad side's reference pad comes from its pin functions or, by convention,
     pad 1; :func:`_reference_vote` decides which EasyEDA pad is the reference and
@@ -469,8 +478,8 @@ def _resolve_polarized(
     verdict.polarity_source = source
     if kind != "other":
         # The vote settles which EasyEDA pad carries the reference terminal and with it
-        # what JLC's pad 1 means, so the pin-1 light no longer waits for a symbol label:
-        # the token and the marks tell it too, and an outvoted label is overruled.
+        # what JLC's pad 1 means, so the pin-1 light does not need a symbol label: the
+        # token and the marks tell it too, and an outvoted label is overruled.
         jlc_pad1 = next((p for p in jlc_named if p.number == "1"), None)
         if jlc_pad1 is not None:
             polarity = "K" if (jlc_ref is jlc_pad1) == (reference == "cathode") else "A"
@@ -483,7 +492,7 @@ def _resolve_polarized(
     if placement.is_underdetermined:
         return verdict.unresolved("unknown", "no_data", "pad geometry is degenerate")
     # The meaning's own pairing must fit: a polarized part is never turned to fit by
-    # shape, so a misfit stays red whatever the swapped pairing does (spec 19.4).
+    # shape, so a misfit stays red whatever the swapped pairing does.
     if not _two_pad_fit(report, verdict):
         return verdict
     verdict.rotation = ccw_correction(placement.rotation_deg)
@@ -516,8 +525,8 @@ def _resolve_polarized(
         verdict.status = "yellow"
     _, swapped = _two_pad_pairing(kicad, _swapped(jlc))
     if fits_clearly_better(swapped, report):
-        # Polarity outranks shapes: the meaning's rotation and fit stand, in yellow
-        # (spec 19.2, decision 3; 19.4).
+        # Polarity outranks shapes: the meaning's rotation and fit stand, in yellow,
+        # and the note says the shapes disagree.
         verdict.status = "yellow"
         verdict.notes.append(
             "pad shapes fit the other way round better (worst pad "
@@ -530,7 +539,7 @@ def _resolve_polarized(
 def _resolve_axis(
     kicad_named: list[Pad], jlc_named: list[Pad], verdict: Verdict
 ) -> Verdict:
-    """Align a non-polar two-pad part by axis, or by the one pairing its pads fit (spec 7.4, 19.4).
+    """Align a non-polar two-pad part by axis, or by the one pairing its pads fit.
 
     Both pairings are graded, KiCad's two pads against JLC's and against JLC's
     swapped.  When one fits clearly better, its own placement is the alignment:
@@ -564,7 +573,7 @@ def _resolve_axis(
 def _shape_alignment(
     verdict: Verdict, placement: Placement, report: FitReport
 ) -> Verdict:
-    """Settle a non-polar two-pad part on the one pairing its pads fit (spec 19.2, decision 2).
+    """Settle a non-polar two-pad part on the one pairing its pads fit.
 
     Nothing names a polarity, but the pads fit one way round clearly better than
     the other, so that way is the alignment and the rotation is a full turn.
@@ -607,7 +616,7 @@ def _body_caveat(
     courtyard: tuple[float, float, float, float],
     body: tuple[float, float, float, float],
 ) -> None:
-    """Note a JLC body that overhangs the KiCad courtyard (spec 16.6).
+    """Note a JLC body that overhangs the KiCad courtyard.
 
     The status and the rotation stand: the pads fit, the part is only bigger than
     the footprint's author allowed for, which the preview shows.
@@ -636,17 +645,17 @@ def resolve(
     package_name: str,
     jlc_pads: list[Pad],
     symbol_pins: list[SymbolPin],
-    marks: DrawingMarks | None = None,
-    kicad_courtyard: tuple[float, float, float, float] | None = None,
+    marks: Optional[DrawingMarks] = None,
+    kicad_courtyard: Optional[tuple[float, float, float, float]] = None,
 ) -> Verdict:
-    """Return the verdict for one part (spec 7).
+    """Return the verdict for one part.
 
     ``kicad_pads`` are in the footprint's own frame (bottom-side parts already
     un-mirrored by the caller); ``jlc_pads`` are millimetres in KiCad's frame.
     ``marks`` are the drawings' ``+`` marks and the JLC body box
     (:func:`jlcfootprint.drawing.drawing_marks`) and ``kicad_courtyard`` the
-    footprint's courtyard box, both optional; together they add the polarity
-    source of last resort and the body-size caveat.
+    footprint's courtyard box, both optional; together they add the drawings'
+    votes on polarity and the body-size caveat.
     """
     verdict = Verdict()
     if record_status == "none":
@@ -671,7 +680,7 @@ def resolve(
     if min(len(kicad_named), len(jlc_named)) < 2:
         return verdict.unresolved("unknown", "no_data", SINGLE_PAD_NOTE)
     # A polarized kind (a drawn + among its reasons) or an FD/RD token sends a two-pad
-    # part to alignment by meaning (spec 7.4, 19.3).
+    # part to alignment by meaning.
     marked = kind != "other" or token_reference_side(package_name, "positive") in (
         "left",
         "right",

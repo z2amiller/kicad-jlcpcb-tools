@@ -1,4 +1,4 @@
-"""Tests for the resolver beyond pad-number pairing (spec 16.6): distinct pad numbers, pairing by pin function, the drawings' + marks vote, and the body-overhang caveat."""
+"""Tests for the resolver beyond pad-number pairing: distinct pad numbers, pairing by pin function, the drawings' + marks vote, and the body-overhang caveat."""
 
 import pytest
 
@@ -39,7 +39,7 @@ def resolve_library(library, footprint, lcsc, functions=None, marks=True):
     )
 
 
-# --- item 1: distinct pad numbers and pairing by function ------------------
+# --- distinct pad numbers and pairing by function --------------------------
 
 
 def test_dpak_with_a_stub_counts_three_pads_and_fits():
@@ -100,7 +100,7 @@ def test_without_pin_functions_the_numbering_difference_stays_red():
 
 
 def test_a_function_pairing_is_never_described_as_shared_pad_names():
-    """A two-pair function pairing carries neither the by-name note nor its counts wording (review nit)."""
+    """A two-pair function pairing carries neither the by-name note nor its counts wording."""
     kicad = [
         Pad("3", -1.0, 0.0, 1.0, 1.0, 0.0, "IN"),
         Pad("4", 1.0, 0.0, 1.0, 1.0, 0.0, "OUT"),
@@ -125,7 +125,7 @@ def test_a_function_pairing_is_never_described_as_shared_pad_names():
     assert "pad counts differ (3 vs 2) but the 2 paired pads align" in verdict.notes
 
 
-# --- item 2: the drawings' + marks ---------------------------------------
+# --- the drawings' + marks -----------------------------------------------
 
 
 def test_tantalums_without_token_or_label_are_read_from_their_marks():
@@ -162,7 +162,7 @@ def test_reversed_numbering_tantalum_token_and_marks_agree():
 
 
 def test_an_unchecked_token_on_a_molded_chip_tantalum_is_only_medium():
-    """The family whose token the crawl found weak resolves at medium with nothing to check it (review nit)."""
+    """The molded-chip tantalum family, whose token is weak, resolves at medium with nothing to check it."""
     kicad = [
         Pad("1", -1.6, 0.0, 1.2, 1.4, 0.0, "+"),
         Pad("2", 1.6, 0.0, 1.2, 1.4, 0.0, "-"),
@@ -395,7 +395,7 @@ def test_pads_that_share_no_name_pair_by_function():
     assert "fewer than two matching pad names" in blind.note_text
 
 
-# --- item 3: kicad-x2ib ---------------------------------------------------
+# --- pin functions that say "not connected" -------------------------------
 
 
 def test_no_connection_functions_carry_no_terminal_and_disqualify_nothing():
@@ -416,7 +416,7 @@ def test_no_connection_functions_carry_no_terminal_and_disqualify_nothing():
     assert part_kind("MPN-2PAD", "Custom:Two", c_and_a, []) == "other"
 
 
-# --- item 4: the body caveat ----------------------------------------------
+# --- the body caveat ------------------------------------------------------
 
 
 def test_body_larger_than_the_courtyard_is_a_caveat_not_a_failure():
@@ -485,7 +485,7 @@ def test_the_caveat_needs_a_courtyard_and_a_body_and_a_fit():
 
 
 def test_a_courtyard_with_a_zero_length_side_raises_no_caveat():
-    """A degenerate courtyard measures nothing, so the body is not reported as overhanging it (review nit)."""
+    """A degenerate courtyard measures nothing, so the body is not reported as overhanging it."""
     record = pro_record("C88744")
     pads, courtyard = library_footprint("Capacitor_SMD", "CP_Elec_4x5.8")
     jlc = easyeda_pads_to_mm(record.pads)

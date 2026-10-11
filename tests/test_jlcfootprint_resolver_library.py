@@ -109,7 +109,7 @@ def test_0402_pads_under_an_0603_part_are_tight():
 
 
 def test_tantalum_without_token_or_label_is_read_from_its_drawings():
-    """CASE-B_3528 has no FD/RD token and its symbol pins are just 1 and 2: the + marks decide (spec 16.6)."""
+    """CASE-B_3528 has no FD/RD token and its symbol pins are just 1 and 2: the + marks decide."""
     verdict = verdict_for("Capacitor_Tantalum_SMD", "CP_EIA-3528-21_Kemet-B", "C16133")
     assert (verdict.status, verdict.rotation, verdict.polarity_source) == (
         "green",
@@ -211,7 +211,7 @@ def test_sot23_with_clockwise_numbering_is_a_numbering_finding():
 
 
 def test_sod882_is_a_diode_family_for_the_name_cross_check():
-    """The crawl's table lacked SOD-882; RD with pin 1 = K is 0, and the port now agrees."""
+    """SOD-882 is a cathode-first diode family: RD with pin 1 = K reads 0."""
     assert parse_package_name("SOD-882_L1.0-W0.6-RD").rotation_correction == 0
 
 

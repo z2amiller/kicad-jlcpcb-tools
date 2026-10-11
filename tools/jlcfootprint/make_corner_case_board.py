@@ -1,4 +1,4 @@
-"""Generate a corner-case validation board (run with KiCad's bundled Python).
+r"""Generate a gate board from a cases CSV (run with KiCad's bundled Python).
 
     /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \
         tools/jlcfootprint/make_corner_case_board.py [--cases CSV] [--blank BOARD] [--out BOARD]
@@ -7,8 +7,9 @@ Reads the cases CSV (tests/fixtures/jlcfootprint/boards/corner_case/cases.csv by
 footprint from KiCad's library, places the parts on a grid at the requested
 rotation and side, sets the LCSC field and any pin functions, draws the outline
 and writes the board (tests/fixtures/jlcfootprint/boards/corner_case/corner_case.kicad_pcb by default).
-This board is the resolver's gate (spec 11); the second one, for the resolver
-batch, is tests/fixtures/jlcfootprint/boards/pin_functions_and_marks/ (spec 16.6).
+The corner-case board is the resolver's gate.  The second gate board, for pairing
+by pin function, the drawings' + marks and the body caveat, is
+tests/fixtures/jlcfootprint/boards/pin_functions_and_marks/, with its own cases.csv.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import argparse
 import csv
 from pathlib import Path
 import sys
+from typing import Optional
 
 import pcbnew
 
@@ -77,7 +79,7 @@ def outline(board, count: int) -> None:
     board.Add(rect)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """Generate the board."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
