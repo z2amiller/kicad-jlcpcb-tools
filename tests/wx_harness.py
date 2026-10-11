@@ -308,6 +308,12 @@ def mainwindow_stubs(
             "format_hook_error": str,
             "run_configured_hook": lambda **_kwargs: None,
         },
+        "jlc_footprint_check": {
+            "confirm_cpl_rotations": lambda *_args, **_kwargs: True,
+            "create_footprint_check": lambda *_args, **_kwargs: None,
+            "is_footprint_check_enabled": lambda _settings: False,
+            "wait_for_pending_fetches": lambda *_args, **_kwargs: True,
+        },
         "helpers": {
             "PLUGIN_PATH": str(ROOT),
             "GetScaleFactor": lambda _window: 1,
@@ -352,6 +358,14 @@ def mainwindow_stubs(
             for suffix, values in symbols.items()
         }
     )
+    # The window's JLC footprint methods are two-line delegators onto this module,
+    # so a stub would leave the behaviour the window tests assert untested.  It is
+    # loaded under the stubs above, so it and the window see one set of doubles,
+    # and a test patches what it holds through ``mainwindow.jlc_footprint_window``.
+    if "jlc_footprint_window" not in overrides:
+        stubs[f"{package}.jlc_footprint_window"] = load(
+            package, "jlc_footprint_window", stubs
+        )
     return stubs
 
 

@@ -227,6 +227,7 @@ _BOOLEAN_SETTINGS = {
     "stock_concern_setting": ("highlighting", "stock_concern"),
     "highlight_matches_setting": ("highlighting", "matches"),
     "bom_estimator_show_setting": ("general", "bom_estimator_show"),
+    "jlcfootprint_enabled_setting": ("jlcfootprint", "enabled"),
     "part_preferences_remember_lcsc_assignments_setting": (
         "part_preferences",
         "remember_lcsc_assignments",
@@ -254,6 +255,7 @@ _EXPECTED_LABELS = {
     "simplify_stock_setting": "Simplify stock",
     "stock_concern_setting": "Highlight stock concern",
     "bom_estimator_show_setting": "Show BOM cost estimator",
+    "jlcfootprint_enabled_setting": "Use JLC footprint data for rotations",
     "part_preferences_remember_lcsc_assignments_setting": "Remember my part preferences",
     "part_preferences_fill_empty_lcsc_assignments_on_open_setting": (
         "Parts preferences fill in empty LCSC assignments"
@@ -273,6 +275,7 @@ def _settings(flag: bool) -> dict[str, dict[str, Any]]:
         "gerber": {},
         "general": {},
         "highlighting": {},
+        "jlcfootprint": {},
         "part_preferences": {},
         "library": {"selected_library": "current-parts", "data_path": ""},
         "hooks": {"pre_script": "", "post_script": "", "timeout_seconds": 30},
@@ -533,3 +536,124 @@ def test_bom_manufacturer_columns_default_off_then_save_and_reopen(
     reopened = open_window()
     assert reopened.settings["gerber"]["bom_manufacturer_columns"] is True
     assert SettingsDialog(reopened).bom_manufacturer_columns_setting.GetValue() is True
+
+
+def _origin_settings(enabled: bool, exact_origin: bool) -> dict:
+    """Return settings with the two JLC footprint switches set independently."""
+    settings_dict = _settings(False)
+    settings_dict["jlcfootprint"] = {
+        "enabled": enabled,
+        "exact_origin": exact_origin,
+    }
+    return settings_dict
+
+
+def test_the_exact_origin_checkbox_reads_its_own_setting():
+    """Its label is static and its value is the stored one."""
+    on = _dialog(_origin_settings(True, True)).jlcfootprint_exact_origin_setting
+    off = _dialog(_origin_settings(True, False)).jlcfootprint_exact_origin_setting
+
+    assert on.GetLabel() == off.GetLabel() == "Place parts at JLC's package origin"
+    assert (on.GetValue(), off.GetValue()) == (True, False)
+
+
+def test_the_exact_origin_checkbox_defaults_to_off():
+    """A settings file without the key reads unchecked: the setting ships off."""
+    settings_dict = _settings(True)
+    settings_dict["jlcfootprint"] = {"enabled": True}
+
+    assert _dialog(settings_dict).jlcfootprint_exact_origin_setting.GetValue() is False
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_the_exact_origin_checkbox_is_active_only_while_the_check_is_on(enabled):
+    """Without the check there is no verdict to take an origin from, so it greys out."""
+    dialog = _dialog(_origin_settings(enabled, True))
+
+    assert dialog.jlcfootprint_exact_origin_setting.IsEnabled() is enabled
+
+
+def test_turning_the_check_off_greys_the_exact_origin_checkbox_at_once():
+    """The enable handler runs on a real event and takes the other box with it."""
+    dialog = _dialog(_origin_settings(True, True))
+    control = dialog.jlcfootprint_enabled_setting
+    control.SetValue(False)
+
+    events = _fire(control)
+
+    assert dialog.jlcfootprint_exact_origin_setting.IsEnabled() is False
+    assert [(event.section, event.setting, event.value) for event in events] == [
+        ("jlcfootprint", "enabled", False)
+    ]
+
+
+def test_the_exact_origin_checkbox_posts_its_own_setting_event():
+    """Its name carries the section, so update_settings stores jlcfootprint.exact_origin."""
+    dialog = _dialog(_origin_settings(True, False))
+    control = dialog.jlcfootprint_exact_origin_setting
+    control.SetValue(True)
+
+    events = _fire(control)
+
+    assert [(event.section, event.setting, event.value) for event in events] == [
+        ("jlcfootprint", "exact_origin", True)
+    ]
+
+
+def test_the_exact_origin_setting_survives_the_main_window_and_a_reopen(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real event through the real window is written to settings.json and read back."""
+    monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
+    parent = object.__new__(JLCPCBTools)
+    parent.window = object()
+    parent.scale_factor = 1.0
+    parent.settings = _origin_settings(True, False)
+    parent.library = types.SimpleNamespace(datadir="/data")
+    dialog = SettingsDialog(parent)
+    control = dialog.jlcfootprint_exact_origin_setting
+    control.SetValue(True)
+
+    parent.update_settings(_fire(control)[0])
+
+    assert parent.settings["jlcfootprint"]["exact_origin"] is True
+    parent.settings = {}
+    parent.load_settings()
+    assert parent.settings["jlcfootprint"]["exact_origin"] is True
+    assert SettingsDialog(parent).jlcfootprint_exact_origin_setting.GetValue() is True
+
+
+def test_the_jlc_footprint_row_closes_the_grid_after_the_library_rows(monkeypatch):
+    """The JLC footprint row keeps its place: last, right after the catalog data path."""
+
+    class Sizer(_FakeWidget):
+        """Remember the controls placed in it, so a row can be told by its content."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.children = []
+
+        def Add(self, child, *_args, **_kwargs):
+            self.children.append(child)
+
+    rows = []
+    monkeypatch.setattr(_wx, "BoxSizer", Sizer)
+    monkeypatch.setattr(
+        SettingsDialog,
+        "_add_setting_row",
+        lambda _self, _grid, _image, control, *_flags: rows.append(control),
+    )
+    dialog = _dialog(_settings(False))
+
+    def row_of(control):
+        return next(
+            index
+            for index, row in enumerate(rows)
+            if row is control or control in getattr(row, "children", ())
+        )
+
+    jlc = row_of(dialog.jlcfootprint_enabled_setting)
+    assert row_of(dialog.jlcfootprint_exact_origin_setting) == jlc
+    assert row_of(dialog.library_data_path_setting) == jlc - 1
+    assert row_of(dialog.library_selected_setting) == jlc - 2
+    assert jlc == len(rows) - 1

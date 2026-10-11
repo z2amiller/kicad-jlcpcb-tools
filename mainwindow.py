@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Iterable, Sequence
 from contextlib import ExitStack, contextmanager, suppress
 from copy import deepcopy
+from functools import partial
 from datetime import datetime as dt
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
@@ -75,6 +76,7 @@ from .events import (
     EVT_DOWNLOAD_FINISHED_EVENT,
     EVT_DOWNLOAD_PROGRESS_EVENT,
     EVT_DOWNLOAD_STARTED_EVENT,
+    EVT_JLCFOOTPRINT_RESULT_EVENT,
     EVT_LOGBOX_APPEND_EVENT,
     EVT_MESSAGE_EVENT,
     EVT_POPULATE_FOOTPRINT_LIST_EVENT,
@@ -102,6 +104,12 @@ from .helpers import (
     HighResWxSize,
     getVersion,
     loadBitmapScaled,
+)
+from . import jlc_footprint_window
+from .jlc_footprint_check import (
+    confirm_cpl_rotations,
+    is_footprint_check_enabled,
+    wait_for_pending_fetches,
 )
 from .kicad_drc import DRCViolationCounter
 from .lcsc import Lcsc, LcscDict, extract_lcsc
@@ -189,6 +197,10 @@ class KicadProvider:
 
 class JLCPCBTools(wx.Frame):
     """JLCPCBTools main application window."""
+
+    # Built on first use by the property below, so a window that never touches the
+    # JLC footprint check never builds one.
+    _jlc_footprint_presenter = None
 
     def __init__(
         self,
@@ -286,6 +298,9 @@ class JLCPCBTools(wx.Frame):
                 "Assembly enrichment failed: %s", message
             ),
         )
+        # The JLC footprint check for the open board; None while the setting is off
+        # or project storage is unavailable.
+        self.jlc_footprint_check = None
         # Latch used by on_bom_data_changed to coalesce a burst of mutations
         # into a single recompute. SQLite commits are synchronous, so async
         # event dispatch is safe to defer here.
@@ -633,8 +648,8 @@ class JLCPCBTools(wx.Frame):
             mode=dv.DATAVIEW_CELL_INERT,
             align=wx.ALIGN_CENTER,
         )
-        correction = self.footprint_list.AppendTextColumn(
-            "Correction",
+        self.rotation_column = correction = self.footprint_list.AppendTextColumn(
+            "Rotation" if is_footprint_check_enabled(self.settings) else "Correction",
             9,
             width=120,
             mode=dv.DATAVIEW_CELL_INERT,
@@ -798,6 +813,7 @@ class JLCPCBTools(wx.Frame):
 
         self.Bind(EVT_LOGBOX_APPEND_EVENT, self.logbox_append)
         self.Bind(EVT_BOM_DATA_CHANGED_EVENT, self.on_bom_data_changed)
+        self.Bind(EVT_JLCFOOTPRINT_RESULT_EVENT, self.on_jlc_footprint_result)
 
         self.enable_part_specific_toolbar_buttons(False)
 
@@ -1156,6 +1172,8 @@ class JLCPCBTools(wx.Frame):
         tooltip = getattr(self, "_type_cell_tooltip", None)
         if tooltip is not None:
             tooltip.stop()
+        with suppress(Exception):
+            self._stop_jlc_footprint_check()
         self._closing = True
         layout_ready = getattr(self, "_layout_ready", False)
         selector = getattr(self, "_part_selector", None)
@@ -1693,6 +1711,8 @@ class JLCPCBTools(wx.Frame):
         if self.store is not None:
             self.start_assembly_enrichment()
             self.recompute_bom_estimate()
+            self._start_jlc_footprint_check()
+            self._refresh_jlc_rotation_cells()
 
     def _set_project_storage_error(self, error: Optional[BaseException]) -> None:
         """Keep Settings usable while unavailable project data disables assignments."""
@@ -1706,6 +1726,7 @@ class JLCPCBTools(wx.Frame):
                 tooltip.dismiss()
             self.partlist_data_model.RemoveAll()
             self.assembly_lookup.invalidate()
+            self._stop_jlc_footprint_check()
         self.project_storage_status.SetLabel(
             "Part assignments are unavailable; assignment actions and generation are disabled.\n"
             "Check the log, close other windows using this project, then reopen. Settings remains available."
@@ -1996,6 +2017,7 @@ class JLCPCBTools(wx.Frame):
         assigned = list(footprints)
         if notify:
             self.start_assembly_enrichment(assigned)
+            self._enqueue_jlc_footprint_check(assigned)
             self.refresh_corrections(assigned)
             wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
         return assigned
@@ -2330,6 +2352,49 @@ class JLCPCBTools(wx.Frame):
             self._refresh_assembly_tooltip()
             wx.PostEvent(self, BomDataChangedEvent(source="enrichment_update"))
 
+    @property
+    def jlc_footprint_presenter(self) -> jlc_footprint_window.JlcFootprintPresenter:
+        """Return this window's JLC footprint presenter, built once on first use.
+
+        Everything the window does with the footprint check lives there; the
+        methods below it are the delegators the hooks, the binds and the tests
+        reach.
+        """
+        presenter = self._jlc_footprint_presenter
+        if presenter is None:
+            presenter = self._jlc_footprint_presenter = (
+                jlc_footprint_window.JlcFootprintPresenter(self)
+            )
+        return presenter
+
+    def _start_jlc_footprint_check(self) -> None:
+        """Start the footprint check for the open board when the setting is on."""
+        self.jlc_footprint_presenter._start_jlc_footprint_check()
+
+    def _stop_jlc_footprint_check(self) -> None:
+        """Stop the footprint check's background thread, if one is running."""
+        self.jlc_footprint_presenter._stop_jlc_footprint_check()
+
+    def _enqueue_jlc_footprint_check(self, references: Iterable[str]) -> None:
+        """Have newly assigned parts checked."""
+        self.jlc_footprint_presenter._enqueue_jlc_footprint_check(references)
+
+    def on_jlc_footprint_result(self, e):
+        """Repaint the cells of one checked part."""
+        self.jlc_footprint_presenter.on_jlc_footprint_result(e)
+
+    def _rotation_cell_text(self, part: dict[str, Any], corrections) -> str:
+        """Return the Rotation column text: the footprint check's decision, else the rule."""
+        return self.jlc_footprint_presenter._rotation_cell_text(part, corrections)
+
+    def _refresh_jlc_rotation_cells(self) -> None:
+        """Repaint the cells the check fills on every row, from its decisions."""
+        self.jlc_footprint_presenter._refresh_jlc_rotation_cells()
+
+    def read_corrections_for_summary(self):
+        """Read the correction rules for the rotation summary's comparison."""
+        return self.jlc_footprint_presenter.read_corrections_for_summary()
+
     def display_message(self, e):
         """Display a message with the data from the event."""
         styles = {
@@ -2374,11 +2439,9 @@ class JLCPCBTools(wx.Frame):
             part = self.store.get_part(reference)
             if not part:
                 continue
+            # With the footprint check on, the cell shows what the CPL emits.
             self.partlist_data_model.set_correction(
-                reference,
-                str(self.get_correction(part, snapshot.corrections))
-                if snapshot.corrections is not None
-                else "Unresolved",
+                reference, self._rotation_cell_text(part, snapshot.corrections)
             )
 
     def update_correction_status(self, snapshot: CorrectionSnapshot) -> None:
@@ -2466,11 +2529,7 @@ class JLCPCBTools(wx.Frame):
                     part["exclude_from_bom"],
                     part["exclude_from_pos"],
                     int(is_dnp),
-                    (
-                        str(self.get_correction(part, corrections))
-                        if corrections is not None
-                        else "Unresolved"
-                    ),
+                    self._rotation_cell_text(part, corrections),
                     str(fp.GetLayer()),
                     params_for_part(details),
                     enrichment_status,
@@ -2687,6 +2746,7 @@ class JLCPCBTools(wx.Frame):
             return
         for item, _ref, _fp in selected:
             self.partlist_data_model.remove_lcsc_number(item)
+        self._enqueue_jlc_footprint_check([ref for _item, ref, _fp in selected])
         self.refresh_corrections([ref for _item, ref, _fp in selected])
         wx.PostEvent(self, BomDataChangedEvent(source="remove_lcsc_number"))
 
@@ -2818,6 +2878,12 @@ class JLCPCBTools(wx.Frame):
                     self.footprint_list.Refresh()
             elif e.setting == "stock_concern":
                 self.recompute_stock_concerns()
+        elif e.section == "jlcfootprint" and e.setting == "enabled":
+            self._start_jlc_footprint_check()
+            column = getattr(self, "rotation_column", None)
+            if column is not None:
+                column.SetTitle("Rotation" if e.value else "Correction")
+            self.populate_footprint_list()
 
         self.save_settings()
 
@@ -3031,12 +3097,44 @@ class JLCPCBTools(wx.Frame):
         wx.BeginBusyCursor()
         self._current_generation_step = "initialization"
         try:
-            corrections = self.run_generation_step(
-                "Validating corrections",
-                self.read_valid_corrections_for_generation,
+            check = (
+                getattr(self, "jlc_footprint_check", None)
+                if is_footprint_check_enabled(self.settings)
+                else None
             )
+            if check is None:
+                corrections = self.run_generation_step(
+                    "Validating corrections",
+                    self.read_valid_corrections_for_generation,
+                )
+                decisions = None
+            else:
+                corrections = self.run_generation_step(
+                    "Reading correction rules for the rotation summary",
+                    self.read_corrections_for_summary,
+                )
+                # Unresolved rules only take the summary's comparison away: the
+                # check's path applies no rule, so generation gets an empty set.
+                rules_available = corrections is not None
+                corrections = corrections if rules_available else ()
+                # Parts placed since the plugin opened are checked here.
+                self.run_generation_step(
+                    "Checking the board for unchecked parts", check.scan_board
+                )
+                if not self.run_generation_step(
+                    "Waiting for JLC footprint data",
+                    wait_for_pending_fetches,
+                    self,
+                    check,
+                ):
+                    self.report_generation_step(
+                        "JLC footprint data still pending: those parts keep their raw angle"
+                    )
+                decisions = self.run_generation_step(
+                    "Collecting JLC footprint rotations", check.decisions
+                )
             if controller := getattr(self, "_variant_controller", None):
-                controller.begin_generation(corrections)
+                controller.begin_generation(corrections, decisions=decisions)
                 placements = self.run_generation_step(
                     "Preparing placement data",
                     self.fabrication.prepare_cpl,
@@ -3047,10 +3145,21 @@ class JLCPCBTools(wx.Frame):
                 self._ordinary_generating = True
                 output = self.run_generation_step(
                     "Preparing placement data",
-                    self.fabrication.begin_ordinary_generation,
+                    partial(
+                        self.fabrication.begin_ordinary_generation, decisions=decisions
+                    ),
                     corrections,
                 )
                 placements = output.cpl_rows
+            if check is not None and not self.run_generation_step(
+                "Summarising JLC footprint rotations",
+                confirm_cpl_rotations,
+                self,
+                self.fabrication.rotation_report,
+                rules_available,
+            ):
+                self.report_generation_step("Export stopped by the JLC footprint check")
+                return
             layer_selection = self.layer_selection.GetSelection()
             number = re.search(r"\d+", self.layer_selection.GetString(layer_selection))
             layer_count = int(number.group(0)) if number else None

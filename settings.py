@@ -599,6 +599,61 @@ class SettingsDialog(wx.Dialog):
         hooks_box_sizer.Add(post_hook_sizer, 0, wx.ALL | wx.EXPAND, 5)
         hooks_box_sizer.Add(timeout_sizer, 0, wx.ALL | wx.EXPAND, 5)
 
+        ##### JLC footprint check #####
+
+        self.jlcfootprint_enabled_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Use JLC footprint data for rotations",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="jlcfootprint.enabled",
+        )
+
+        self.jlcfootprint_enabled_setting.SetToolTip(
+            wx.ToolTip(
+                "Derive each part's CPL rotation from its EasyEDA footprint geometry and check "
+                "that the picked part fits the pads; the correction rules are not consulted "
+                "while this is on"
+            )
+        )
+
+        self.jlcfootprint_enabled_setting.Bind(wx.EVT_CHECKBOX, self.update_settings)
+
+        self.jlcfootprint_exact_origin_setting = wx.CheckBox(
+            self,
+            id=wx.ID_ANY,
+            label="Place parts at JLC's package origin",
+            pos=wx.DefaultPosition,
+            size=wx.DefaultSize,
+            style=0,
+            name="jlcfootprint.exact_origin",
+        )
+
+        self.jlcfootprint_exact_origin_setting.SetToolTip(
+            wx.ToolTip(
+                "Write each checked part's CPL position at the origin of JLC's own "
+                "package drawing instead of the centre of your pads; parts the check "
+                "could not judge keep the pad centre either way"
+            )
+        )
+
+        self.jlcfootprint_exact_origin_setting.Bind(
+            wx.EVT_CHECKBOX, self.update_settings
+        )
+
+        jlcfootprint_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        jlcfootprint_sizer.Add(
+            self.jlcfootprint_enabled_setting, 0, wx.RIGHT | wx.ALIGN_CENTER_VERTICAL, 5
+        )
+        jlcfootprint_sizer.Add(
+            self.jlcfootprint_exact_origin_setting,
+            0,
+            wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
+            5,
+        )
+
         ##### Show BOM Cost Estimator panel #####
 
         self.bom_estimator_show_setting = wx.CheckBox(
@@ -699,6 +754,7 @@ class SettingsDialog(wx.Dialog):
         )
         self._add_setting_row(settings_grid, None, library_sizer, wx.EXPAND)
         self._add_setting_row(settings_grid, None, library_data_path_sizer, wx.EXPAND)
+        self._add_setting_row(settings_grid, None, jlcfootprint_sizer, wx.EXPAND)
 
         layout = wx.BoxSizer(wx.VERTICAL)
         layout.Add(settings_grid, 0, wx.ALL | wx.EXPAND, 5)
@@ -857,8 +913,28 @@ class SettingsDialog(wx.Dialog):
             bool(enabled)
         )
 
+    def update_jlcfootprint_enabled(self, enabled: bool) -> None:
+        """Reflect whether CPL rotations come from the JLC footprint data.
+
+        The origin checkbox rides on this one: without the check there is no verdict
+        to take an origin from, so it is greyed out rather than silently ignored.
+        """
+        self.jlcfootprint_enabled_setting.SetValue(bool(enabled))
+        self.jlcfootprint_exact_origin_setting.Enable(bool(enabled))
+
+    def update_jlcfootprint_exact_origin(self, enabled: bool) -> None:
+        """Reflect whether CPL positions come from JLC's package origin."""
+        self.jlcfootprint_exact_origin_setting.SetValue(bool(enabled))
+
     def load_settings(self) -> None:
         """Load settings and set checkboxes accordingly."""
+        self.update_jlcfootprint_exact_origin(
+            self.parent.settings.get("jlcfootprint", {}).get("exact_origin", False)
+        )
+        # After the value, because this one also enables or disables that checkbox.
+        self.update_jlcfootprint_enabled(
+            self.parent.settings.get("jlcfootprint", {}).get("enabled", False)
+        )
         self.update_tented_vias(
             self.parent.settings.get("gerber", {}).get("tented_vias", True)
         )

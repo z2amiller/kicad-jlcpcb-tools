@@ -3,7 +3,8 @@
 ``jlcfootprint_support`` and its fetch and controller siblings hold the pure
 package's helpers; this module holds what the tests around the plugin root share:
 the storage doubles the CPL tests run against and the duck-typed decision they pass
-through ``prepare_cpl``.
+through ``prepare_cpl``.  It also holds the fake-wx loaders for the facade and for
+the main window, and the window double the window tests build on.
 
 Everything here is a builder, not a fixture, so a test file keeps naming its own
 fixtures and pytest keeps reporting them against that file.
@@ -13,12 +14,85 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
 from .correction_test_support import make_library
-from .wx_harness import load_correction_modules, module
+from .wx_harness import (
+    load,
+    load_correction_modules,
+    load_mainwindow,
+    load_siblings,
+    module,
+    package_stubs,
+    wx_stubs,
+)
+
+
+def jlcfootprint_enabled(settings: dict) -> bool:
+    """Read the shipped setting the way the facade does (the harness stubs it off)."""
+    return bool(settings.get("jlcfootprint", {}).get("enabled", False))
+
+
+@contextmanager
+def load_facade(package: str, **wx_symbols: Any) -> Iterator[SimpleNamespace]:
+    """Load the real facade under a fake wx, with the real events module beside it.
+
+    The events module is loaded rather than stubbed so its event names cannot drift
+    out of step with a copy; ``wx_symbols`` adds to the ``PostEvent`` every caller needs.
+    """
+    stubs = wx_stubs(PostEvent=MagicMock(), **wx_symbols)
+    stubs.update(package_stubs(package))
+    stubs[f"{package}.events"] = load(package, "events", stubs)
+    with load_siblings(package, ("jlc_footprint_check",), stubs) as loaded:
+        yield SimpleNamespace(
+            module=loaded["jlc_footprint_check"],
+            wx=stubs["wx"],
+            events=stubs[f"{package}.events"],
+        )
+
+
+def facade_symbols(**overrides: Any) -> dict:
+    """Return the facade functions the window imports: inert, but answering truthfully.
+
+    Only ``is_footprint_check_enabled`` is a real function, because the window
+    branches on it; each of the rest gives the answer that lets the window carry on.
+    """
+    symbols = {
+        "confirm_cpl_rotations": MagicMock(return_value=True),
+        "create_footprint_check": MagicMock(),
+        "is_footprint_check_enabled": jlcfootprint_enabled,
+        "wait_for_pending_fetches": MagicMock(return_value=True),
+    }
+    symbols.update(overrides)
+    return symbols
+
+
+def load_window(package: str, facade: dict, **wx_symbols: Any) -> ModuleType:
+    """Load ``mainwindow`` with the JLC facade faked and the fake wx a window needs."""
+    return load_mainwindow(
+        package,
+        wx=wx_stubs(
+            Frame=type("Frame", (), {}),
+            NewIdRef=MagicMock(side_effect=object),
+            **wx_symbols,
+        ),
+        jlc_footprint_check=facade,
+    )
+
+
+def check_window(main: ModuleType, check: Any, *, enabled: bool = True) -> Any:
+    """Return a main window carrying one footprint-check double, and nothing else.
+
+    ``__init__`` is skipped on purpose: these tests exercise one method at a time,
+    so a window built by hand says exactly which attributes that method reads.
+    """
+    window = object.__new__(main.JLCPCBTools)
+    window.settings = {"jlcfootprint": {"enabled": enabled}}
+    window.jlc_footprint_check = check
+    window.logger = MagicMock()
+    return window
 
 
 def cpl_decision(

@@ -257,10 +257,18 @@ $KPY $T/check_live_adapter.py $B/pin_functions_and_marks/pin_functions_and_marks
 - **The report.** Each row also goes into `Fabrication.rotation_report` as a `report.CplRotation`: the raw and emitted angles, the correction, its source, the verdict's status, fit and notes, what the rules would have applied and where the position came from. `report.summarise` sorts the rows into four groups, worst first: does not fit, the applied rotations (a `*` where the rules would have set another angle, a `!` where JLC's body overhangs the courtyard), the parts whose JLC pin-1 marker will look wrong, and the unresolved parts, emitted raw. `raw_angle_reason` says why a part goes out at the raw angle against the check: it does not fit, EasyEDA's data is inconsistent, it is unknown, not checked, still fetching, or its part number changed. A part with an override, a part without an LCSC number and an unknown part with fewer than two named pads on a side are never named.
 - Without decisions the CPL is the correction rules' CPL, unchanged.
 
+## In the plugin
+
+Two settings switch the check on, and both are off by default: **Use JLC footprint data for rotations** (`jlcfootprint.enabled`) and **Place parts at JLC's package origin** (`jlcfootprint.exact_origin`), which is greyed out while the first is off. `jlc_footprint_check.py` builds the check for a board, and `jlc_footprint_window.py` holds what the main window does with it.
+
+- **In the background.** With the first setting on, the window starts a check once the part list is filled with the parts catalog available, and scans the board; an assignment or a removed number re-reads those parts. Turning the setting off stops it, and so do a project-storage error and closing the window. Each result repaints its parts' Rotation text: while the setting is on, the Correction column is titled Rotation and shows what the CPL will emit. So opening a board sends the LCSC numbers the cache does not hold yet to EasyEDA, as "Fetching from EasyEDA" describes.
+- **Generating.** With the check on, generation reads the correction rules for comparison only, scans the board for parts placed since it was opened, and waits, behind a progress dialog with a Cancel button, for the parts still being fetched; a cancelled wait or a tripped breaker leaves those parts at the raw angle. It then takes the check's decisions. Once the placements are prepared, before any file is written, the rotation summary goes to the log, one line per part, the parts at the raw angle against the check at warning level. When at least one part would go out at the raw angle because the check refused it or could not decide it, a Continue Anyway / Cancel Export question names up to ten of them, and Cancel Export stops generation before any fabrication file is written.
+- **Boards with KiCad design variants** do not start the check: their parts are edited in the variant matrix, and their CPL keeps the correction rules.
+- **Installed.** The plugin archive ships this package, and a plugin update keeps `jlcfootprint-cache.db`, so no board is fetched again after an update.
+
 ## What comes next
 
 The package arrives in parts. Still to come:
 
-- **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
 - **The UI**: a JLC column with a hover, a detail dialog with a pad overlay, overrides and actions.
 - **Variant boards**: the check on boards with KiCad design variants.

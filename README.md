@@ -360,6 +360,14 @@ You can download Matthews file from GitHub and manage your own corrections in th
 See [Importing and repairing corrections](CORRECTIONS.md) for supported CSV
 formats, validation rules, and recovery of invalid records from older versions.
 
+The JLC footprint check is an alternative to these rules: it derives each part's
+rotation from the EasyEDA footprint JLC places that part by. Turn it on in Settings with **Use JLC
+footprint data for rotations** (off by default). While it is on the correction rules
+are not applied, and the Correction column becomes **Rotation** and shows what the CPL
+will emit. Opening a board with the setting on sends its LCSC part numbers to EasyEDA
+(`pro.easyeda.com`) to fetch their footprints. See
+[the footprint check's README](jlcfootprint/README.md).
+
 ## Icons
 
 This plugin makes use of a lot of icons from the excellent [Material Design Icons](https://materialdesignicons.com/)
