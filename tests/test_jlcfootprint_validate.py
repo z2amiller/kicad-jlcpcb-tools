@@ -255,6 +255,37 @@ def test_pro_fixtures_assemble_a_part_like_the_cache_would(tmp_path):
     assert by_reference["U1"]["verdict"] is None
 
 
+def test_a_recorded_footprint_keeps_its_own_status(tmp_path):
+    """A footprint document that cannot be read is an error to retry, one that answered nothing is none."""
+    import json
+    import shutil
+
+    pro = tmp_path / "pro"
+    shutil.copytree(PRO_FIXTURES, pro)
+    index = validator.load_pro_index(pro)
+    footprint = pro / f"footprint_{index['C7950'].puuid}.json"
+    footprint.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "code": 0,
+                "result": {"dataStr": '["DOCTYPE","FOOTPRINT","1.8"]', "title": "x"},
+            }
+        )
+    )
+    assert validator.load_pro_record(pro, index, "C7950").status == "error"
+    rows = validator.evaluate(
+        ROOT / "tests/fixtures/jlcfootprint/boards/corner_case/corner_case.kicad_pcb",
+        FIXTURES,
+        pro_fixtures=pro,
+    )
+    soic = [row["verdict"] for row in rows if row["lcsc"] == "C7950"]
+    assert soic and all(verdict.status == "unknown" for verdict in soic)
+    assert all("will retry" in verdict.note_text for verdict in soic)
+    footprint.write_text(json.dumps({"success": False, "code": 404, "message": "x"}))
+    assert validator.load_pro_record(pro, index, "C7950").status == "none"
+
+
 def test_pro_fixtures_reject_a_broken_batch_file(tmp_path):
     """A batch file that is not a recorded answer stops the run with its name."""
     broken = tmp_path / "pro"

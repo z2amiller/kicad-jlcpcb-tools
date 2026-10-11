@@ -111,9 +111,11 @@ def load_pro_record(
 ) -> Optional[ComponentRecord]:
     """Assemble one part from the Pro recordings with ``assemble_record``, or None when unrecorded.
 
-    A code the batch was asked about but did not know is ``none``; a footprint that
-    answered nothing makes the part ``none`` too; a missing symbol file leaves the
-    part unrecorded, a symbol that answered nothing leaves it without pins.
+    A code the batch was asked about but did not know is ``none``.  Otherwise the
+    footprint document's own status carries through, ``none`` when it answered
+    nothing and ``error`` when it cannot be read, as it does for a fetched part.  A
+    missing footprint or symbol file leaves the part unrecorded; a symbol that
+    answered nothing leaves it without pins.
     """
     if lcsc not in index:
         return None
@@ -126,8 +128,6 @@ def load_pro_record(
     footprint = parse_puuid_response(
         json.loads(footprint_path.read_text(encoding="utf-8")), hit.puuid
     )
-    if footprint.status != "ok":
-        return ComponentRecord(lcsc=lcsc, status="none")
     symbol = None
     if hit.symbol_uuid:
         symbol_path = pro_dir / f"symbol_{hit.symbol_uuid}.json"
