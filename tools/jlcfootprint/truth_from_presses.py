@@ -1,7 +1,7 @@
 """Turn a placement-preview log of space-bar presses into the gate's truth.csv.
 
 Usage:
-    python3 tools/jlcfootprint/truth_from_presses.py PRESSES.csv CPL.csv [--out tests/fixtures/jlcfootprint/truth.csv]
+    python3 tools/jlcfootprint/truth_from_presses.py PRESSES.csv CPL.csv --out TRUTH.csv
 
 JLC's placement preview rotates a part 90 degrees counter-clockwise per press of the
 space bar and does not display the resulting angle, so the natural thing to write
@@ -9,8 +9,9 @@ down is the number of degrees pressed per part.  The angle JLC settled on is the
 uploaded CPL rotation plus the presses, modulo 360.  PRESSES.csv rows are
 ``reference,degrees_pressed[,note]``; lines starting with ``#`` are comments; a row
 with a blank second cell means "must not derive" (wrong picks, checkerboards).
-The output is ``reference,observed_rotation,note`` in the CPL's order of the
-references present in PRESSES.csv, which is what ``validate_board.py --truth`` reads.
+The output is ``reference,observed_rotation,note``, one row per PRESSES.csv row in
+the same order, which is what ``validate_board.py --truth`` reads.  ``--out`` has no
+default, so a run never overwrites a committed truth file by accident.
 """
 
 from __future__ import annotations
@@ -20,9 +21,6 @@ import csv
 from pathlib import Path
 import sys
 from typing import Optional
-
-ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUT = ROOT / "tests" / "fixtures" / "jlcfootprint" / "truth.csv"
 
 
 def read_cpl(path: Path) -> dict[str, float]:
@@ -62,7 +60,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument("presses", type=Path)
     parser.add_argument("cpl", type=Path)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     uploaded = read_cpl(args.cpl)
     rows = read_presses(args.presses)

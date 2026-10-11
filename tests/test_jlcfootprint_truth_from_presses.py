@@ -29,3 +29,19 @@ def test_presses_add_to_the_uploaded_angle(tmp_path):
     presses.write_text("R9,0\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="not in the CPL: R9"):
         converter.main([str(presses), str(cpl), "--out", str(out)])
+
+
+def test_the_output_file_must_be_named(tmp_path, capsys):
+    """With no --out the run stops before writing, so no committed truth file is overwritten."""
+    presses = tmp_path / "presses.csv"
+    presses.write_text("U1,0\n", encoding="utf-8")
+    cpl = tmp_path / "cpl.csv"
+    cpl.write_text("Designator,Rotation\nU1,0\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as stopped:
+        converter.main([str(presses), str(cpl)])
+    assert stopped.value.code == 2
+    assert "--out" in capsys.readouterr().err
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "cpl.csv",
+        "presses.csv",
+    ]

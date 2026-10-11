@@ -2,6 +2,8 @@
 
 import importlib.util
 from pathlib import Path
+import sys
+import types
 
 import pytest
 
@@ -141,3 +143,18 @@ def test_corner_case_board_courtyards_match_the_library():
     by_reference = {fp.reference: fp for fp in parse_kicad_pcb(str(board))}
     assert by_reference["C3"].courtyard == (-4.7, -3.55, 4.7, 3.55)
     assert by_reference["Q5"].courtyard is not None
+
+
+def test_the_board_generator_needs_an_output_file(monkeypatch, capsys):
+    """make_corner_case_board stops without --out, before it loads a board, so no gate board is overwritten."""
+    monkeypatch.setitem(sys.modules, "pcbnew", types.ModuleType("pcbnew"))
+    spec = importlib.util.spec_from_file_location(
+        "make_corner_case_board",
+        ROOT / "tools" / "jlcfootprint" / "make_corner_case_board.py",
+    )
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    with pytest.raises(SystemExit) as stopped:
+        generator.main([])
+    assert stopped.value.code == 2
+    assert "--out" in capsys.readouterr().err

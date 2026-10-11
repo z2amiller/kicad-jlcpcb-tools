@@ -1,12 +1,13 @@
 r"""Generate a gate board from a cases CSV (run with KiCad's bundled Python).
 
     /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \
-        tools/jlcfootprint/make_corner_case_board.py [--cases CSV] [--blank BOARD] [--out BOARD]
+        tools/jlcfootprint/make_corner_case_board.py [--cases CSV] [--blank BOARD] --out BOARD
 
 Reads the cases CSV (tests/fixtures/jlcfootprint/boards/corner_case/cases.csv by default), loads each
 footprint from KiCad's library, places the parts on a grid at the requested
 rotation and side, sets the LCSC field and any pin functions, draws the outline
-and writes the board (tests/fixtures/jlcfootprint/boards/corner_case/corner_case.kicad_pcb by default).
+and writes the board to ``--out``, which has no default, so a run never overwrites the
+committed tests/fixtures/jlcfootprint/boards/corner_case/corner_case.kicad_pcb by accident.
 The corner-case board is the resolver's gate.  The second gate board, for pairing
 by pin function, the drawings' + marks and the body caveat, is
 tests/fixtures/jlcfootprint/boards/pin_functions_and_marks/, with its own cases.csv.
@@ -25,7 +26,6 @@ import pcbnew
 BOARDS = Path(__file__).resolve().parents[2] / "tests/fixtures/jlcfootprint/boards"
 CASES = BOARDS / "corner_case" / "cases.csv"
 BLANK = BOARDS / "corner_case" / "blank.kicad_pcb"
-OUT = BOARDS / "corner_case" / "corner_case.kicad_pcb"
 LIBRARY_ROOT = Path("/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints")
 COLUMNS = 6
 PITCH_MM = 12.0
@@ -86,7 +86,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument("--cases", type=Path, default=CASES)
     parser.add_argument("--blank", type=Path, default=BLANK)
-    parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     board = pcbnew.LoadBoard(str(args.blank))
     if board is None:
