@@ -35,7 +35,7 @@ Q7     C347207    red      numbering               180                Package_TO
 R1     C2906861   green    fits                 0        0.00   0.00  Resistor_SMD:R_0402_1005Metric / R0402 /
 R2     C25804     green    fits                 0        0.00   0.00  Resistor_SMD:R_0603_1608Metric / R0603 /
 R3     C25804     green    fits                 0        0.00   0.00  Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder / R0603 /
-R4     C25804     yellow   fits_tight           0        0.00   0.00  Resistor_SMD:R_0402_1005Metric / R0603 / JLC pads 2, 1 sit at the edge of your pads; check the placement preview
+R4     C25804     yellow   fits_tight           0        0.00   0.00  Resistor_SMD:R_0402_1005Metric / R0603 / JLC pads 1, 2 sit at the edge of your pads; check the placement preview
 U1     C7950      green    fits               270  270   0.00   0.00  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL /
 U2     C7950      green    fits               270  270   0.00   0.00  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL /
 U3     C7950      green    fits               270  270   0.00   0.00  Package_SO:SOIC-8_3.9x4.9mm_P1.27mm / SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL /

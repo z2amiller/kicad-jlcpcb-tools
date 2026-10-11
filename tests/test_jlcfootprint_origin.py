@@ -227,6 +227,43 @@ def test_a_half_filled_truth_origin_is_rejected(tmp_path):
         validator.load_truth_origins(path)
 
 
+def test_a_half_present_origin_header_is_rejected(tmp_path):
+    """A misspelt origin column would otherwise turn every origin check off."""
+    header = "reference,observed_rotation,origin_dx_mm,origin_dy\n"
+    path = truth_file(tmp_path, "Q1,180,0.099,0\n", header=header)
+
+    with pytest.raises(SystemExit, match="only origin_dx_mm is there"):
+        validator.load_truth_origins(path)
+
+
+@pytest.mark.parametrize(
+    ("jlc", "rotation"),
+    [
+        ([Pad("1", 2, 0, 0.8, 0.9), Pad("2", 0, 0, 0.8, 0.9)], 0),
+        ([Pad("1", 0, 2, 0.8, 0.9, 90), Pad("2", 0, 0, 0.8, 0.9, 90)], 90),
+    ],
+)
+def test_an_axis_aligned_part_reports_the_origin_of_the_rotation_it_emits(
+    jlc, rotation
+):
+    """JLC's pad at its origin must land on a KiCad pad at the emitted rotation, not at 180 more.
+
+    The pairing by number solves at 180 or 270 here; the axis rotation is folded under
+    180, and the origin must come from the pairing that gives the folded turn.
+    """
+    kicad = [Pad("1", -1, 0, 0.8, 0.9), Pad("2", 1, 0, 0.8, 0.9)]
+    verdict = resolve(kicad, "Resistor_SMD:R_0603_1608Metric", "ok", "R0603", jlc, [])
+    assert (verdict.status, verdict.method, verdict.rotation) == (
+        "green",
+        "axis",
+        rotation,
+    )
+    # JLC's pad 2 is drawn at JLC's origin, so wherever the turn takes the rest of
+    # the drawing, the origin itself is where that pad lands: on KiCad's pad 1, the
+    # other KiCad pad being where pad 1's drawing at (2, 0) or (0, 2) turns to.
+    assert verdict.origin == pytest.approx((-1.0, 0.0), abs=1e-9)
+
+
 @pytest.mark.parametrize(
     ("dx", "reasons"),
     [(0.099, 0), (0.103, 0), (0.12, 1)],

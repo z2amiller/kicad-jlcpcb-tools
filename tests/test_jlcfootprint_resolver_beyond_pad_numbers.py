@@ -422,6 +422,17 @@ def test_no_connection_functions_carry_no_terminal_and_disqualify_nothing():
     assert part_kind("MPN-2PAD", "Custom:Two", c_and_a, []) is OTHER
 
 
+def test_the_same_pads_numbered_with_repeats_are_a_numbering_difference():
+    """Four pads at the same places, numbered 1, 2, 3, 4 and 1, 1, 2, 2: only the numbering differs."""
+
+    def row(numbers: str) -> list[Pad]:
+        return [Pad(n, x, 0, 0.6, 1.0) for n, x in zip(numbers, (0, 1.27, 2.54, 3.81))]
+
+    verdict = resolve(row("1234"), "Custom:Row4", "ok", "X", row("1122"), [])
+    assert (verdict.status, verdict.fit, verdict.rotation) == ("red", "numbering", None)
+    assert "the package itself aligns at 0°" in verdict.note_text
+
+
 # --- the body caveat ------------------------------------------------------
 
 
