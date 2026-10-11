@@ -104,6 +104,25 @@ def test_pin_functions_and_marks_board_matches_jlc_from_the_pro_fixtures():
     assert by_reference["C11"].rotation == 0
 
 
+@pytest.mark.parametrize(
+    ("board", "pro"),
+    [
+        (BOARD, False),
+        (BOARD, True),
+        (BOARD_FUNCTIONS_AND_MARKS, True),
+    ],
+    ids=["corner_case_classic", "corner_case_pro", "pin_functions_and_marks_pro"],
+)
+def test_each_board_reproduces_its_committed_report(board, pro):
+    """The validator's table, byte for byte, is the pre_upload_report.txt committed beside the board."""
+    validator = load_validator()
+    rows = validator.evaluate(
+        board, FIXTURES, pro_fixtures=PRO_FIXTURES if pro else None
+    )
+    committed = (board.parent / "pre_upload_report.txt").read_text(encoding="utf-8")
+    assert validator.format_rows(rows) + "\n" == committed
+
+
 def test_corner_case_board_courtyards_match_the_library():
     """C3 (CP_Elec_6.3x7.7) reads its 9.4 x 7.1 mm courtyard from the board file."""
     from pathlib import Path

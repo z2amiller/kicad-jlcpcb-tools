@@ -418,7 +418,8 @@ def format_rows(rows: list[dict]) -> str:
             f"{row['reference']:<6} {row['lcsc']:<10} {verdict.status:<8} {verdict.fit:<17} "
             f"{rot:>4} {name:>4} {dx:>6} {dy:>6}  {row['footprint']} / {row['package']} / {verdict.note_text}"
         )
-    return "\n".join(lines)
+    # A part with no notes would end its line in "/ "; no line keeps trailing space.
+    return "\n".join(line.rstrip() for line in lines)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
