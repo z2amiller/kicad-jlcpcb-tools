@@ -265,3 +265,59 @@ def test_a_file_from_another_layout_is_dropped_and_refilled(tmp_path, version):
         ).fetchone() == (SCHEMA_VERSION,)
     # Reopened at its own layout, the file keeps what it holds.
     assert Cache(path).counts()["parts"] == 1
+
+
+class _OtherProcessDropsFirst:
+    """A connection that lets another process drop the old tables right after the layout check."""
+
+    def __init__(self, con, path):
+        self.con, self.path = con, path
+
+    def __enter__(self):
+        return self.con.__enter__()
+
+    def __exit__(self, *exc):
+        return self.con.__exit__(*exc)
+
+    def __getattr__(self, name):
+        return getattr(self.con, name)
+
+    def execute(self, sql, *args):
+        cursor = self.con.execute(sql, *args)
+        if "schema_version" in sql and sql.lstrip().upper().startswith("SELECT"):
+            row = cursor.fetchone()
+            cursor.close()
+            with closing(sqlite3.connect(self.path)) as other:
+                other.executescript("DROP TABLE lcsc_map; DROP TABLE package;")
+            return _Answered(row)
+        return cursor
+
+
+class _Answered:
+    """A cursor that has already been read: the layout check's one row."""
+
+    def __init__(self, row):
+        self.row = row
+
+    def fetchone(self):
+        """Return the row read before the other process dropped the tables."""
+        return self.row
+
+
+def test_a_rebuild_racing_another_process_does_not_fail(tmp_path, monkeypatch):
+    """Two processes open a file of another layout; the one that drops the tables second still opens it."""
+    path = str(tmp_path / "jlcfootprint-cache.db")
+    with closing(sqlite3.connect(path)) as con, con:
+        con.executescript(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+            "INSERT INTO meta VALUES ('schema_version', '1');"
+        )
+    connect = Cache.connect
+    monkeypatch.setattr(
+        Cache, "connect", lambda self: _OtherProcessDropsFirst(connect(self), path)
+    )
+    cache = Cache(path)
+    monkeypatch.undo()
+    assert cache.counts() == {"parts": 0, "packages": 0}
+    cache.store(recorded("C2132"), now=1)
+    assert cache.part("C2132").record.status == "ok"

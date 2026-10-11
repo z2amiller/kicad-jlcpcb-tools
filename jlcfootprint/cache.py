@@ -137,9 +137,11 @@ class Cache:
                 # A file written under another layout, older or newer, is rebuilt
                 # rather than migrated: every row in it was fetched and can be
                 # fetched again, so a later change to these tables only has to
-                # raise SCHEMA_VERSION.
+                # raise SCHEMA_VERSION.  A second KiCad process opening the same
+                # file may have dropped the tables already, hence IF EXISTS.
                 con.executescript(
-                    "DROP TABLE lcsc_map; DROP TABLE package; DELETE FROM meta;"
+                    "DROP TABLE IF EXISTS lcsc_map; DROP TABLE IF EXISTS package;"
+                    " DELETE FROM meta;"
                 )
                 con.executescript(SCHEMA)
             con.execute(
