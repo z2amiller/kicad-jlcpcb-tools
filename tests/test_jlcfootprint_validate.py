@@ -2,10 +2,21 @@
 
 import importlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from tests.fabrication_test_support import (
+    Point,
+    library as fabrication_library,
+    make_fabrication,
+    make_footprint,
+    modules as fabrication_modules,
+)
 from tools.jlcfootprint import validate_board as validator
+
+modules = fabrication_modules
+library = fabrication_library
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "jlcfootprint" / "easyeda"
@@ -66,12 +77,19 @@ def test_sot23_at_every_placement_emits_the_same_correction(tmp_path):
     ]
 
 
-def test_expected_cpl_rotation_matches_upstream():
-    """Fabrication mirrors a bottom part's angle as 180 minus the angle, then adds the correction."""
-    assert validator.expected_cpl_rotation(90, False, 180) == 270
-    assert validator.expected_cpl_rotation(90, True, 180) == 270
-    assert validator.expected_cpl_rotation(0, True, 180) == 0
-    assert validator.expected_cpl_rotation(270, False, 90) == 0
+@pytest.mark.parametrize("correction", [0, 90, 180, 270])
+@pytest.mark.parametrize("bottom", [False, True], ids=["top", "bottom"])
+@pytest.mark.parametrize("placed", [0, 45, 90, 180, 270])
+def test_expected_cpl_rotation_matches_upstream(
+    modules, library, tmp_path, placed, bottom, correction
+):
+    """The gate's CPL angle is the one Fabrication writes: a bottom part mirrored as 180 minus the angle, the correction added after."""
+    fabrication = make_fabrication(modules, library, tmp_path)
+    footprint = make_footprint("U1", 31 if bottom else 0, placed, Point(0, 0))
+    match = SimpleNamespace(correction=SimpleNamespace(rotation=correction))
+    assert validator.expected_cpl_rotation(
+        placed, bottom, correction
+    ) == fabrication._rotation_for_match(footprint, match)
 
 
 def test_missing_fixture_and_blank_truth(tmp_path):
