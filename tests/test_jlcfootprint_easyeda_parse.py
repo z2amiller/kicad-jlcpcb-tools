@@ -188,6 +188,26 @@ def test_error_codes_are_errors_not_none():
     )
 
 
+# Refusals whose code is a list or a dict, as a fuzz of the parsers produced them.
+# None of them is a not-found code, not even a list holding 404.
+UNHASHABLE_CODE_REFUSALS = [
+    {
+        "code": {"result": None, "x": "x", "lists": -1, "uuid": -1, "shape": -1},
+        "product_code": [[[], '["PIN","p1"]'], 2.5],
+        "success": False,
+    },
+    {"success": False, "code": [{"dataStr": False, "lists": {"success": False}}]},
+    {"success": False, "code": [404]},
+]
+
+
+@pytest.mark.parametrize("body", UNHASHABLE_CODE_REFUSALS)
+def test_a_refusal_whose_code_is_a_list_or_a_dict_is_an_error(body):
+    """The parser never raises: an unhashable code is an error with the code kept."""
+    record = parse_component_response(body, "C1")
+    assert (record.status, record.error) == ("error", f"code {body['code']}")
+
+
 def test_displayed_pin_number_wins_over_the_spice_field():
     """C2132's symbol carries SPICE numbers 2/1/2 but displays 3/1/2, which match its pads."""
     record = load("C2132")

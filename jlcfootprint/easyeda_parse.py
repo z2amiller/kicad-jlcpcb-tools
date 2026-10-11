@@ -13,6 +13,7 @@ JSON arrays).
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 import json
 from typing import Any, Optional
@@ -199,9 +200,7 @@ def _classify_body(
     for the batch lookup), so that check stays with each caller.
 
     ``not_found_split`` is False for the batch lookup, which has no ``none``
-    status to reach: ``DevicesResult`` carries only an ``error``.  The batch path
-    therefore never tests the code, which also keeps a ``code`` that is a list or
-    a dict, and so cannot be looked up in a frozenset, from raising ``TypeError``.
+    status to reach: ``DevicesResult`` carries only an ``error``.
     """
     if not isinstance(body, dict):
         return "error", "response is not a JSON object", None
@@ -210,8 +209,18 @@ def _classify_body(
         detail = f"code {code}: {body.get('message', '')}".strip(": ")
         if not not_found_split:
             return "error", detail, None
-        return ("none" if code in _NOT_FOUND_CODES else "error"), detail, None
+        return ("none" if _is_not_found(code) else "error"), detail, None
     return "ok", None, body.get("result")
+
+
+def _is_not_found(code: Any) -> bool:
+    """Return True when a ``success: false`` code means "no such component".
+
+    A JSON code can be a list or a dict.  Neither is a not-found code, even one
+    holding 404, and neither can be looked up in a frozenset, so only a hashable
+    code is looked up.
+    """
+    return isinstance(code, Hashable) and code in _NOT_FOUND_CODES
 
 
 def _classic_origin(head: dict, record: Any) -> tuple[float, float]:

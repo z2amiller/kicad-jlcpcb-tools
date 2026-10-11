@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from jlcfootprint.easyeda_parse import (
     SymbolPin,
     parse_component_response,
@@ -20,6 +22,7 @@ from .jlcfootprint_support import (
     recorded_devices,
     recorded_document,
 )
+from .test_jlcfootprint_easyeda_parse import UNHASHABLE_CODE_REFUSALS
 
 SYMBOLS = {
     # C2132, C81598 and C88744: recorded from the Pro host by symbol uuid.
@@ -111,6 +114,13 @@ def test_symbol_response_status_rules():
         == "error"
     )
     assert pro_shape_lines("\n\n") == []
+
+
+@pytest.mark.parametrize("body", UNHASHABLE_CODE_REFUSALS)
+def test_a_symbol_refusal_whose_code_is_a_list_or_a_dict_is_an_error(body):
+    """The parser never raises: an unhashable code is an error with the code kept."""
+    record = parse_symbol_response(body, "u")
+    assert (record.status, record.error) == ("error", f"code {body['code']}")
 
 
 def test_devices_response_classifies_hits_and_misses():

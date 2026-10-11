@@ -3,12 +3,16 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from jlcfootprint.easyeda_parse import (
     parse_component_response,
     parse_pro_pads,
     parse_puuid_response,
     pro_shape_lines,
 )
+
+from .test_jlcfootprint_easyeda_parse import UNHASHABLE_CODE_REFUSALS
 
 FIXTURES = Path(__file__).parent / "fixtures" / "jlcfootprint"
 UUID = "b3b82869fa924bae820e3a6cfb44d689"  # C2132's classic footprint uuid
@@ -132,6 +136,13 @@ def test_puuid_response_statuses():
     assert empty.status == "error"
     assert "no readable pads" in empty.error
     assert empty.package_name == "T"
+
+
+@pytest.mark.parametrize("body", UNHASHABLE_CODE_REFUSALS)
+def test_a_footprint_refusal_whose_code_is_a_list_or_a_dict_is_an_error(body):
+    """The parser never raises: an unhashable code is an error with the code kept."""
+    record = parse_puuid_response(body, "u")
+    assert (record.status, record.error) == ("error", f"code {body['code']}")
 
 
 def test_pro_pad_numbers_lose_their_leading_zeros_like_classic_ones():
