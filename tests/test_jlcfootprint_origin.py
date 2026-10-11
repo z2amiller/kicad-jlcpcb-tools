@@ -227,6 +227,15 @@ def test_a_half_filled_truth_origin_is_rejected(tmp_path):
         validator.load_truth_origins(path)
 
 
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_a_non_finite_truth_origin_is_rejected(tmp_path, value):
+    """A NaN would compare as within tolerance and switch that origin check off."""
+    path = truth_file(tmp_path, f"Q1,180,{value},0\n")
+
+    with pytest.raises(SystemExit, match="non-finite origin"):
+        validator.load_truth_origins(path)
+
+
 def test_a_half_present_origin_header_is_rejected(tmp_path):
     """A misspelt origin column would otherwise turn every origin check off."""
     header = "reference,observed_rotation,origin_dx_mm,origin_dy\n"
