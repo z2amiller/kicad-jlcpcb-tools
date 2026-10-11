@@ -252,13 +252,29 @@ def test_unit_conversion_and_old_angle_format():
 
 
 def test_lcsc_value_reads_fields_and_legacy_properties():
-    """Any lcsc/jlc field holding C<digits> counts, on new and old pcbnew alike."""
+    """A part-number field holding C<digits> counts, on new and old pcbnew alike."""
     assert (
         lcsc_value(FakeFootprint("R1", [], fields={"JLCPCB Part": " C123 "})) == "C123"
     )
     assert lcsc_value(FakeFootprint("R1", [], fields={"LCSC": "not a code"})) == ""
     legacy = SimpleNamespace(GetProperties=lambda: {"lcsc": "C9"})
     assert lcsc_value(legacy) == "C9"
+
+
+@pytest.mark.parametrize(
+    ("fields", "lcsc"),
+    [
+        ({"JLCPCB Rotation": "C123"}, ""),
+        ({"Supplier LCSC": "C123"}, ""),
+        ({"LCSC": "C123", "JLCPCB Part": "C456"}, ""),
+        ({"LCSC": "C123", "JLCPCB Part": " c123 "}, "C123"),
+        ({"LCSC Part #": " c123 "}, "C123"),
+    ],
+    ids=["other-jlc-field", "other-lcsc-field", "two-numbers", "same-number", "case"],
+)
+def test_lcsc_value_reads_the_field_as_the_board_file_does(fields, lcsc):
+    """A live footprint's fields give the number its board file gives (boardfile.lcsc_assignment)."""
+    assert lcsc_value(FakeFootprint("R1", [], fields=fields)) == lcsc
 
 
 def test_board_parts_reads_the_footprints_it_is_given_in_order():

@@ -1,5 +1,7 @@
 """Tests for jlcfootprint.boardfile: footprints, pads, pin functions and LCSC fields."""
 
+import pytest
+
 from jlcfootprint.boardfile import footprint_pads, parse_kicad_pcb_text
 from jlcfootprint.geometry import Pad
 
@@ -33,7 +35,7 @@ BOARD = """
 
 
 def test_footprints_positions_layers_and_lcsc_fields():
-    """Reference, placement, side and the LCSC field (any lcsc/jlc-named property) are read."""
+    """Reference, placement, side and the LCSC field (any part-number field name) are read."""
     d1, q1, r9 = parse_kicad_pcb_text(BOARD)
     assert (d1.reference, d1.footprint_name, d1.lcsc) == (
         "D1",
@@ -64,6 +66,32 @@ KICAD7_TEXT = """(kicad_pcb (version 20221018) (generator pcbnew)
     (pad "1" smd roundrect (at -0.8 0) (size 0.8 0.95) (layers "F.Cu" "F.Paste" "F.Mask"))
   )
 )"""
+
+
+def _one_footprint(*properties):
+    fields = "".join(f'(property "{name}" "{text}")' for name, text in properties)
+    (footprint,) = parse_kicad_pcb_text(
+        '(kicad_pcb (footprint "L:F" (layer "F.Cu") (at 0 0)'
+        f' (property "Reference" "R1") {fields}'
+        ' (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu"))))'
+    )
+    return footprint.lcsc
+
+
+@pytest.mark.parametrize(
+    ("properties", "lcsc"),
+    [
+        ((("JLCPCB Rotation", "C123"),), None),
+        ((("Supplier LCSC", "C123"),), None),
+        ((("LCSC", "C123"), ("JLCPCB Part", "C456")), None),
+        ((("LCSC", "C123"), ("JLCPCB Part", " c123 ")), "C123"),
+        ((("LCSC Part #", " c123 "),), "C123"),
+    ],
+    ids=["other-jlc-field", "other-lcsc-field", "two-numbers", "same-number", "case"],
+)
+def test_the_lcsc_field_is_read_as_the_plugin_reads_it(properties, lcsc):
+    """Only part-number field names count, two different numbers are a conflict, and the number is upper-cased."""
+    assert _one_footprint(*properties) == lcsc
 
 
 def test_kicad_7_reference_and_value_come_from_fp_text():

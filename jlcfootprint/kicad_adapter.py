@@ -16,9 +16,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 import hashlib
 import json
-import re
 from typing import Any, Optional
 
+from .boardfile import lcsc_assignment
 from .geometry import Pad, mirror_box, mirror_y, pad_hash, rotate
 from .polarity import normalise_function
 
@@ -38,9 +38,6 @@ NPTH_ATTRIBUTE = 3
 FRONT_COPPER = 0
 # Courtyard layer names as pcbnew reports them (KiCad 7 to 10) and as files spell them.
 COURTYARD_LAYER_NAMES = ("F.Courtyard", "B.Courtyard", "F.CrtYd", "B.CrtYd")
-
-_LCSC_FIELD = re.compile(r"lcsc|jlc", re.IGNORECASE)
-_LCSC_VALUE = re.compile(r"^C\d+$")
 
 
 @dataclass
@@ -80,21 +77,17 @@ def verdict_key(pads: list[Pad]) -> str:
 
 
 def lcsc_value(footprint: Any) -> str:
-    """Return the first field whose name starts with lcsc or jlc, in any case, holding C<digits>.
+    """Return the LCSC part number the footprint's fields assign, or "" for none.
 
-    A plain reading for tools and tests.  The plugin's own rule is
-    ``footprint_helpers.get_lcsc_value``, which reads only the assignment field
-    names it recognises, normalises the number and refuses aliases that
-    disagree; a caller that wants it passes it to ``board_parts`` as ``lcsc_of``.
+    ``boardfile.lcsc_assignment`` reads the fields, so a live board and its file
+    give the same number, and the same one ``footprint_helpers.get_lcsc_value``
+    reads.  Older pcbnew has properties instead of fields.
     """
     try:
         fields = [(f.GetName(), f.GetText()) for f in footprint.GetFields()]
     except AttributeError:
         fields = list(footprint.GetProperties().items())
-    for name, text in fields:
-        if _LCSC_FIELD.match(str(name)) and _LCSC_VALUE.match(str(text).strip()):
-            return str(text).strip()
-    return ""
+    return lcsc_assignment(fields)
 
 
 def _degrees(angle: Any) -> float:
@@ -262,8 +255,8 @@ def board_parts(
     ``board.GetFootprints()``.
     ``pcbnew`` is imported here when not supplied; ``to_mm`` defaults to its
     ``ToMM``, or to the identity when pcbnew is absent (test doubles in millimetres).
-    ``lcsc_of`` reads a footprint's part number (``lcsc_value`` by default); a caller
-    that wants the plugin's own reading passes ``footprint_helpers.get_lcsc_value``.
+    ``lcsc_of`` reads a footprint's part number; the default, ``lcsc_value``, reads
+    its fields as ``footprint_helpers.get_lcsc_value`` does.
     """
     if pcbnew is None:
         try:

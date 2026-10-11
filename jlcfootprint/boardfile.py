@@ -10,18 +10,56 @@ board-level construct.  Python 3.9 compatible, stdlib only.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 import re
 from typing import Optional
 
 from .geometry import Pad
 
-# A property is the LCSC number when its name contains "lcsc" or "jlc" and its value
-# is C<digits>.  The plugin's own rule for field names (part_assignments) is
-# stricter; this one is enough for the boards the tools and tests read, and the
-# value test keeps out a field such as "JLCPCB Rotation".
-_LCSC_FIELD_NAME = re.compile(r"lcsc|jlc", re.IGNORECASE)
-_LCSC_VALUE = re.compile(r"^C\d+$")
+# The plugin's part-number field names (part_assignments.is_assignment_alias): LCSC,
+# JLC or JLCPCB, then optionally Part, Part Number, Part Num, Part No, Part Nr, PN,
+# Number, Code or ID, read with case, spaces and punctuation ignored.  Other names that
+# start with one of them, such as "JLCPCB Rotation", are not part numbers.
+_LCSC_FIELD_NAME = re.compile(
+    r"(?:lcsc|jlcpcb|jlc)(?:part(?:number|num|no|nr)?|pn|number|code|id)?"
+)
+_PART_NUMBER = re.compile(r"C\d+")
+
+
+def is_lcsc_field(name: str) -> bool:
+    """Return True for a field name the plugin reads a part number from."""
+    return bool(_LCSC_FIELD_NAME.fullmatch(re.sub(r"[^a-z0-9]", "", name.casefold())))
+
+
+def lcsc_assignment(fields: Iterable[tuple[str, str]]) -> str:
+    """Return the LCSC part number a footprint's fields assign, or "" for none.
+
+    The same reading as the plugin's ``footprint_helpers.get_lcsc_value``, so a
+    board file gives the number the plugin reads from the live board.  A repeated
+    name keeps its last text.  The part-number fields are taken in order, ``LCSC``
+    first and then by name; their texts are read stripped and upper-cased.  Fields
+    naming two different numbers are a conflict, and so is an empty first field
+    beside a filled one; either gives "".  Otherwise the first field's text is the
+    number when it is C and ASCII digits, and "" when it is not.
+    """
+    named = {str(name): "" if text is None else str(text) for name, text in fields}
+    names = sorted(
+        (name for name in named if is_lcsc_field(name)),
+        key=lambda name: (name.casefold() != "lcsc", name.casefold(), name),
+    )
+    if not names:
+        return ""
+    texts = [named[name] for name in names]
+    numbers = [text.strip().upper() for text in texts]
+    if len({number for number in numbers if number}) > 1 or (
+        texts[0] == "" and any(numbers)
+    ):
+        return ""
+    if _PART_NUMBER.fullmatch(numbers[0]) and numbers[0].isascii():
+        return numbers[0]
+    return ""
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -53,7 +91,7 @@ class KiCadFootprint:
     placed_y: float
     placed_rotation: float  # the footprint-level rotation in degrees
     layer: str  # e.g. "F.Cu" (top) or "B.Cu" (bottom)
-    lcsc: Optional[str]  # any lcsc/jlc-named property holding C<digits>
+    lcsc: Optional[str]  # the part number lcsc_assignment reads, None without one
     pads: list[KiCadPad] = field(default_factory=list)
     # The courtyard's box in the footprint frame (mm), None without a courtyard.
     courtyard: Optional[tuple[float, float, float, float]] = None
@@ -341,7 +379,7 @@ def _parse_footprint(fp_node: list[object]) -> Optional[KiCadFootprint]:
     # Properties — iterate over all (property name value ...) children
     reference = ""
     value = ""
-    lcsc: Optional[str] = None
+    properties: list[tuple[str, str]] = []
 
     for prop_node in _find_all_direct(fp_node, "property"):
         prop_name = _str_arg(prop_node, 1)
@@ -350,13 +388,9 @@ def _parse_footprint(fp_node: list[object]) -> Optional[KiCadFootprint]:
             reference = prop_value or ""
         elif prop_name == "Value":
             value = prop_value or ""
-        elif (
-            prop_name
-            and _LCSC_FIELD_NAME.search(prop_name)
-            and prop_value
-            and _LCSC_VALUE.match(prop_value.strip())
-        ):
-            lcsc = prop_value.strip()
+        elif prop_name:
+            properties.append((prop_name, prop_value or ""))
+    lcsc = lcsc_assignment(properties) or None
     # KiCad 7 and earlier write the reference and the value as fp_text items.
     for text_node in _find_all_direct(fp_node, "fp_text"):
         kind = _str_arg(text_node, 1)
