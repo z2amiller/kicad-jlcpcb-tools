@@ -63,18 +63,13 @@ def installed_library_footprint(
     return footprint_pads(footprint), footprint.courtyard
 
 
-def installed_library_pads(library: str, name: str) -> list[Pad]:
-    """Read one footprint's pads from the KiCad libraries installed on this machine."""
-    return installed_library_footprint(library, name)[0]
-
-
 def library_footprint(library: str, name: str) -> tuple[list[Pad], Optional[Box]]:
     """Return a KiCad library footprint's pads and courtyard box, footprint frame, unplaced.
 
     The recorded snapshot under ``tests/fixtures/jlcfootprint/kicad`` is used when it
     exists, so the tests run without KiCad; otherwise the installed library is read.
     Record a snapshot with ``python3 tools/jlcfootprint/snapshot_kicad_footprints.py Library:Name``.
-    A snapshot recorded before courtyards were kept has no box (None).
+    A footprint that draws no courtyard has no box (None).
     """
     snapshot = snapshot_path(library, name)
     if snapshot.exists():
