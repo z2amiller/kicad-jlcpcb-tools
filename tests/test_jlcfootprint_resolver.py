@@ -351,3 +351,19 @@ def test_a_switch_numbered_1_1_2_2_fits_whatever_order_its_legs_are_listed_in():
             )
             assert (verdict.status, verdict.fit) == ("green", "fits"), order
             assert verdict.rotation == (360 - degrees) % 360
+
+
+def test_a_numbering_difference_counts_every_pad_not_every_number():
+    """Four pads under three numbers, all landing when names are ignored, are a numbering difference."""
+    kicad = [
+        Pad("1", -3.0, -1.0, 1.0, 1.0),
+        Pad("2", -3.0, 1.0, 1.0, 1.0),
+        Pad("3", 3.0, -1.0, 1.0, 1.0),
+        Pad("3", 3.0, 1.0, 1.0, 1.0),
+    ]
+    renumbered = [
+        pad._replace(number=number) for pad, number in zip(kicad, ("2", "3", "1", "3"))
+    ]
+    verdict = resolve(kicad, "Custom:Four", "ok", "X", renumbered, [])
+    assert (verdict.status, verdict.fit, verdict.rotation) == ("red", "numbering", None)
+    assert "the package itself aligns at 0°" in verdict.note_text

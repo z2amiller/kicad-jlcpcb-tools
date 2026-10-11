@@ -75,8 +75,9 @@ class FunctionPairing:
 
     ``kicad`` and ``jlc`` are keyed like :func:`pair_by_name`'s dicts (the JLC pad
     number, then ``number#1`` for a group's second member).  ``differences`` lists
-    ``(function, kicad_number, jlc_number)`` for every pair whose numbers differ,
-    and ``eliminated`` the one pair made by elimination, if any.
+    ``(function, kicad_number, jlc_number)`` for every pair matched by function
+    whose numbers differ, and ``eliminated`` the one pair made by elimination, if
+    any, whatever its numbers.
     """
 
     kicad: dict[str, Pad]
@@ -259,9 +260,9 @@ def pair_by_function(
         return None
     kicad, jlc, leftovers = _pair_groups(pairs, groups_k, groups_j)
     differences = [
-        (names.get(number_j, ""), number_k, number_j)
+        (names[number_j], number_k, number_j)
         for number_j, number_k in pairs.items()
-        if number_j != number_k
+        if number_j != number_k and number_j in names
     ]
     return FunctionPairing(kicad, jlc, leftovers, differences, eliminated)
 

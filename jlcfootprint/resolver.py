@@ -300,10 +300,10 @@ def _resolve_multi_pin(
             return by_function
         verdict.take_fit(report)
         if verdict.pad_count_kicad == verdict.pad_count_jlc:
-            angle, landed = shape_alignment(
-                named_pads(kicad_pads), named_pads(jlc_pads)
-            )
-            if landed == verdict.pad_count_jlc:
+            # Every JLC pad must land, so the count is of pads, not of distinct numbers.
+            jlc_named = named_pads(jlc_pads)
+            angle, landed = shape_alignment(named_pads(kicad_pads), jlc_named)
+            if landed == len(jlc_named):
                 return verdict.unresolved(
                     "red",
                     "numbering",

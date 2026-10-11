@@ -140,6 +140,24 @@ def test_pair_by_function_pairs_the_last_pad_by_elimination():
     assert pairing.kicad["1"] is renamed[0]
 
 
+def test_a_pair_made_by_elimination_is_not_listed_as_a_number_difference():
+    """The pad left on each side is reported once, as the elimination, not as a nameless difference."""
+    kicad = [
+        Pad("1", -2.0, -2.3, 1.0, 1.0, 0.0, "S"),
+        Pad("2", 2.0, 0.0, 3.0, 3.0, 0.0, "D"),
+        Pad("3", -2.0, 2.3, 1.0, 1.0, 0.0, "IN"),
+    ]
+    jlc = [
+        Pad("2", -2.0, -2.3, 1.0, 1.0),
+        Pad("3", 2.0, 0.0, 3.0, 3.0),
+        Pad("1", -2.0, 2.3, 1.0, 1.0),
+    ]
+    pins = [SymbolPin("1", "G"), SymbolPin("2", "S"), SymbolPin("3", "D")]
+    pairing = pair_by_function(kicad, jlc, pins)
+    assert pairing.eliminated == ("1", "3")
+    assert sorted(pairing.differences) == [("D", "2", "3"), ("S", "1", "2")]
+
+
 def test_pair_by_function_needs_two_names_and_every_jlc_pad_paired():
     """One matching name, or a JLC pad nothing pairs with, gives no pairing; numeric labels count for nothing."""
     only_d = (
