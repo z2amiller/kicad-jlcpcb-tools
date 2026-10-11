@@ -11,6 +11,7 @@ from tools.jlcfootprint.kicad_library import (
     installed_library_pads,
     library_pads,
 )
+from tools.jlcfootprint.snapshot_kicad_footprints import library_version
 
 SNAPSHOTS = sorted(KICAD_SNAPSHOTS.glob("*.json")) if KICAD_SNAPSHOTS.is_dir() else []
 
@@ -35,8 +36,18 @@ def test_snapshot_parses_to_pads(path):
 )
 @pytest.mark.parametrize("path", SNAPSHOTS, ids=lambda p: p.stem)
 def test_snapshot_matches_installed_library(path):
-    """A KiCad library update shows up here; re-record with tools/jlcfootprint/snapshot_kicad_footprints.py --all."""
+    """On the KiCad release a snapshot was recorded from, a library change shows up here.
+
+    Re-record with ``tools/jlcfootprint/snapshot_kicad_footprints.py --all``.  An
+    installed footprint file of another format version, from another KiCad
+    release, is skipped rather than failed.
+    """
     data = json.loads(path.read_text(encoding="utf-8"))
+    installed = library_version(data["library"], data["name"])
+    if installed != data["version"]:
+        pytest.skip(
+            f"installed file is version {installed or 'unknown'}, the snapshot {data['version']}"
+        )
     assert library_pads(data["library"], data["name"]) == installed_library_pads(
         data["library"], data["name"]
     )
