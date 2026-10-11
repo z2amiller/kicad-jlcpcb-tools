@@ -12,6 +12,7 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `naming.py` | EasyEDA's footprint naming rule: the pin-1 position a package name encodes |
 | `easyeda_parse.py` | EasyEDA's answers read into records: the batch lookup, footprint and symbol documents, the classic per-part response |
 | `records.py` | The small records judging a part needs without the parsers: symbol pins, the pin-1 labels, the drawings' marks |
+| `drawing.py` | The `+` marks and the body outline read from EasyEDA's symbol and footprint drawings |
 
 ## Frames and units
 
@@ -75,11 +76,26 @@ The rule is a convention, and EasyEDA's library does not always follow it. Over 
 
 The recorded EasyEDA answers come from `tools/jlcfootprint/fetch_easyeda_fixture.py`. It paces its requests, backs off when the host refuses, and keeps an answer only when the parser reads it as `ok` or `none`.
 
+### The drawings
+
+No EasyEDA record says which terminal of a two-pad part is positive. The drawings do: the symbol draws a `+` beside its positive pin, and the footprint draws one beside its positive pad, on the silkscreen or the document layer. JLC's placement preview follows these marks. Where a tantalum's footprint numbers its terminals the other way round, the package name's FD/RD token is wrong and the marks are right.
+
+`drawing.py` reads both drawings, in both formats, each in its own frame and units. Only two-pin symbols and two-pad footprints are read. A `+` is two bars, a horizontal one and a vertical one, on the same layer, and it has to stand alone:
+
+- the bars are alike in length (neither is more than 2.5 times the other) and cross near both their midpoints, which rules out an outline corner and a `T`;
+- they are between 5 % and 45 % of the pin span long on a symbol, and between 5 % and 70 % of the pad spacing on a footprint, so a capacitor's plates, a footprint outline and pin stubs are not bars of a `+`;
+- on a footprint the lower bound never exceeds 0.75 mm, so the ordinary 30 to 40 mil mark beside a large part's pads is still read;
+- no third bar comes near the crossing or the bars' ends, and no polyline or polygon edge comes near the crossing, which rules out a diode's silk arrow;
+- on a footprint the crossing sits off the centre (an origin cross names no pad), and every `+` has to be on the same side;
+- on a symbol the nearer pin has to be clearly nearer, and every `+` has to name the same pin.
+
+When any of this fails, no terminal is named. The footprint's body outline (Pro layer 48, classic layer 99) is read as a box in millimetres, in the same frame as the pads.
+
 ## What comes next
 
 The package arrives in parts. Still to come:
 
-- **Readers** for EasyEDA's drawings and for KiCad board and library files.
+- **A reader** for KiCad board and library files.
 - **The resolver and its gate**: rotation, fit and polarity per part, checked offline against parts whose rotations were read from JLC's placement preview.
 - **Background fetch and storage**: the EasyEDA client, a paced worker, the response cache and per-project verdicts.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
