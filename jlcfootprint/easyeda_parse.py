@@ -82,7 +82,7 @@ def classic_pin_records(shapes: list[Any]) -> list[tuple[str, str, float, float]
                 x, y = float(header[4]), float(header[5])
             except ValueError:
                 x = y = 0.0
-        pins.append((_normal_number(number), label, x, y))
+        pins.append((normal_number(number), label, x, y))
     return pins
 
 
@@ -96,8 +96,8 @@ def parse_symbol_pins(shapes: list[Any]) -> tuple[list[SymbolPin], int]:
     )
 
 
-def _normal_number(number: str) -> str:
-    """Strip leading zeros from purely numeric pin numbers so ``01`` and ``1`` agree."""
+def normal_number(number: str) -> str:
+    """Strip leading zeros from a purely numeric pad or pin number, so ``01`` and ``1`` agree."""
     return (number.lstrip("0") or "0") if number.isdigit() else number
 
 
@@ -138,7 +138,7 @@ def parse_footprint_pads(
                 hole = 0.0
         pads.append(
             {
-                "number": _normal_number(parts[8].strip()),
+                "number": normal_number(parts[8].strip()),
                 "x": x - origin_x,
                 "y": y - origin_y,
                 "w": w,
@@ -384,7 +384,7 @@ def parse_pro_pads(lines: list[str]) -> tuple[list[dict], int]:
             continue
         try:
             parts = json.loads(line)
-            number = _normal_number(str(parts[5]).strip())
+            number = normal_number(str(parts[5]).strip())
             x = float(parts[6]) / PRO_MILS_PER_CANVAS_UNIT
             y = -float(parts[7]) / PRO_MILS_PER_CANVAS_UNIT
             rotation = float(parts[8] or 0.0)
@@ -570,7 +570,7 @@ def pro_pin_records(lines: list[Any]) -> list[tuple[str, str, float, float]]:
     A pin is a ``["PIN", id, ?, ?, x, y, ...]`` record.  Its displayed name and
     number are the attribute records ``["ATTR", attrId, pinId, "NAME", text, ...]``
     and ``["ATTR", attrId, pinId, "NUMBER", text, ...]``; the number is what matches
-    the footprint's pad numbers, leading zeros stripped by :func:`_normal_number` so a
+    the footprint's pad numbers, leading zeros stripped by :func:`normal_number` so a
     Pro ``01`` and a classic ``1`` are one pad.  A pin without a number is returned
     with ``""``; :func:`parse_pro_pins` and :func:`jlcfootprint.drawing.symbol_pins`
     drop those, since a pin with no number names no pad.
@@ -601,7 +601,7 @@ def pro_pin_records(lines: list[Any]) -> list[tuple[str, str, float, float]]:
         elif parts[0] == "ATTR" and len(parts) >= 5 and parts[3] in ("NAME", "NUMBER"):
             value = "" if parts[4] is None else str(parts[4]).strip()
             if parts[3] == "NUMBER":
-                names_or_numbers, value = numbers, _normal_number(value)
+                names_or_numbers, value = numbers, normal_number(value)
             else:
                 names_or_numbers = names
             names_or_numbers[str(parts[2])] = value

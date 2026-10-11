@@ -29,6 +29,7 @@ from typing import Any, NamedTuple, Optional
 from .easyeda_parse import (
     PRO_MILS_PER_CANVAS_UNIT,
     classic_pin_records,
+    normal_number,
     pro_pin_records,
 )
 from .geometry import EASYEDA_UNIT_MM
@@ -116,11 +117,12 @@ def is_pro(shapes: list[Any]) -> bool:
 
 
 def _pro_records(shapes: list[Any]) -> list[list]:
-    """Return the Pro records that parse, in order."""
+    """Return the Pro records that parse, in order; an empty array is no record."""
     records: list[list] = []
     for shape in shapes:
         if isinstance(shape, list):
-            records.append(shape)
+            if shape:
+                records.append(shape)
             continue
         if not isinstance(shape, str) or not shape.lstrip().startswith("["):
             continue
@@ -271,7 +273,11 @@ def _classic_fields(shape: str) -> list[str]:
 
 
 def footprint_pads(shapes: list[Any]) -> list[tuple[str, float, float]]:
-    """Return ``(number, x, y)`` per pad in the drawing's own frame and units."""
+    """Return ``(number, x, y)`` per pad in the drawing's own frame and units.
+
+    Numbers lose their leading zeros as the pad parser's do, so a ``+`` beside
+    pad ``01`` names pad ``1``, the pad the rest of the check knows.
+    """
     pads: list[tuple[str, float, float]] = []
     if is_pro(shapes):
         for record in _pro_records(shapes):
@@ -279,7 +285,11 @@ def footprint_pads(shapes: list[Any]) -> list[tuple[str, float, float]]:
                 continue
             try:
                 pads.append(
-                    (str(record[5]).strip(), float(record[6]), float(record[7]))
+                    (
+                        normal_number(str(record[5]).strip()),
+                        float(record[6]),
+                        float(record[7]),
+                    )
                 )
             except (TypeError, ValueError):
                 continue
@@ -291,7 +301,9 @@ def footprint_pads(shapes: list[Any]) -> list[tuple[str, float, float]]:
         if len(parts) < 9:
             continue
         try:
-            pads.append((parts[8].strip(), float(parts[2]), float(parts[3])))
+            pads.append(
+                (normal_number(parts[8].strip()), float(parts[2]), float(parts[3]))
+            )
         except ValueError:
             continue
     return pads

@@ -263,6 +263,28 @@ def test_a_pro_record_whose_layer_is_a_list_or_a_dict_is_skipped():
     assert marks == DrawingMarks(positive_pin=None, positive_pad="1", body_box=None)
 
 
+def test_a_plus_beside_pad_01_names_pad_1_in_both_formats():
+    """Drawn pad numbers lose their leading zeros as the pad parser's do."""
+    pro = [pro_pad("01", -80, 0), pro_pad("02", 80, 0), *plus_at(13, -60, 0)]
+    assert [number for number, _x, _y in footprint_pads(pro)] == ["1", "2"]
+    assert footprint_positive_pad(pro) == "1"
+    classic = [
+        "PAD~RECT~3992~3000~5.9~5.3~1~~01~0~~0~gge1",
+        "PAD~RECT~4008~3000~5.9~5.3~1~~02~0~~0~gge2",
+        "TRACK~0.6~3~~3992 2996 3998 2996~ggh~0",
+        "TRACK~0.6~3~~3995 2993 3995 2999~ggv~0",
+    ]
+    assert [number for number, _x, _y in footprint_pads(classic)] == ["1", "2"]
+    assert footprint_positive_pad(classic) == "1"
+
+
+def test_an_empty_pro_record_is_no_record():
+    """An empty array among a drawing's records is skipped, never read as a record."""
+    shapes = [[], *TWO_PADS, [], *plus_at(13, -60, 0)]
+    assert footprint_positive_pad(shapes) == "1"
+    assert drawing_marks([[]], shapes).positive_pad == "1"
+
+
 def test_vertical_pad_axis():
     """With the pads drawn vertical the + is judged along that axis."""
     pads = [pro_pad("1", 0, 80), pro_pad("2", 0, -80)]
