@@ -252,29 +252,6 @@ _CATHODE_PIN1_FAMILIES = frozenset(
 # Polarized capacitors never belong here: listing a family inverts its FD/RD rotation.
 CATHODE_PIN1_FAMILIES: frozenset[str] = _CATHODE_PIN1_FAMILIES
 
-# Polarized capacitor families — aluminum electrolytic and tantalum.
-# Their pin 1 is the positive terminal, so a part in one of them is polarized,
-# but they use the STANDARD FD/RD rotation correction (pin-1 = anode/positive)
-# and must NOT appear in _CATHODE_PIN1_FAMILIES.
-#
-# CP-* prefix = "Capacitor Polarized" in EasyEDA naming conventions.
-# CASE-* = EIA standard tantalum case codes (A=3216, B=3528, C=6032, D=7343, E=7360).
-POLARIZED_CAP_FAMILIES: frozenset[str] = frozenset(
-    {
-        # Through-hole aluminum electrolytic
-        "CP-TH",
-        # SMD aluminum electrolytic (cylindrical; CP = Capacitor Polarized)
-        "CP-SMD",
-        # Tantalum SMD — EIA standard case codes
-        "CASE-A",
-        "CASE-B",
-        "CASE-C",
-        "CASE-D",
-        "CASE-E",
-    }
-)
-
-
 # Families that must never be treated as cathode-is-pin-1 even when a caller says the part
 # is a diode: multi-LED arrays usually put the anode on pin 1.  A listed family covers
 # its hyphenated variants (LED-ARRAY-SMD, LED-ARRAY-TH).

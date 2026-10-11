@@ -12,13 +12,30 @@ from __future__ import annotations
 import re
 
 from .geometry import Pad
-from .naming import (
-    CATHODE_PIN1_FAMILIES,
-    POLARIZED_CAP_FAMILIES,
-    extract_family,
-    extract_orientation_tokens,
-)
+from .naming import CATHODE_PIN1_FAMILIES, extract_family, extract_orientation_tokens
 from .records import PIN1_ANODE_LABELS, PIN1_CATHODE_LABELS, DrawingMarks, SymbolPin
+
+# Polarized capacitor families — aluminum electrolytic and tantalum.  A part in one of
+# them is a polarized capacitor (:func:`part_kind`).  Their pin 1 is the positive
+# terminal, so they read FD/RD with the naming rule's STANDARD table and must NOT
+# appear in naming.CATHODE_PIN1_FAMILIES.
+#
+# CP-* prefix = "Capacitor Polarized" in EasyEDA naming conventions.
+# CASE-* = EIA standard tantalum case codes (A=3216, B=3528, C=6032, D=7343, E=7360).
+POLARIZED_CAP_FAMILIES: frozenset[str] = frozenset(
+    {
+        # Through-hole aluminum electrolytic
+        "CP-TH",
+        # SMD aluminum electrolytic (cylindrical; CP = Capacitor Polarized)
+        "CP-SMD",
+        # Tantalum SMD — EIA standard case codes
+        "CASE-A",
+        "CASE-B",
+        "CASE-C",
+        "CASE-D",
+        "CASE-E",
+    }
+)
 
 # Pin-function tokens, after normalisation, that name the terminals.  ``C`` is a
 # collector on KiCad's transistor symbols and a cathode on some vendor symbols; it is

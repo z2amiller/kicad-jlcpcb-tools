@@ -4,7 +4,6 @@ import pytest
 
 from jlcfootprint.naming import (
     CATHODE_PIN1_FAMILIES,
-    POLARIZED_CAP_FAMILIES,
     extract_family,
     extract_orientation_tokens,
     parse_package_name,
@@ -186,8 +185,3 @@ def test_chip_diodes_read_cathode_first():
     assert parse_package_name("D0603-FD").rotation_correction == 180
     assert parse_package_name("D0402-BI").rotation_correction == 0
     assert parse_package_name("D0402").rotation_source == "family_default"
-
-
-def test_polarized_cap_families_are_not_cathode_families():
-    """Electrolytics and tantalums keep the standard FD/RD mapping."""
-    assert not (POLARIZED_CAP_FAMILIES & CATHODE_PIN1_FAMILIES)

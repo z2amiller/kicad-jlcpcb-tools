@@ -13,7 +13,9 @@ from jlcfootprint.easyeda_parse import (
 from jlcfootprint.fit import SHAPE_MARGIN, FitReport, fits_clearly_better
 from jlcfootprint.geometry import Pad, pad_hash
 from jlcfootprint.kicad_adapter import verdict_key
+from jlcfootprint.naming import CATHODE_PIN1_FAMILIES
 from jlcfootprint.polarity import (
+    POLARIZED_CAP_FAMILIES,
     is_no_function,
     normalise_function,
     part_kind,
@@ -141,6 +143,11 @@ def test_bt1_coin_cell_holder_resolves_yellow_at_180_from_the_footprint_mark():
     assert verdict.polarity_source == "drawing"
     assert verdict.polarity_light == "yellow"
     assert verdict.notes == ["polarity from the footprint's + mark", YELLOW_NOTE]
+
+
+def test_polarized_cap_families_are_not_cathode_families():
+    """Electrolytics and tantalums keep the standard FD/RD mapping."""
+    assert not (POLARIZED_CAP_FAMILIES & CATHODE_PIN1_FAMILIES)
 
 
 @pytest.mark.parametrize(
