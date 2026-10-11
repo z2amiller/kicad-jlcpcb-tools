@@ -1,10 +1,12 @@
 """Tests for the global EasyEDA cache: round trips, retry rules, the layout version."""
 
 from contextlib import closing
+from pathlib import Path
 import sqlite3
 
 import pytest
 
+from jlcfootprint.boardfile import footprint_pads, parse_kicad_pcb
 from jlcfootprint.cache import NONE_RETRY_S, SCHEMA_VERSION, Cache
 from jlcfootprint.easyeda_parse import (
     ComponentRecord,
@@ -12,8 +14,18 @@ from jlcfootprint.easyeda_parse import (
     SymbolPin,
     SymbolRecord,
 )
+from jlcfootprint.resolving import resolve_record
 
 from .jlcfootprint_support import recorded
+
+CORNER_CASE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "jlcfootprint"
+    / "boards"
+    / "corner_case"
+    / "corner_case.kicad_pcb"
+)
 
 
 def _rounded(pads):
@@ -68,8 +80,34 @@ def test_live_record_round_trip(cache):
     assert got.symbol_shapes == record.symbol_shapes
     assert got.footprint_shapes == record.footprint_shapes
     assert got.footprint_source == "component"
+    assert got.footprint_origin == record.footprint_origin != (0.0, 0.0)
     assert cache.has_package(record.puuid)
     assert cache.counts() == {"parts": 1, "packages": 1}
+
+
+def test_a_cached_classic_part_resolves_as_its_record_does(cache):
+    """The drawing's origin comes back with it, so the body outline is read where it is drawn.
+
+    Q2 on the corner-case board is C2132, a SOT-23 whose classic drawing has its
+    origin at (4000.0005, 3000) canvas units: read against (0, 0) instead, its body
+    would sit a metre away and overhang the courtyard by that much.
+    """
+    record = recorded("C2132")
+    q2 = next(fp for fp in parse_kicad_pcb(str(CORNER_CASE)) if fp.reference == "Q2")
+    pads = footprint_pads(q2)
+    direct = resolve_record(pads, q2.footprint_name, record, q2.courtyard)
+    cache.store(record, now=1)
+    cached = resolve_record(
+        pads, q2.footprint_name, cache.part("C2132").record, q2.courtyard
+    )
+    assert direct.body_excess_mm is None and cached.body_excess_mm is None
+    assert (cached.status, cached.rotation, cached.fit, cached.origin) == (
+        direct.status,
+        direct.rotation,
+        direct.fit,
+        direct.origin,
+    )
+    assert cached.note_text == direct.note_text
 
 
 def test_needs_rules(cache):
@@ -115,6 +153,19 @@ def test_store_footprint_from_the_uuid_endpoint(cache):
     part = cache.part("C2132")
     assert _rounded(part.record.pads) == _rounded(record.pads)
     assert part.record.footprint_source == "puuid-endpoint"
+    assert part.record.footprint_origin == (0.0, 0.0)
+    cache.store_footprint(
+        FootprintRecord(
+            puuid=record.puuid,
+            status="ok",
+            package_name=record.package_name,
+            pads=record.pads,
+            footprint_shapes=record.footprint_shapes,
+            footprint_origin=record.footprint_origin,
+        ),
+        now=3,
+    )
+    assert cache.part("C2132").record.footprint_origin == record.footprint_origin
 
 
 def test_forget_and_clear(cache):

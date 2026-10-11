@@ -4,6 +4,9 @@ Symbol data is keyed per LCSC because pin meaning is a per-part fact; footprint
 data is keyed per footprint uuid because footprints are shared.  Pads are stored
 in the parser's raw form (classic canvas units) and converted to millimetres when
 a part is judged, so a change to the frame convention never invalidates the cache.
+A classic drawing's own origin (its head x/y, which its pads have already had
+subtracted) is stored with it, because the body outline and the marks in the
+stored drawing are read against it; it is (0, 0) for Pro text.
 
 No row expires on a timer; ``needs`` decides what is fetched again.  A ``none``
 row (EasyEDA has nothing for the part) is looked up again after 30 days, an
@@ -31,7 +34,7 @@ from .easyeda_parse import ComponentRecord, FootprintRecord, SymbolPin, SymbolRe
 from .naming import parse_package_name
 
 FILENAME = "jlcfootprint-cache.db"
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 NONE_RETRY_S = 30 * 24 * 3600
 CONNECT_TIMEOUT_S = 5.0
 
@@ -57,6 +60,8 @@ CREATE TABLE IF NOT EXISTS package (
   pads_json        TEXT NOT NULL,
   footprint_blob   BLOB,
   footprint_source TEXT,
+  origin_x         REAL NOT NULL,
+  origin_y         REAL NOT NULL,
   fetched_at       INTEGER NOT NULL
 );
 """
@@ -81,6 +86,8 @@ _PACKAGE_COLUMNS = (
     "pads_json",
     "footprint_blob",
     "footprint_source",
+    "origin_x",
+    "origin_y",
     "fetched_at",
 )
 
@@ -225,6 +232,10 @@ class Cache:
             record.pads = json.loads(package["pads_json"])
             record.footprint_shapes = decompress(package["footprint_blob"])
             record.footprint_source = str(package["footprint_source"] or "")
+            record.footprint_origin = (
+                float(package["origin_x"]),
+                float(package["origin_y"]),
+            )
         return CachedPart(record=record, fetched_at=int(row["fetched_at"]))
 
     def has_package(self, puuid: str) -> bool:
@@ -284,6 +295,7 @@ class Cache:
                         record.pads,
                         record.footprint_shapes,
                         record.footprint_source or "component",
+                        record.footprint_origin,
                         fetched_at,
                     ),
                 )
@@ -363,6 +375,7 @@ class Cache:
                     footprint.pads,
                     footprint.footprint_shapes,
                     footprint.footprint_source,
+                    footprint.footprint_origin,
                     fetched_at,
                 ),
             )
@@ -374,6 +387,7 @@ class Cache:
         pads: list[dict],
         shapes: list[str],
         footprint_source: str,
+        origin: tuple[float, float],
         fetched_at: int,
     ) -> dict[str, Any]:
         """Build a package row.
@@ -381,7 +395,8 @@ class Cache:
         The family and name columns are the naming rule's reading of the package
         name, the angle in the rule's own sense (``geometry.naming_rule_to_cpl``
         gives the CPL's) and only for a ``naming_rule`` source; ``part`` does not
-        read them back.
+        read them back.  ``origin`` is the drawing's own origin in canvas units,
+        which ``part`` restores as ``footprint_origin``.
         """
         parsed = parse_package_name(package_name)
         return {
@@ -398,6 +413,8 @@ class Cache:
             "pads_json": json.dumps(pads, separators=(",", ":")),
             "footprint_blob": compress(shapes),
             "footprint_source": footprint_source,
+            "origin_x": float(origin[0]),
+            "origin_y": float(origin[1]),
             "fetched_at": fetched_at,
         }
 
