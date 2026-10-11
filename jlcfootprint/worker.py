@@ -47,8 +47,8 @@ FOOTPRINT = "footprint"
 SYMBOL = "symbol"
 LOOKUP = "lookup"
 BREAKER_MESSAGE = (
-    "EasyEDA refused {failures} requests in a row; the remaining {pending} request(s) "
-    "stay pending until the plugin is reopened."
+    "{failures} fetches from EasyEDA failed in a row; the {pending} part lookup(s) and "
+    "drawing(s) still queued wait until the plugin is reopened."
 )
 
 

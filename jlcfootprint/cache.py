@@ -34,7 +34,7 @@ from .easyeda_parse import ComponentRecord, FootprintRecord, SymbolPin, SymbolRe
 from .naming import parse_package_name
 
 FILENAME = "jlcfootprint-cache.db"
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 NONE_RETRY_S = 30 * 24 * 3600
 CONNECT_TIMEOUT_S = 5.0
 
@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS lcsc_map (
   symbol_uuid      TEXT,
   symbol_pins_json TEXT,
   symbol_blob      BLOB,
+  package_name     TEXT,
   fetched_at       INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS package (
@@ -77,6 +78,7 @@ _LCSC_COLUMNS = (
     "symbol_uuid",
     "symbol_pins_json",
     "symbol_blob",
+    "package_name",
     "fetched_at",
 )
 _PACKAGE_COLUMNS = (
@@ -242,6 +244,8 @@ class Cache:
             symbol_uuid=str(row["symbol_uuid"] or ""),
             symbol_shapes=decompress(row["symbol_blob"]),
             puuid=str(row["puuid"] or ""),
+            # The lookup's name, kept for a footprint document that carries none.
+            package_name=str(row["package_name"] or ""),
         )
         if row["symbol_pins_json"]:
             record.symbol_pins = [
@@ -249,7 +253,7 @@ class Cache:
                 for pin in json.loads(row["symbol_pins_json"])
             ]
         if package is not None:
-            record.package_name = str(package["package_name"])
+            record.package_name = str(package["package_name"]) or record.package_name
             record.pads = json.loads(package["pads_json"])
             record.footprint_shapes = decompress(package["footprint_blob"])
             record.footprint_source = str(package["footprint_source"] or "")
@@ -301,6 +305,7 @@ class Cache:
                 else None
             ),
             "symbol_blob": compress(record.symbol_shapes),
+            "package_name": record.package_name or None,
             "fetched_at": fetched_at,
         }
         with closing(self.connect()) as con, con:
@@ -327,11 +332,15 @@ class Cache:
         symbol_uuid: str,
         puuid: str,
         now: Optional[float] = None,
+        *,
+        package_name: str = "",
     ) -> None:
-        """Store what the batch lookup knows about a part: its uuids, no drawings yet.
+        """Store what the batch lookup knows about a part: its uuids and package name, no drawings yet.
 
         A part with no symbol uuid gets an empty pin list, so ``needs`` never asks
-        for a symbol that does not exist.
+        for a symbol that does not exist.  The package name stands in for the
+        footprint document's own, should that document carry none, as
+        ``easyeda_parse.assemble_record`` falls back to the lookup's.
         """
         fetched_at = int(time.time() if now is None else now)
         row = {
@@ -342,6 +351,7 @@ class Cache:
             "symbol_uuid": symbol_uuid or None,
             "symbol_pins_json": None if symbol_uuid else "[]",
             "symbol_blob": None,
+            "package_name": package_name or None,
             "fetched_at": fetched_at,
         }
         with closing(self.connect()) as con, con:
