@@ -12,7 +12,7 @@ in tests and standalone tools with duck-typed footprints.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -249,13 +249,17 @@ def board_part(
 
 
 def board_parts(
-    board: Any,
+    footprints: Iterable[Any],
     pcbnew: Any = None,
     to_mm: Optional[Callable[[float], float]] = None,
     lcsc_of: Callable[[Any], str] = lcsc_value,
 ) -> list[BoardPart]:
-    """Read every footprint on the board whose reference starts with a word character or a hyphen.
+    """Read the given footprints, in order.
 
+    Which footprints of a board count is the caller's choice: the plugin's own
+    selection is ``footprint_helpers.get_valid_footprints(board)``, the footprints
+    with a reference, and a tool reading a whole board passes
+    ``board.GetFootprints()``.
     ``pcbnew`` is imported here when not supplied; ``to_mm`` defaults to its
     ``ToMM``, or to the identity when pcbnew is absent (test doubles in millimetres).
     ``lcsc_of`` reads a footprint's part number (``lcsc_value`` by default); a caller
@@ -270,8 +274,4 @@ def board_parts(
             pcbnew = None
     if to_mm is None:
         to_mm = getattr(pcbnew, "ToMM", None) or (lambda value: float(value))
-    return [
-        board_part(footprint, to_mm, pcbnew, lcsc_of)
-        for footprint in board.GetFootprints()
-        if re.match(r"[\w\d-]+", str(footprint.GetReference()))
-    ]
+    return [board_part(footprint, to_mm, pcbnew, lcsc_of) for footprint in footprints]

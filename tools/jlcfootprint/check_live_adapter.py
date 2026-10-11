@@ -85,7 +85,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     file_parts = {fp.reference: fp for fp in parse_kicad_pcb(str(args.board))}
     live = {
         part.reference: part
-        for part in board_parts(pcbnew.LoadBoard(str(args.board)), pcbnew=pcbnew)
+        for part in board_parts(
+            pcbnew.LoadBoard(str(args.board)).GetFootprints(), pcbnew=pcbnew
+        )
     }
     index = load_pro_index(args.pro_fixtures) if args.pro_fixtures else None
     mismatches = verdict_differences = 0

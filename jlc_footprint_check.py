@@ -17,7 +17,7 @@ from typing import Any, Optional
 import wx  # pylint: disable=import-error
 
 from .events import JlcFootprintResultEvent, MessageEvent
-from .footprint_helpers import get_lcsc_value
+from .footprint_helpers import get_lcsc_value, get_valid_footprints
 from .jlcfootprint.cache import FILENAME, Cache
 from .jlcfootprint.controller import FootprintCheck, describe_seconds
 from .jlcfootprint.kicad_adapter import board_parts
@@ -150,7 +150,9 @@ def create_footprint_check(window: Any, pcbnew: Any) -> FootprintCheck:
             reader = variant_lcsc_reader(
                 snapshot, judged_variant(snapshot, session.output_variant)
             )
-        return board_parts(pcbnew.GetBoard(), pcbnew=pcbnew, lcsc_of=reader)
+        return board_parts(
+            get_valid_footprints(pcbnew.GetBoard()), pcbnew=pcbnew, lcsc_of=reader
+        )
 
     def other_lcscs():
         session = _variant_session(window)

@@ -261,21 +261,20 @@ def test_lcsc_value_reads_fields_and_legacy_properties():
     assert lcsc_value(legacy) == "C9"
 
 
-def test_board_parts_reads_every_footprint_with_a_reference():
-    """The board's footprints are read in order; a footprint without a reference is skipped."""
-    board = SimpleNamespace(
-        GetFootprints=lambda: [
-            FakeFootprint("R1", [FakePad("1", -1, 0), FakePad("2", 1, 0)]),
-            FakeFootprint("", [FakePad("1", 0, 0)]),
-            FakeFootprint("C1", [], fields={}),
-        ]
-    )
+def test_board_parts_reads_the_footprints_it_is_given_in_order():
+    """Every footprint passed in is read, in order; choosing them is the caller's business."""
+    footprints = [
+        FakeFootprint("R1", [FakePad("1", -1, 0), FakePad("2", 1, 0)]),
+        FakeFootprint("", [FakePad("1", 0, 0)]),
+        FakeFootprint("C1", [], fields={}),
+    ]
     parts = board_parts(
-        board,
+        iter(footprints),
         pcbnew=SimpleNamespace(PAD_ATTRIB_NPTH=3, PAD_SHAPE_CUSTOM=6, ToMM=lambda v: v),
     )
     assert [(p.reference, p.lcsc, len(p.pads)) for p in parts] == [
         ("R1", "C2132", 2),
+        ("", "C2132", 1),
         ("C1", "", 0),
     ]
     assert (
