@@ -23,6 +23,9 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `worker.py` | The background fetch thread: two paced queues and a breaker |
 | `cache.py` | The global cache of EasyEDA's answers |
 | `verdicts.py` | The per-project verdict store in `project.db` |
+| `model.py` | `Decision`, what the CPL emits for one reference |
+| `presentation.py` | How the plugin words the check for the user: `describe_seconds` |
+| `controller.py` | One open board's check: scanning, the fetch results, the decisions |
 
 ## Frames and units
 
@@ -233,6 +236,15 @@ $KPY $T/check_live_adapter.py $B/pin_functions_and_marks/pin_functions_and_marks
 - **Reading.** `emitted_rotation` is the override, else the rotation of a green or yellow row, else None, which leaves the part at its raw angle; `source` says which (`override`, `derived`, `raw`). `origin` is JLC's package origin for a green or yellow row only, so a pending row reports none even though its columns are kept. `display_text` is the emitted rotation as text: `180°`, `90° !` for a yellow row, `270° set` for an override, or `raw`.
 - A table written by a development build of the check lacks the courtyard-overhang and origin columns, and projects opened with those builds still hold one; it gains the columns when the store opens (`add_missing_columns`), its rows and overrides kept, and two KiCad processes doing so at once is not an error.
 - Every call opens its own connection, with a five-second busy timeout, so a background thread may write while the main thread reads.
+
+## The check session
+
+`controller.FootprintCheck` runs the check for one open board: it owns the cache, the verdict store, the client and the worker, and reads the board through a `read_board` callable its caller passes.
+
+- **Scanning.** `scan_board` reads the board on the caller's thread and takes each part with an LCSC number in turn. A part whose verdict is resolved and whose cache row is final is left alone; a part the cache can judge is resolved and its verdict saved; any other part's verdict is marked pending and what it still needs is queued: the batch lookup, or the footprint and symbol documents. A full scan starts a new generation. `enqueue_references` scans only the given references, after an assignment or a removed number. `ScanSummary` is the scan's log line: what was resolved, queued and pending, and roughly how long the queue takes (`presentation.describe_seconds`).
+- **Results.** The worker's handlers store each answer in the cache. Once a part's row is complete, every board part with that LCSC is resolved and stored, and `post(lcsc, generation)` tells the caller; an event of an older generation belongs to a board state that is gone, and the caller drops it. A failed fetch becomes an error row and an unknown verdict, so the part keeps its raw angle and is looked up again the next time it is checked. A tripped breaker reaches the caller through `message`.
+- **The lock.** One re-entrant lock makes each scan step and each result handler whole with respect to the other: a result landing mid-scan is seen still pending or complete, never half handled, and a scan never queues a part behind a request that has just been answered.
+- **Decisions.** `decisions` re-reads the board and returns one `model.Decision` per reference, from the verdict row: the rotation the CPL applies (`emitted_rotation`: the override, else a green or yellow row's rotation, else none), where it comes from (`source`), the status, fit, notes, the courtyard overhang, JLC's package origin and whether the part is still pending. A part without an LCSC is `no-lcsc` and a part with no row `no-verdict`. `display_text` is the Rotation column's text: `180°`, `90° !` for a yellow part, `270° set` for an override, or `raw`.
 
 ## What comes next
 
