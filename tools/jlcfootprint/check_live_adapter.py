@@ -92,6 +92,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     index = load_pro_index(args.pro_fixtures) if args.pro_fixtures else None
     mismatches = verdict_differences = 0
     resolved = 0
+    for reference in sorted(live.keys() - file_parts.keys()):
+        print(f"EXTRA {reference}: the file parser did not read it")
+        mismatches += 1
     for reference, fp in sorted(file_parts.items()):
         part = live.get(reference)
         if part is None:
@@ -148,7 +151,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 f"ORIGIN {reference}: file {from_file.origin} live {from_live.origin}"
             )
     print(
-        f"checked {len(file_parts)} footprints ({resolved} resolved): "
+        f"checked {len(file_parts.keys() | live.keys())} footprints ({resolved} resolved): "
         f"{mismatches} pad-set mismatches, {verdict_differences} verdict differences"
     )
     return 1 if mismatches or verdict_differences else 0

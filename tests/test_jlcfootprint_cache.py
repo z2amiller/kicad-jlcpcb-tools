@@ -315,3 +315,22 @@ def test_a_second_process_opening_during_a_rebuild_waits_and_keeps_it(
     assert seen == ["1", SCHEMA_VERSION]
     assert first.part("C2132").record.status == "ok"
     assert second["cache"].counts()["parts"] == 1
+
+
+def test_the_lookup_package_name_stands_in_for_a_footprint_document_without_one(cache):
+    """A footprint document with no title keeps the lookup's name; one with a title wins."""
+    record = recorded("C2132")
+    cache.store_lookup("C1", "", "fp-1", now=10, package_name=record.package_name)
+    assert cache.part("C1").record.package_name == record.package_name
+    cache.store_footprint(
+        FootprintRecord(puuid="fp-1", status="ok", package_name="", pads=record.pads),
+        now=11,
+    )
+    assert cache.part("C1").record.package_name == record.package_name
+    cache.store_footprint(
+        FootprintRecord(
+            puuid="fp-1", status="ok", package_name="SOT-23-3_X", pads=record.pads
+        ),
+        now=12,
+    )
+    assert cache.part("C1").record.package_name == "SOT-23-3_X"

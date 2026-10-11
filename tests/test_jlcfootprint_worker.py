@@ -195,8 +195,8 @@ def test_breaker_trips_after_three_transient_failures_across_both_queues():
     assert worker.tripped, "s2 was the third failure in a row"
     assert worker.pending_documents() == {(SYMBOL, "s3")}
     assert len(messages) == 1
-    assert "3 requests in a row" in messages[0]
-    assert "1 request(s)" in messages[0]
+    assert "3 fetches from EasyEDA failed in a row" in messages[0]
+    assert "the 1 part lookup(s) and drawing(s) still queued" in messages[0]
     assert worker.consecutive_failures == MAX_CONSECUTIVE_FAILURES
     assert worker.enqueue_lookups(["C7"]) == 1
     assert worker.run_pending() == 0
