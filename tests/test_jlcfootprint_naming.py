@@ -24,6 +24,9 @@ from jlcfootprint.naming import (
         ("DO-27-BD5.3-L9.0-P14.0-D1.3-R-RD", "DO-27"),
         ("D-L1.6-W0.8-RD", "D"),
         ("TO-220-7-L10.2-W4.5-P1.27-BL", "TO-220-7"),
+        ("CONN-SMD-2P-P1.20_BM02B-ACHSS-GAN-TF-LF-SN", "CONN-SMD-2P"),
+        ("L0603", "L"),
+        ("L0201-RD", "L"),
     ],
 )
 def test_extract_family(name, family):
@@ -143,10 +146,8 @@ def test_a_polarity_token_outranks_an_edge_token():
 
 def test_a_corner_token_outranks_an_edge_token():
     """Without a polarity token, a corner still beats an edge token, wherever each sits."""
-    assert (
-        parse_package_name("DIP-6_L8.5-W8.5-P2.54-LS10.8-BL-R").rotation_correction
-        == 90
-    )
+    result = parse_package_name("DIP-6_L8.5-W8.5-P2.54-LS10.8-BL-R")
+    assert (result.rotation_correction, result.notes) == (90, None)
 
 
 @pytest.mark.parametrize(

@@ -460,9 +460,10 @@ def parse_package_name(
     5. No orientation token otherwise, MPN-suffix families included: 0° with
        'none' source and no confidence.
 
-    When a lower-ranked token disagrees with the one used, a note records its
-    value.  The rotation is in the table's sense; the CPL correction is its
-    negative (module docstring).
+    When a polarity token disagrees with the corner or the edge token it is
+    ranked against, a note records the other token's value; an edge token
+    outranked by a corner gets no note.  The rotation is in the table's sense;
+    the CPL correction is its negative (module docstring).
 
     """
     family = extract_family(package_name)
