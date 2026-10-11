@@ -12,7 +12,7 @@ from jlcfootprint.easyeda_parse import (
     pro_shape_lines,
 )
 
-from .test_jlcfootprint_easyeda_parse import UNHASHABLE_CODE_REFUSALS
+from .test_jlcfootprint_easyeda_parse import UNHASHABLE_CODE_REFUSALS, WITHOUT_SUCCESS
 
 FIXTURES = Path(__file__).parent / "fixtures" / "jlcfootprint"
 UUID = "b3b82869fa924bae820e3a6cfb44d689"  # C2132's classic footprint uuid
@@ -143,6 +143,12 @@ def test_a_footprint_refusal_whose_code_is_a_list_or_a_dict_is_an_error(body):
     """The parser never raises: an unhashable code is an error with the code kept."""
     record = parse_puuid_response(body, "u")
     assert (record.status, record.error) == ("error", f"code {body['code']}")
+
+
+@pytest.mark.parametrize("body", WITHOUT_SUCCESS)
+def test_a_footprint_body_without_a_boolean_success_flag_is_an_error(body):
+    """Neither an answer nor EasyEDA's refusal: it is asked again, never taken as 'none'."""
+    assert parse_puuid_response(body, "u").status == "error"
 
 
 def test_pro_pad_numbers_lose_their_leading_zeros_like_classic_ones():

@@ -185,32 +185,37 @@ def _shape_list(container: dict) -> list[str]:
     ]
 
 
-def _classify_body(
-    body: Any, not_found_split: bool = True
-) -> tuple[str, Optional[str], Any]:
+def _classify_body(body: Any) -> tuple[str, Optional[str], Any]:
     """Classify a response body the way all four parsers open.
 
-    Returns ``(status, error, result)``.  ``status`` is ``"none"`` or ``"error"``
-    for a body that is not a JSON object or carries ``success: false`` (a
-    not-found code is ``none``, any other code is ``error``, so it is asked again
-    later), with ``error`` the detail text; otherwise ``status`` is ``"ok"``,
-    ``error`` is None and ``result`` is ``body.get("result")`` exactly as the
-    body carried it, unvalidated.  What counts as a usable result differs by
-    endpoint (a non-empty dict for the three per-part parsers, a list of devices
-    for the batch lookup), so that check stays with each caller.
+    Returns ``(status, error, result)``, by the body's ``success`` flag:
 
-    ``not_found_split`` is False for the batch lookup, which has no ``none``
-    status to reach: ``DevicesResult`` carries only an ``error``.
+    - the boolean True: an answer.  ``status`` is ``"ok"``, ``error`` is None and
+      ``result`` is ``body.get("result")`` exactly as the body carried it,
+      unvalidated.  What counts as a usable result differs by endpoint (a
+      non-empty dict for the three per-part parsers, a list of devices for the
+      batch lookup), so that check stays with each caller.
+    - the boolean False: EasyEDA's refusal.  With no code or a not-found code it
+      is ``"none"``, EasyEDA having nothing for the part; any other code is
+      ``"error"``, so it is asked again later.  ``error`` is the code and message.
+    - missing, or not a boolean (the string ``"false"``, say), or a body that is
+      not a JSON object: ``"error"`` with the reason, so it is asked again rather
+      than taken as EasyEDA's answer.
     """
     if not isinstance(body, dict):
         return "error", "response is not a JSON object", None
-    if body.get("success") is False:
+    success = body.get("success")
+    if success is True:
+        return "ok", None, body.get("result")
+    if success is False:
         code = body.get("code")
         detail = f"code {code}: {body.get('message', '')}".strip(": ")
-        if not not_found_split:
-            return "error", detail, None
         return ("none" if _is_not_found(code) else "error"), detail, None
-    return "ok", None, body.get("result")
+    return (
+        "error",
+        f"response has no boolean success flag (success is {success!r})",
+        None,
+    )
 
 
 def _is_not_found(code: Any) -> bool:
@@ -247,8 +252,9 @@ def parse_component_response(body: Any, lcsc: str) -> ComponentRecord:
     for the part (the checkerboard case): status ``none``.  ``success: false`` is
     ``none`` only when it carries no code or a not-found code; any other code is an
     ``error`` with the code and message kept, so it is asked again rather than
-    taken as EasyEDA's answer.  Anything malformed is ``error`` and never raises.
-    A record without a puuid is also ``error``.
+    taken as EasyEDA's answer.  A body without a boolean ``success`` flag, and
+    anything malformed, is ``error`` and never raises.  A record without a puuid is
+    also ``error``.
     """
     status, error, result = _classify_body(body)
     if status != "ok":
@@ -497,22 +503,23 @@ def parse_devices_response(body: Any, codes: list[str]) -> DevicesResult:
     record names its part in ``product_code``, its footprint in ``footprint.uuid``
     (``attributes.Footprint`` says the same) and its symbol in ``attributes.Symbol``;
     ``footprint.display_title`` is the suffix-bearing package name.  A record with no
-    footprint uuid is a miss: there is nothing to align.  Never raises.
+    footprint uuid is a miss: there is nothing to align.  An answer of any other
+    shape (no list of devices, or an entry that is not a record) is an error for
+    every code, so the codes are asked again instead of being taken as misses.
+    Never raises.
     """
     result = DevicesResult()
-    status, error, raw = _classify_body(body, not_found_split=False)
+    status, error, raw = _classify_body(body)
     if status != "ok":
-        result.error = error or ""
+        # The batch lookup has no "none" to reach: a refusal of any code, like any
+        # unreadable answer, says nothing about the codes it was asked for.
+        result.error = error or "unreadable answer"
         return result
-    if raw is None:
-        raw = []
-    items = raw.get("lists", []) if isinstance(raw, dict) else raw
-    if not isinstance(items, list):
+    items = raw.get("lists") if isinstance(raw, dict) else raw
+    if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
         result.error = "result is not a list of devices"
         return result
     for item in items:
-        if not isinstance(item, dict):
-            continue
         lcsc = str(item.get("product_code") or "").strip()
         footprint = _dict(item.get("footprint"))
         attributes = _dict(item.get("attributes"))

@@ -22,7 +22,7 @@ from .jlcfootprint_support import (
     recorded_devices,
     recorded_document,
 )
-from .test_jlcfootprint_easyeda_parse import UNHASHABLE_CODE_REFUSALS
+from .test_jlcfootprint_easyeda_parse import UNHASHABLE_CODE_REFUSALS, WITHOUT_SUCCESS
 
 SYMBOLS = {
     # C2132, C81598 and C88744: recorded from the Pro host by symbol uuid.
@@ -123,6 +123,12 @@ def test_a_symbol_refusal_whose_code_is_a_list_or_a_dict_is_an_error(body):
     assert (record.status, record.error) == ("error", f"code {body['code']}")
 
 
+@pytest.mark.parametrize("body", WITHOUT_SUCCESS)
+def test_a_symbol_body_without_a_boolean_success_flag_is_an_error(body):
+    """Neither an answer nor EasyEDA's refusal: it is asked again, never taken as 'none'."""
+    assert parse_symbol_response(body, "u").status == "error"
+
+
 def test_devices_response_classifies_hits_and_misses():
     """Every asked code is a hit with both uuids or a miss; a record without a footprint is a miss."""
     codes, body = recorded_devices("misses")
@@ -151,7 +157,6 @@ def test_devices_response_classifies_hits_and_misses():
                     "attributes": {"Symbol": "s2", "Footprint": "f2"},
                 },
                 {"product_code": "C3", "attributes": {"Symbol": "s3"}},
-                "garbage",
             ]
         },
     }
@@ -162,18 +167,26 @@ def test_devices_response_classifies_hits_and_misses():
 
 
 def test_devices_response_failures_classify_nothing():
-    """A refused, malformed or unexpected answer carries an error and no hits or misses."""
+    """A refused, malformed or unexpected answer carries an error and no hits or misses.
+
+    An answer that is not the expected list of device records says nothing about any
+    code, so every code is asked again rather than taken as a miss.
+    """
+    record = {"product_code": "C1", "footprint": {"uuid": "f1"}}
     for body in (
         "nope",
         {"success": False, "code": 401, "message": "denied"},
-        # A code that is not a scalar: the batch lookup has no not-found status to
-        # reach, so it reports the detail rather than testing an unhashable value.
         {"success": False, "code": ["401"], "message": "denied"},
+        {"code": 500, "result": [record]},
+        {"success": "true", "result": [record]},
+        {"success": True, "result": None},
+        {"success": True, "result": {}},
         {"success": True, "result": {"lists": 5}},
+        {"success": True, "result": [record, "garbage"]},
     ):
         result = parse_devices_response(body, ["C1"])
         assert result.error and result.hits == {} and result.missing == []
-    result = parse_devices_response({"success": True, "result": None}, ["C1"])
+    result = parse_devices_response({"success": True, "result": []}, ["C1"])
     assert result.error == "" and result.missing == ["C1"]
 
 

@@ -9,7 +9,9 @@ from jlcfootprint.easyeda_parse import (
     SymbolPin,
     parse_component_response,
     parse_footprint_pads,
+    parse_puuid_response,
     parse_symbol_pins,
+    parse_symbol_response,
 )
 from jlcfootprint.geometry import easyeda_pads_to_mm, named_pads
 from jlcfootprint.records import pin1_polarity
@@ -188,8 +190,44 @@ def test_error_codes_are_errors_not_none():
     )
 
 
+# Bodies without a boolean success flag: none at all, an empty object, a string, a number.
+WITHOUT_SUCCESS = [
+    {"code": 500, "message": "busy"},
+    {},
+    {"success": "false", "code": 500},
+    {"success": 1, "result": {"dataStr": {}}},
+]
+
+
+@pytest.mark.parametrize("body", WITHOUT_SUCCESS)
+def test_a_body_without_a_boolean_success_flag_is_an_error(body):
+    """Neither an answer nor EasyEDA's refusal: it is asked again, never taken as 'none'."""
+    record = parse_component_response(body, "C1")
+    assert record.status == "error"
+    assert record.error.startswith("response has no boolean success flag")
+
+
+@pytest.mark.parametrize(
+    "parse", [parse_component_response, parse_puuid_response, parse_symbol_response]
+)
+@pytest.mark.parametrize(
+    "body, status",
+    [
+        ({"success": True, "result": None}, "none"),
+        ({"success": False, "code": 404, "message": "not found"}, "none"),
+        ({"success": False}, "none"),
+        ({"success": False, "code": 500, "message": "busy"}, "error"),
+        ({"code": 500}, "error"),
+        ({}, "error"),
+        ({"success": "false", "code": 500}, "error"),
+    ],
+)
+def test_the_success_flag_decides_answer_refusal_or_unreadable(parse, body, status):
+    """True is an answer, False is EasyEDA's refusal (not-found is 'none'), anything else is an error."""
+    assert parse(body, "u").status == status
+
+
 # Refusals whose code is a list or a dict, as a fuzz of the parsers produced them.
-# None of them is a not-found code, not even a list holding 404.
 UNHASHABLE_CODE_REFUSALS = [
     {
         "code": {"result": None, "x": "x", "lists": -1, "uuid": -1, "shape": -1},

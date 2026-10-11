@@ -94,6 +94,23 @@ def test_failures_are_paced_too_and_three_in_a_row_stop_the_run(tmp_path, fake_n
     assert not list(tmp_path.iterdir()), "no failed body is written"
 
 
+def test_only_an_answer_or_a_genuine_none_is_kept(tmp_path, fake_network):
+    """EasyEDA's not-found refusal and an empty answer are kept; a body without a boolean success flag is not."""
+    recorder, log = fake_network
+    log["queue"] = [
+        FakeResponse(body={"success": False, "code": 404, "message": "not found"}),
+        FakeResponse(body={"success": True, "result": None}),
+        FakeResponse(body={"code": 500, "message": "busy"}),
+        FakeResponse(body={"success": "false", "code": 500}),
+    ]
+    rc = recorder.main(
+        ["C1", "C2", "C3", "C4", "--out", str(tmp_path), "--interval", "0"]
+    )
+    assert rc == 1
+    assert len(log["urls"]) == 4
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["C1.json", "C2.json"]
+
+
 def test_rate_limit_backs_off_then_gives_up_that_part(tmp_path, fake_network, capsys):
     """403 backs off 60, 120, 240 s (plus the interval) and the part is reported failed."""
     recorder, log = fake_network
