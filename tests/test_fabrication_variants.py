@@ -892,14 +892,14 @@ def test_changed_plot_source_preserves_previous_artifacts(
 def test_split_designator_rows_are_not_value_conflicts(
     runtime: SimpleNamespace,
 ) -> None:
-    """Splitting a large identical group must not trigger a plausibility warning."""
+    """Splitting a large identical group must not report a value mismatch."""
     references = [f"R{index:05d}" for index in range(400)]
     runtime.footprints[:] = [
         make_footprint(ref, 0, 0, Point(10, 20)) for ref in references
     ]
     begin(runtime, *(part(ref) for ref in references))
     assert len(runtime.exporter.output_snapshot.bom_rows) > 1
-    assert runtime.exporter.get_part_consistency_warnings() == ""
+    assert runtime.exporter.get_part_consistency_warnings() == {}
     runtime.exporter.abort_generation()
 
 
