@@ -1,20 +1,17 @@
-"""Small records the resolver core shares with the parsers.
+"""Small records the parsers fill and the code that judges a part reads.
 
 ``SymbolPin`` (a pin's number and label), the pin-1 label sets, the reading
 ``pin1_polarity`` takes from them, and ``DrawingMarks`` (what the drawings say
-about polarity and the body box) are two fields, two frozensets and a loop over
-them; the resolver core (``fit.py``, ``polarity.py``, ``resolver.py``) needs
-them without needing the 656-line EasyEDA response parser or the 657-line
-drawing reader that build them.  ``easyeda_parse.py`` and ``drawing.py`` import
-``SymbolPin`` and ``DrawingMarks`` back from here, so every existing import of
-those two names from those two modules keeps working.
+about polarity and the body box).  They live apart from the EasyEDA parser and
+the drawing reader so that code which only judges a part never imports either.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
-# Label sets shared with the crawler's extract_pin1_polarity.
+# Symbol pin labels that name pin 1's terminal; anything else says nothing.
 PIN1_CATHODE_LABELS = frozenset({"K", "C", "CA", "CAT", "CATHODE", "K1", "NEG", "-"})
 PIN1_ANODE_LABELS = frozenset({"A", "AN", "ANODE", "A1", "AK", "POS", "+"})
 
@@ -31,13 +28,13 @@ class SymbolPin:
 class DrawingMarks:
     """What the drawings say: the ``+`` pin, the ``+`` pad and the body box in millimetres."""
 
-    positive_pin: str | None = None
-    positive_pad: str | None = None
-    body_box: tuple[float, float, float, float] | None = None
+    positive_pin: Optional[str] = None
+    positive_pad: Optional[str] = None
+    body_box: Optional[tuple[float, float, float, float]] = None
 
 
-def pin1_polarity(pins: list[SymbolPin]) -> str | None:
-    """Return 'K', 'A' or None for pin 1, using the crawler's label sets."""
+def pin1_polarity(pins: list[SymbolPin]) -> Optional[str]:
+    """Return 'K' or 'A' when pin 1's label names its terminal, else None."""
     for pin in pins:
         if pin.number != "1":
             continue

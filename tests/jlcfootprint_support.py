@@ -1,10 +1,8 @@
 """Shared helpers for the jlcfootprint tests: recorded EasyEDA responses and the script loader.
 
-Everything here reads files: the recorded EasyEDA answers under
-``tests/fixtures/jlcfootprint/`` and the development scripts under
-``tools/jlcfootprint/``.  The board parts, the fake EasyEDA client and the fake
-clock are in ``jlcfootprint_fetch_support``; the controller fixture builder is in
-``jlcfootprint_controller_support``.
+Everything here reads files: EasyEDA's recorded answers under
+``tests/fixtures/jlcfootprint/`` and the development tools under
+``tools/jlcfootprint/``.
 """
 
 from __future__ import annotations
@@ -64,7 +62,7 @@ def pro_hit(lcsc: str) -> DeviceHit:
 
 
 def pro_record(lcsc: str) -> ComponentRecord:
-    """Assemble one part from the Pro recordings the way the plugin's cache holds it.
+    """Assemble one part from its recorded Pro answers, as a live fetch assembles it.
 
     The batch hit names the uuids, ``footprint_<uuid>.json`` gives the pads and the
     drawing, ``symbol_<uuid>.json`` the pins and the symbol drawing.

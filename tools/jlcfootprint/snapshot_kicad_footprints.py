@@ -5,10 +5,11 @@ Usage:
     python3 tools/jlcfootprint/snapshot_kicad_footprints.py --all
 
 Each ``Library:Name`` is read from the KiCad footprint libraries installed on this
-machine with the plugin's own ``.kicad_pcb`` parser (pads and the courtyard box) and written to
-``tests/fixtures/jlcfootprint/kicad/Library__Name.json`` so the library-backed
-resolver tests run where KiCad is not installed.  ``--all`` re-records every
-existing snapshot, which is how a KiCad library update is picked up.
+machine with the package's own parser (``jlcfootprint.boardfile``: the pads and
+the courtyard box) and written to
+``tests/fixtures/jlcfootprint/kicad/Library__Name.json``, so the library-backed
+tests run where KiCad is not installed.  ``--all`` re-records every existing
+snapshot, which is how a KiCad library update is picked up.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import json
 from pathlib import Path
 import re
 import sys
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -68,7 +70,7 @@ def existing() -> list[str]:
     ]
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """Run the recorder from the command line."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter

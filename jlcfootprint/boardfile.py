@@ -1,20 +1,25 @@
-"""Minimal KiCad .kicad_pcb footprint parser for tools and tests (stdlib, no pcbnew).
+"""A minimal parser for the footprints in KiCad board and footprint files, without pcbnew.
 
-The plugin itself reads pads through pcbnew; this parser exists for the
-validator and the test-suite.
+The plugin reads a board's pads through pcbnew.  This parser is for the
+development tools and the tests, which read boards (``.kicad_pcb``) and KiCad's
+library footprints (``.kicad_mod``) from plain Python.
 
-Extracts footprint data only — skips tracks, zones, nets, and all other
-board-level constructs.  Python 3.9 compatible, stdlib only.
+It extracts footprint data only and skips tracks, zones, nets and every other
+board-level construct.  Python 3.9 compatible, stdlib only.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
+from typing import Optional
 
 from .geometry import Pad
 
-# Same rule as upstream's footprint helper: any field named like lcsc/jlc holding C<digits>.
+# A property is the LCSC number when its name contains "lcsc" or "jlc" and its value
+# is C<digits>.  The plugin's own rule for field names (part_assignments) is
+# stricter; this one is enough for the boards the tools and tests read, and the
+# value test keeps out a field such as "JLCPCB Rotation".
 _LCSC_FIELD_NAME = re.compile(r"lcsc|jlc", re.IGNORECASE)
 _LCSC_VALUE = re.compile(r"^C\d+$")
 
@@ -48,10 +53,10 @@ class KiCadFootprint:
     placed_y: float
     placed_rotation: float  # the footprint-level rotation in degrees
     layer: str  # e.g. "F.Cu" (top) or "B.Cu" (bottom)
-    lcsc: str | None  # any lcsc/jlc-named property holding C<digits>
+    lcsc: Optional[str]  # any lcsc/jlc-named property holding C<digits>
     pads: list[KiCadPad] = field(default_factory=list)
     # The courtyard's box in the footprint frame (mm), None without a courtyard.
-    courtyard: tuple[float, float, float, float] | None = None
+    courtyard: Optional[tuple[float, float, float, float]] = None
 
     @property
     def is_bottom(self) -> bool:
@@ -128,7 +133,7 @@ def _parse_sexp(text: str) -> list[object]:
 # ---------------------------------------------------------------------------
 
 
-def _tag(node: object) -> str | None:
+def _tag(node: object) -> Optional[str]:
     """Return the tag (first atom element) of a list node, or None."""
     if isinstance(node, list) and node and isinstance(node[0], str):
         return node[0]
@@ -142,7 +147,7 @@ def _children(node: object) -> list[object]:
     return []
 
 
-def _find_direct(node: object, tag: str) -> list[object] | None:
+def _find_direct(node: object, tag: str) -> Optional[list[object]]:
     """Find the first direct child list with the given tag."""
     for child in _children(node):
         if isinstance(child, list) and _tag(child) == tag:
@@ -159,7 +164,7 @@ def _find_all_direct(node: object, tag: str) -> list[list[object]]:
     ]
 
 
-def _str_arg(node: object, idx: int = 1) -> str | None:
+def _str_arg(node: object, idx: int = 1) -> Optional[str]:
     """Return the idx-th element as str, or None if missing/wrong type."""
     if isinstance(node, list) and len(node) > idx:
         v = node[idx]
@@ -168,7 +173,7 @@ def _str_arg(node: object, idx: int = 1) -> str | None:
     return None
 
 
-def _float_arg(node: object, idx: int = 1) -> float | None:
+def _float_arg(node: object, idx: int = 1) -> Optional[float]:
     """Return the idx-th element as float, or None if missing/wrong type."""
     if isinstance(node, list) and len(node) > idx:
         v = node[idx]
@@ -185,7 +190,7 @@ def _float_arg(node: object, idx: int = 1) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def _parse_pad(pad_node: list[object]) -> KiCadPad | None:
+def _parse_pad(pad_node: list[object]) -> Optional[KiCadPad]:
     """Parse a (pad ...) node into a KiCadPad, or None if it should be skipped."""
     # pad_node[0] = "pad", [1] = number, [2] = type, [3] = shape, ...
     if len(pad_node) < 4:
@@ -239,7 +244,9 @@ _COURTYARD_LAYERS = ("F.CrtYd", "B.CrtYd")
 _GRAPHIC_TAGS = ("fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly")
 
 
-def _courtyard_box(fp_node: list[object]) -> tuple[float, float, float, float] | None:
+def _courtyard_box(
+    fp_node: list[object],
+) -> Optional[tuple[float, float, float, float]]:
     """Return the box of the footprint's courtyard graphics (their centrelines), or None.
 
     Lines, rectangles and polygons contribute their points, arcs their three
@@ -284,7 +291,7 @@ def _courtyard_box(fp_node: list[object]) -> tuple[float, float, float, float] |
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def _parse_footprint(fp_node: list[object]) -> KiCadFootprint | None:
+def _parse_footprint(fp_node: list[object]) -> Optional[KiCadFootprint]:
     """Parse a (footprint ...) node into a KiCadFootprint."""
     # fp_node[0] = "footprint", fp_node[1] = library+name string
     if len(fp_node) < 2:
@@ -313,7 +320,7 @@ def _parse_footprint(fp_node: list[object]) -> KiCadFootprint | None:
     # Properties — iterate over all (property name value ...) children
     reference = ""
     value = ""
-    lcsc: str | None = None
+    lcsc: Optional[str] = None
 
     for prop_node in _find_all_direct(fp_node, "property"):
         prop_name = _str_arg(prop_node, 1)

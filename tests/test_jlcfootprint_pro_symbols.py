@@ -22,7 +22,7 @@ from .jlcfootprint_support import (
 )
 
 SYMBOLS = {
-    # C2132, C81598 and C88744: recorded 2026-09-16 from the Pro host by symbol uuid.
+    # C2132, C81598 and C88744: recorded from the Pro host by symbol uuid.
     "C2132": "c7fc7a92fb9f4171a873988b8332913e",
     "C81598": "3861a833159347518b9253018065656d",
     "C88744": "7c5fd9c52c42478ea0b2dc7dd589563c",
@@ -211,7 +211,7 @@ def test_polygon_pads_take_their_bounding_box():
 
 
 def test_pro_pin_numbers_lose_their_leading_zeros_like_classic_ones():
-    """A Pro symbol that numbers a pin "01" matches the footprint's pad 1 (review nit)."""
+    """A Pro symbol that numbers a pin "01" matches the footprint's pad 1."""
     lines = [
         '["DOCTYPE","SYMBOL","1.1"]',
         '["PIN","e3",1,null,10,20,10,270,null,0,0,1]',

@@ -1,4 +1,4 @@
-"""Tests for spec 19.8: a ``+`` beside the pads of a large part, under the absolute bar floor."""
+"""Tests for the footprint ``+`` reader's absolute floor: a ``+`` of ordinary size beside a large part's pads."""
 
 import pytest
 
@@ -29,20 +29,20 @@ def classic_plus_at(x, y, arm):
 
 
 def test_a_plus_beside_a_large_part_is_read_below_five_percent_of_the_spacing():
-    """A 1.6 mm + beside pads 37.6 mm apart (4.3 % of the spacing) names its pad (spec 19.8)."""
+    """A 1.6 mm + beside pads 37.6 mm apart (4.3 % of the spacing) names its pad."""
     assert footprint_positive_pad(LARGE_PRO_PADS + plus_at(13, -740, -77, 31.5)) == "1"
     assert footprint_positive_pad(LARGE_PRO_PADS + plus_at(13, 740, -77, 31.5)) == "2"
 
 
 def test_the_floor_follows_the_pads_when_they_are_drawn_along_y():
-    """Pads 1,481.88 mil apart along Y: the 63-mil + beside either pad is read (spec 19.8)."""
+    """Pads 1,481.88 mil apart along Y: the 63-mil + beside either pad is read."""
     pads = [pro_pad("1", 0, 740.94), pro_pad("2", 0, -740.94)]
     assert footprint_positive_pad(pads + plus_at(13, -77, 740, 31.5)) == "1"
     assert footprint_positive_pad(pads + plus_at(13, -77, -740, 31.5)) == "2"
 
 
 def test_the_symbol_reader_keeps_its_five_percent_bound_on_a_long_pin_span():
-    """The floor is the footprint's alone: a symbol's 4 % + is not read, a 6 % one is (spec 19.8)."""
+    """The floor is the footprint's alone: a symbol's 4 % + is not read, a 6 % one is."""
     pins = [
         '["PIN","a",1,null,-500,0,10,0,null,0,0,1]',
         '["ATTR","a1","a","NUMBER","1"]',
@@ -62,7 +62,7 @@ def test_the_symbol_reader_keeps_its_five_percent_bound_on_a_long_pin_span():
 
 
 def test_a_cross_well_below_the_absolute_floor_is_not_read_on_the_same_pads():
-    """A 0.4 mm cross beside the same pads stays too short to be a mark (spec 19.8)."""
+    """A 0.4 mm cross beside the same pads stays too short to be a mark."""
     tiny = plus_at(13, -740, -77, 8.0, thick=3.0)
     assert footprint_positive_pad(LARGE_PRO_PADS + tiny) is None
 

@@ -1,22 +1,21 @@
-"""Polarity marks and the body outline read from EasyEDA drawings (spec 16.6).
+"""Polarity marks and the body outline read from EasyEDA drawings.
 
 No EasyEDA record carries a pad's polarity as metadata.  What the data carries is
 the drawing: the symbol draws a ``+`` beside its positive pin and the footprint
 draws a ``+`` beside its positive pad (a diode's anode, a capacitor's positive
 terminal) on the silkscreen or the document layer, as two short bars crossing at
-their midpoints.  Calibrated against JLC's placement preview on 2026-09-17: the
-footprint mark named the observed positive terminal on all 22 polarized two-pad
-parts with a known truth and the symbol mark on all 10 capacitors, where the
-package name's FD/RD token was wrong on three reversed-numbering tantalums.
+their midpoints.  JLC's placement preview places polarized two-pad parts by
+these marks: where a tantalum's footprint numbers its terminals the other way
+round, the package name's FD/RD token is wrong and the marks are right.
 
 Both drawing formats are read.  Pro records are JSON arrays in mils with Y up;
 classic shapes are ``~``-separated strings in canvas units (10 mil) with Y down.
-Marks are located in each drawing's own frame against that drawing's own pins or
-pads, so they need no unit conversion, except the footprint's absolute floor on a
-bar's length (spec 19.8), which is converted into each format's units; the body box
-is converted to millimetres in the pad frame the resolver uses (KiCad's Y-down,
-origin at the footprint origin).
-Stdlib only, pure functions, malformed records are skipped rather than raised.
+A mark is found in its drawing's own frame, against that drawing's own pins or
+pads, so it needs no unit conversion; only the footprint's absolute floor on a
+bar's length is converted into each format's units.  The body box is converted to
+millimetres in the footprint's pad frame, the frame of ``geometry.Pad`` (KiCad's
+Y down, origin at the footprint origin).  Stdlib only, pure functions; malformed
+records are skipped, never raised.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 from .easyeda_parse import (
     PRO_MILS_PER_CANVAS_UNIT,
@@ -55,11 +54,13 @@ _LENGTH_RATIO = 2.5
 _SYMBOL_BAR_RANGE = (0.05, 0.45)
 _FOOTPRINT_BAR_RANGE = (0.05, 0.70)
 # The footprint's lower bound is never longer than this, in millimetres, so a + of
-# ordinary size beside the pads of a large part is read (spec 19.8).  Measured on
-# the crawl's 13,257 two-pad footprint drawings (2026-10-09): every + the 5 % bound
-# drops is at least 1.016 mm long (40 mil), on pads 28.8 to 86.1 mm apart, so any
-# floor up to that reads the same 26 drawings; 0.75 mm sits a quarter below it and
-# still reads the 30-mil (0.762 mm) + that parts 8 to 15 mm apart often carry.
+# ordinary size beside the pads of a large part (a battery holder's, pads tens of
+# millimetres apart) is still read: 5 % of that spacing would be longer than the
+# mark.  Measured over 13,257 two-pad footprint drawings from EasyEDA's library,
+# every + the 5 % bound drops is at least 1.016 mm (40 mil) long, on pads 28.8 to
+# 86.1 mm apart, so any floor up to that reads the same 26 drawings; 0.75 mm sits a
+# quarter below it and still reads the 30-mil (0.762 mm) + that parts 8 to 15 mm
+# apart often carry.
 _FOOTPRINT_BAR_FLOOR_MM = 0.75
 # The crossing sits off the centre by at least this fraction of the pad spacing, so
 # a centre cross or a diode's silk symbol never names a pad.
@@ -150,7 +151,7 @@ def _has_arc(values: Any) -> bool:
     )
 
 
-def _box_of(numbers: list[float]) -> tuple[float, float, float, float] | None:
+def _box_of(numbers: list[float]) -> Optional[tuple[float, float, float, float]]:
     """Return the bounding box of x/y pairs, or None for fewer than two points."""
     if len(numbers) < 4:
         return None
@@ -159,7 +160,9 @@ def _box_of(numbers: list[float]) -> tuple[float, float, float, float] | None:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def _bar_from_box(box: tuple[float, float, float, float], layer: str) -> Segment | None:
+def _bar_from_box(
+    box: tuple[float, float, float, float], layer: str
+) -> Optional[Segment]:
     """Return the centreline of a filled box when it is a thin bar, else None."""
     x1, y1, x2, y2 = box
     width, height = x2 - x1, y2 - y1
@@ -174,7 +177,7 @@ def _bar_from_box(box: tuple[float, float, float, float], layer: str) -> Segment
     return None
 
 
-def _stroke(numbers: list[float], layer: str) -> Segment | None:
+def _stroke(numbers: list[float], layer: str) -> Optional[Segment]:
     """Return a two-point stroke of any angle as a segment, else None.
 
     Only axis-aligned strokes can form a ``+``; the others still count as
@@ -187,7 +190,7 @@ def _stroke(numbers: list[float], layer: str) -> Segment | None:
 
 
 def _edges_between(
-    corners: list[tuple[float, float] | None], layer: str
+    corners: list[Optional[tuple[float, float]]], layer: str
 ) -> list[Segment]:
     """Return the segments between consecutive corners; None breaks the chain."""
     return [
@@ -205,7 +208,7 @@ def _pro_edges(points: Any, layer: str) -> list[Segment]:
     """
     if not isinstance(points, list) or (points and points[0] == "CIRCLE"):
         return []
-    corners: list[tuple[float, float] | None] = []
+    corners: list[Optional[tuple[float, float]]] = []
     index = 0
     skip_angle = False
     while index < len(points):
@@ -231,14 +234,16 @@ def _pro_edges(points: Any, layer: str) -> list[Segment]:
 
 def _edges_of(numbers: list[float], layer: str) -> list[Segment]:
     """Return the edges of a flat ``x y x y ...`` point list."""
-    corners: list[tuple[float, float] | None] = list(zip(numbers[0::2], numbers[1::2]))
+    corners: list[Optional[tuple[float, float]]] = list(
+        zip(numbers[0::2], numbers[1::2])
+    )
     return _edges_between(corners, layer)
 
 
 _PATH_TOKEN = re.compile(r"[A-Za-z]|[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
 
 
-def _classic_path_numbers(path: str) -> list[float] | None:
+def _classic_path_numbers(path: str) -> Optional[list[float]]:
     """Return the points of a classic ``M x y L x y ... Z`` path, or None when it has arcs.
 
     Commands and numbers may be run together (``L3996.0158,3002.1968``), so the
@@ -398,8 +403,8 @@ def _body_boxes(shapes: list[Any]) -> list[tuple[float, float, float, float]]:
 
 def footprint_body_box(
     shapes: list[Any], origin: tuple[float, float] = (0.0, 0.0)
-) -> tuple[float, float, float, float] | None:
-    """Return the body outline's box in millimetres in the resolver's pad frame, or None.
+) -> Optional[tuple[float, float, float, float]]:
+    """Return the body outline's box in millimetres in the footprint's pad frame, or None.
 
     Pro drawings are in mils with Y up about the footprint origin; classic drawings
     are in canvas units with Y down about ``origin`` (the ``head`` x/y that the pad
@@ -445,7 +450,7 @@ def plus_marks(
     bars: list[Segment],
     span: float,
     bar_range: tuple[float, float],
-    edges: list[Segment] | None = None,
+    edges: Optional[list[Segment]] = None,
 ) -> list[tuple[float, float]]:
     """Return the crossing points of every ``+`` drawn by the bars.
 
@@ -456,9 +461,10 @@ def plus_marks(
     :data:`_CLEARANCE` of the shorter bar, and no polyline or polygon edge
     (``edges``) of that layer through the crossing itself: a ``+`` stands alone,
     where a diode's silk arrow, drawn as one polyline, ends on its bar exactly at
-    the bar's crossing with the lead.  Edges are tested at the crossing only: on
-    the crawl's 13,000 two-pad drawings that changes no answer, while testing
-    them at the bars' ends would reject the marks drawn beside a pad outline.
+    the bar's crossing with the lead.  Edges are tested at the crossing only: over
+    some 13,000 two-pad drawings from EasyEDA's library that changes no answer,
+    while testing them at the bars' ends would reject the marks drawn beside a pad
+    outline.
     """
     if span <= 0:
         return []
@@ -516,8 +522,8 @@ def footprint_bar_range(shapes: list[Any], spacing: float) -> tuple[float, float
 
     The lower bound is the smaller of 5 % of the spacing and
     :data:`_FOOTPRINT_BAR_FLOOR_MM` in the drawing's own units (Pro mils, classic
-    10-mil canvas units), so the bound stops growing with the part (spec 19.8);
-    the upper bound is :data:`_FOOTPRINT_BAR_RANGE`'s.
+    10-mil canvas units), so the bound stops growing with the part; the upper
+    bound is :data:`_FOOTPRINT_BAR_RANGE`'s.
     """
     if is_pro(shapes):
         mm_per_unit = EASYEDA_UNIT_MM / PRO_MILS_PER_CANVAS_UNIT
@@ -529,7 +535,7 @@ def footprint_bar_range(shapes: list[Any], spacing: float) -> tuple[float, float
     return (min(low, _FOOTPRINT_BAR_FLOOR_MM / mm_per_unit / spacing), high)
 
 
-def footprint_positive_pad(shapes: list[Any]) -> str | None:
+def footprint_positive_pad(shapes: list[Any]) -> Optional[str]:
     """Return the number of the pad the footprint's ``+`` marks sit beside, or None.
 
     Only two-pad drawings are read.  The bars' lengths are judged by
@@ -638,7 +644,7 @@ def symbol_edges(shapes: list[Any]) -> list[Segment]:
     return _symbol_primitives(shapes)[1]
 
 
-def symbol_positive_pin(shapes: list[Any]) -> str | None:
+def symbol_positive_pin(shapes: list[Any]) -> Optional[str]:
     """Return the number of the pin the symbol's ``+`` sits beside, or None.
 
     Only two-pin symbols are read; the nearer pin must be clearly nearer and every

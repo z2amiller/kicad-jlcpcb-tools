@@ -38,14 +38,14 @@ def test_c14663_is_a_two_pad_0603_capacitor():
 
 
 def test_two_parts_sharing_a_puuid_have_different_symbols():
-    """C14663 and C15849 both use C0603 but carry their own symbol uuid (spec section 2)."""
+    """C14663 and C15849 both use C0603 but carry their own symbol uuid."""
     a, b = load("C14663"), load("C15849")
     assert a.puuid == b.puuid
     assert a.symbol_uuid != b.symbol_uuid
 
 
 def test_c2132_sot23_pads_match_the_name():
-    """SOT-23-3 -BR: pads 1 and 2 stacked on one side 1.90 units of pitch apart, pad 3 opposite."""
+    """SOT-23-3 -BR: pads 1 and 2 on one side, 1.90 mm apart (the name's P1.90), pad 3 opposite."""
     record = load("C2132")
     assert record.package_name == "SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR"
     assert record.puuid == "b3b82869fa924bae820e3a6cfb44d689"
@@ -96,7 +96,7 @@ def test_parse_symbol_pins_reads_number_and_label():
     ],
 )
 def test_pin1_polarity(pins, expected):
-    """Pin-1 polarity follows the crawler's label sets; unlabelled pins give None."""
+    """Pin-1 polarity follows the label sets; unlabelled pins give None."""
     assert pin1_polarity(pins) == expected
 
 

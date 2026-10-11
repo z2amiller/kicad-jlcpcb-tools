@@ -135,7 +135,7 @@ def test_puuid_response_statuses():
 
 
 def test_pro_pad_numbers_lose_their_leading_zeros_like_classic_ones():
-    """A Pro drawing that writes "01" names the same pad as a classic "1" (review nit)."""
+    """A Pro drawing that writes "01" names the same pad as a classic "1"."""
     padded = PRO_SOT23[0].replace('"",1,"1"', '"",1,"01"')
     pads, skipped = parse_pro_pads([padded])
     assert (skipped, [pad["number"] for pad in pads]) == (0, ["1"])

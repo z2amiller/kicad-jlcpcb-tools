@@ -1,16 +1,18 @@
-"""Read one KiCad library footprint: from this machine's libraries or a recorded snapshot.
+"""Read one KiCad library footprint: from a recorded snapshot or this machine's libraries.
 
-The resolver's library-backed tests and two dev-time scripts all need the pads and
-the courtyard of a named ``Library:Footprint``.  Where KiCad is installed they come
-from its own ``.pretty`` directories; where it is not (CI, and any machine without
-it) they come from the JSON snapshots under ``tests/fixtures/jlcfootprint/kicad``,
-recorded by ``tools/jlcfootprint/snapshot_kicad_footprints.py``.
+The library-backed tests and the snapshot recorder need the pads and the
+courtyard of a named ``Library:Footprint``.  The JSON snapshot under
+``tests/fixtures/jlcfootprint/kicad``, recorded by
+``tools/jlcfootprint/snapshot_kicad_footprints.py``, is read when there is one, so
+the tests see the same pads on every machine and need no KiCad (CI has none);
+otherwise the footprint is read from an installed KiCad's ``.pretty``
+directories.
 
-It lives beside the scripts rather than in ``tests/`` so that no script has to
-import from the test package, and not in ``jlcfootprint/`` because none of it is
-something the shipped plugin ever reads: two of the paths name the test fixtures,
-and the third names a developer's KiCad install behind a test environment
-variable.  The parsing itself is the package's (``boardfile``).
+It lives with the development tools rather than in ``tests/`` so that no tool
+imports from the test package, and not in ``jlcfootprint/`` because the plugin
+never reads any of it: the snapshots are test fixtures, and the installed
+libraries are found at the macOS KiCad application's path.  The parsing itself
+is the package's (``boardfile``).
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -51,7 +54,7 @@ def footprints_available() -> bool:
 
 def installed_library_footprint(
     library: str, name: str
-) -> tuple[list[Pad], Box | None]:
+) -> tuple[list[Pad], Optional[Box]]:
     """Read one footprint's pads and courtyard box from the installed KiCad libraries."""
     text = (KICAD_FOOTPRINTS / f"{library}.pretty" / f"{name}.kicad_mod").read_text(
         encoding="utf-8"
@@ -65,7 +68,7 @@ def installed_library_pads(library: str, name: str) -> list[Pad]:
     return installed_library_footprint(library, name)[0]
 
 
-def library_footprint(library: str, name: str) -> tuple[list[Pad], Box | None]:
+def library_footprint(library: str, name: str) -> tuple[list[Pad], Optional[Box]]:
     """Return a KiCad library footprint's pads and courtyard box, footprint frame, unplaced.
 
     The recorded snapshot under ``tests/fixtures/jlcfootprint/kicad`` is used when it

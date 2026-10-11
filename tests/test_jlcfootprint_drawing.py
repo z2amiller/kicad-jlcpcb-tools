@@ -310,7 +310,7 @@ def test_segment_helpers_and_symbol_bars():
 
 
 def test_symbol_pins_skip_unnumbered_pins_in_both_formats():
-    """A pin with no number names no pad and is dropped; its numbered siblings survive (review nit)."""
+    """A pin with no number names no pad and is dropped; its numbered siblings survive."""
     classic = [
         "P~show~0~1~-10~0~0~~gge1~0^^0~-10~0^^1~-7~0~0~K~start~~~#880000^^1~-3~0~0~1~end~~~#880000",
         "P~show~0~~10~0~180~~gge2~0^^0~10~0^^1~7~0~180~A~end~~~#880000^^1~3~0~180~~end~~~#880000",

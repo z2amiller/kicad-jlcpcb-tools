@@ -10,7 +10,7 @@ Usage:
 Classic per-LCSC responses land in ``tests/fixtures/jlcfootprint/easyeda/<lcsc>.json``;
 classic per-uuid footprint responses in ``tests/fixtures/jlcfootprint/easyeda_uuid/
 uuid_<uuid>.json`` (``pro_<uuid>.json`` with ``--pro``).  The EasyEDA Pro host's
-answers, which the plugin fetches live (spec 15), land in
+answers, which the plugin fetches live, land in
 ``tests/fixtures/jlcfootprint/easyeda_pro/``: ``--batch`` records one
 ``searchByCodes`` answer as ``devices_<name>.json`` (the codes asked and the body,
 so misses are known), ``--footprint`` and ``--symbol`` record one document each
@@ -19,14 +19,16 @@ queues every footprint and symbol a recorded batch answer names.  Existing files
 are skipped, so re-running costs nothing.
 
 Requests are spaced ``interval`` seconds apart whatever happened to the previous
-one.  The classic host returned 403 after about 18 requests at 1.5 s and 10 s has
-been safe there; the Pro host served the crawl at 2.5 per second, so ``--interval 1``
-is fine for Pro-only runs.  A 403/429/5xx backs off 60, 120 and 240 s before that
-item is given up, and three items failing in a row stop the run: a server that
-keeps refusing is left alone.  A response is kept only when the plugin's parser
-reads it as ``ok`` (data for the item) or ``none`` (EasyEDA has nothing for it);
-anything else is a failure and no file is written.  Exits 1 when any item failed
-or was not attempted.
+one.  The classic host answers 403 after about 18 requests at 1.5 s, and 10 s is
+safe there; the Pro host serves 2.5 requests per second without refusing, so
+``--interval 1`` is fine for Pro-only runs.  A 403/429/5xx backs off 60, 120 and
+240 s before that item is given up, and three items failing in a row stop the
+run: a server that keeps refusing is left alone.  A response is kept only when
+the package's parser reads it as ``ok`` (data for the item) or ``none`` (EasyEDA
+has nothing for it); anything else is a failure and no file is written.  A kept
+file is EasyEDA's answer as it came, written as compact JSON; a ``devices_*.json``
+file wraps the answer with the codes it was asked for.  Exits 1 when any item
+failed or was not attempted.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from pathlib import Path
 import re
 import sys
 import time
-from typing import Any
+from typing import Any, Optional
 
 import requests
 
@@ -201,7 +203,7 @@ def uuids_from_devices(paths: list[Path]) -> tuple[list[str], list[str]]:
     return footprints, symbols
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """Record each requested item unless its fixture already exists."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter

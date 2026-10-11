@@ -1,32 +1,31 @@
-"""Parse EasyEDA responses (no network here; the client fetches them).
+"""Parse EasyEDA's responses; this module makes no requests of its own.
 
 The classic per-LCSC response carries two drawings.  ``result.dataStr`` is the
 schematic symbol, per part, whose ``P~`` shapes carry pin numbers and optional
 labels such as ``A`` and ``K``.  ``result.packageDetail.dataStr`` is the
-footprint, per puuid, whose ``PAD~`` shapes carry the pad geometry (spec 2).
+footprint, per puuid, whose ``PAD~`` shapes carry the pad geometry.  Two parts
+that share a footprint can carry different symbols, so pin meaning is per part.
 The EasyEDA Pro host answers the batch device lookup with one record per known
 part (symbol uuid, footprint uuid, package name) and the per-uuid endpoint with
 one document, a footprint or a symbol, in the Pro text form (newline-delimited
-JSON arrays) (spec 15).
+JSON arrays).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-from typing import Any
+from typing import Any, Optional
 
 from .records import SymbolPin
 
-# SymbolPin lives in .records, shared with the resolver core; re-exported here so
-# this module's own name is unchanged.  The pin-1 label sets and pin1_polarity,
-# which reads a symbol rather than parsing one, live there too and are imported
-# from .records by the two modules that use them.
+# SymbolPin lives in .records so that code judging a part can read it without this
+# parser; every record below carries a list of them.
 
 
 @dataclass
 class ComponentRecord:
-    """Everything the resolver needs from one per-LCSC EasyEDA response."""
+    """One part's EasyEDA data: the classic per-LCSC response, or the Pro host's three answers joined."""
 
     lcsc: str
     status: str  # 'ok' | 'none' | 'error'
@@ -152,8 +151,8 @@ def parse_footprint_pads(
     return pads, skipped
 
 
-# 3D-model nodes are artwork, not geometry; a graphics-based polarity reader needs
-# the drawing commands only, and the nodes are half the bytes of a footprint.
+# 3D-model nodes are artwork, not geometry; the drawing reader needs only the drawing
+# commands, and the nodes are half the bytes of a footprint.
 _DROPPED_SHAPE_PREFIXES = ("SVGNODE~",)
 
 # ``success: false`` bodies that mean "no such component" rather than a server problem.
@@ -187,23 +186,22 @@ def _shape_list(container: dict) -> list[str]:
 
 def _classify_body(
     body: Any, not_found_split: bool = True
-) -> tuple[str, str | None, Any]:
+) -> tuple[str, Optional[str], Any]:
     """Classify a response body the way all four parsers open.
 
     Returns ``(status, error, result)``.  ``status`` is ``"none"`` or ``"error"``
     for a body that is not a JSON object or carries ``success: false`` (a
-    not-found code is ``none``, any other code is ``error`` so the cache retries
-    it), with ``error`` the detail text; otherwise ``status`` is ``"ok"``,
+    not-found code is ``none``, any other code is ``error``, so it is asked again
+    later), with ``error`` the detail text; otherwise ``status`` is ``"ok"``,
     ``error`` is None and ``result`` is ``body.get("result")`` exactly as the
     body carried it, unvalidated.  What counts as a usable result differs by
     endpoint (a non-empty dict for the three per-part parsers, a list of devices
     for the batch lookup), so that check stays with each caller.
 
     ``not_found_split`` is False for the batch lookup, which has no ``none``
-    status to reach: ``DevicesResult`` carries only an ``error``.  It never asked
-    whether the code is a not-found one, and asking is not free -- a ``code`` that
-    is a list or a dict cannot be tested against a frozenset, so the membership
-    would raise ``TypeError`` out of a parser documented never to raise.
+    status to reach: ``DevicesResult`` carries only an ``error``.  The batch path
+    therefore never tests the code, which also keeps a ``code`` that is a list or
+    a dict, and so cannot be looked up in a frozenset, from raising ``TypeError``.
     """
     if not isinstance(body, dict):
         return "error", "response is not a JSON object", None
@@ -239,9 +237,9 @@ def parse_component_response(body: Any, lcsc: str) -> ComponentRecord:
     ``success: true`` with a null or empty ``result`` means EasyEDA has no component
     for the part (the checkerboard case): status ``none``.  ``success: false`` is
     ``none`` only when it carries no code or a not-found code; any other code is an
-    ``error`` with the code and message kept, so the cache retries it rather than
-    parking it for a month.  Anything malformed is ``error`` and never raises.  A
-    record without a puuid is also ``error``.
+    ``error`` with the code and message kept, so it is asked again rather than
+    taken as EasyEDA's answer.  Anything malformed is ``error`` and never raises.
+    A record without a puuid is also ``error``.
     """
     status, error, result = _classify_body(body)
     if status != "ok":
@@ -298,19 +296,19 @@ def parse_component_response(body: Any, lcsc: str) -> ComponentRecord:
 
 
 # ---------------------------------------------------------------------------
-# EasyEDA Pro footprint text: what the per-uuid endpoint returns
+# EasyEDA Pro footprint text, as the per-uuid endpoint serves it
 # ---------------------------------------------------------------------------
 
 # Pro footprint text is in mils with Y up; the classic canvas unit is 10 mil with Y
 # down.  Pro pads are converted to classic canvas units when parsed, so every consumer
-# sees one raw pad form.  Checked on C2132, C46749, C6186, C19213, C7950 and C88744
-# against the classic responses for the same footprints (2026-09-16).
+# sees one raw pad form: C2132's footprint gives the same pads in both formats
+# (tests/test_jlcfootprint_pro_format.py).
 PRO_MILS_PER_CANVAS_UNIT = 10.0
 
 
 @dataclass
 class FootprintRecord:
-    """One footprint on its own: what the per-uuid endpoint yields.
+    """One footprint on its own, as the per-uuid endpoint serves it.
 
     ``pads`` use the same raw form as ``ComponentRecord.pads``: classic canvas units,
     Y down, origin subtracted.
@@ -475,7 +473,7 @@ class DevicesResult:
     """What one ``searchByCodes`` answer says about the codes it was asked for.
 
     ``error`` is non-empty when the answer could not be read; nothing is a hit or a
-    miss then and the caller retries the chunk.
+    miss then, and the codes are to be asked again.
     """
 
     hits: dict[str, DeviceHit] = field(default_factory=dict)
@@ -655,20 +653,18 @@ def assemble_record(
     lcsc: str,
     hit: DeviceHit,
     footprint: FootprintRecord,
-    symbol: SymbolRecord | None,
+    symbol: Optional[SymbolRecord],
 ) -> ComponentRecord:
     """Join a batch hit and its footprint and symbol documents into one record.
 
-    This is the join ``validate_board.load_pro_record`` and
-    ``tests/jlcfootprint_support.pro_record`` build by hand from the Pro
-    fixtures, the way the plugin's live fetch builds it from the network.
-    ``hit`` names the uuids and the batch lookup's package name; ``footprint``
-    is the parsed per-uuid footprint document, whatever its own status (a
-    caller that only wants an ``ok`` part checks that itself, before or after
-    calling this); ``symbol`` is the parsed per-uuid symbol document, or None
-    when the part names no symbol uuid or none was fetched for it. A symbol
-    whose own status is not ``ok`` leaves the record without pins, same as no
-    symbol at all.
+    It is the same join whether the three came from the network or from recorded
+    answers.  ``hit`` names the uuids and the batch lookup's package name.
+    ``footprint`` is the parsed per-uuid footprint document, and the record takes
+    its status, whatever that is: a caller that only wants an ``ok`` part checks
+    that itself.  ``symbol`` is the parsed per-uuid symbol document, or None when
+    the part names no symbol uuid or none was fetched for it; a symbol whose own
+    status is not ``ok`` leaves the record without pins, the same as no symbol at
+    all.
     """
     record = ComponentRecord(
         lcsc=lcsc,
