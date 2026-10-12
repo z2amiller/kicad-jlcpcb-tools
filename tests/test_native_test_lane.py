@@ -169,7 +169,12 @@ def test_cli_option_enables_native_tests_and_propagates_to_child_processes(
 
 @pytest.mark.parametrize(
     "version, kicad_major, expected",
-    [("10.0.6", "9", "expected KiCad 9"), ("9.0.9", None, "expected KiCad 10")],
+    [
+        ("10.0.6", "9", "expected KiCad 9"),
+        ("9.0.9", None, "expected KiCad 10"),
+        ("8.0.9-8.0.9-0~ubuntu24.04.1", "7", "expected KiCad 7"),
+        ("7.0.11+dfsg-1build4", "8", "expected KiCad 8"),
+    ],
 )
 def test_kicad_lane_requires_its_own_major_version(
     tmp_path: Path,
@@ -184,7 +189,7 @@ def test_kicad_lane_requires_its_own_major_version(
         monkeypatch,
         "kicad",
         "raise AssertionError('collection happened before runtime validation')\n",
-        "variants" if version.startswith("9.") else "",
+        "" if version.startswith("10.") else "variants",
         version=version,
         kicad_major=kicad_major,
     )
@@ -194,10 +199,21 @@ def test_kicad_lane_requires_its_own_major_version(
     assert expected in result.stderr
 
 
-def test_kicad9_lane_skips_only_the_variant_tests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "version, kicad_major",
+    [
+        ("9.0.9-9.0.9~ubuntu24.04.1", "9"),
+        ("8.0.9-8.0.9-0~ubuntu24.04.1", "8"),
+        ("7.0.11+dfsg-1build4", "7"),
+    ],
+)
+def test_a_lane_without_variants_skips_only_the_variant_tests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str, kicad_major: str
 ) -> None:
-    """Without the variant API a variant test skips with its reason; others run."""
+    """Without the variant API a variant test skips with its reason; others run.
+
+    The versions are the builds the KiCad 9, 8 and 7 lanes install.
+    """
     result = run_lane(
         tmp_path,
         monkeypatch,
@@ -207,10 +223,10 @@ def test_kicad9_lane_skips_only_the_variant_tests(
         "def test_variants(): raise AssertionError('variant test ran')\n"
         "@pytest.mark.native_kicad\n"
         "def test_board():\n"
-        "    assert os.environ['KICAD_JLCPCB_KICAD_MAJOR'] == '9'\n",
+        f"    assert os.environ['KICAD_JLCPCB_KICAD_MAJOR'] == {kicad_major!r}\n",
         "variants",
-        version="9.0.9-9.0.9~ubuntu24.04.1",
-        kicad_major="9",
+        version=version,
+        kicad_major=kicad_major,
     )
     assert result.returncode == pytest.ExitCode.OK, result.stdout + result.stderr
     assert "1 passed, 1 skipped" in result.stdout

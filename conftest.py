@@ -24,7 +24,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
     parser.addoption(
         "--kicad-major",
-        choices=("9", "10"),
+        choices=("7", "8", "9", "10"),
         default=os.environ.get("KICAD_JLCPCB_KICAD_MAJOR", "10"),
         help="The KiCad major version a required native KiCad lane must find.",
     )
