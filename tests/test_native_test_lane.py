@@ -387,7 +387,7 @@ def test_kicad10_lane_skips_only_the_standalone_drc_tests(
     assert "1 passed, 1 skipped" in result.stdout
     assert "standalone WriteDRCReport segfaults" in result.stdout
     assert "dereferences a null Pgm()" in result.stdout
-    assert "KiCad issue:" in result.stdout
+    assert "KiCad issue #25755" in result.stdout
 
 
 @pytest.mark.parametrize(

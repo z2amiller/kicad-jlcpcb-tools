@@ -156,7 +156,8 @@ def _skip_standalone_drc_where_it_crashes(items: list[pytest.Item]) -> None:
     reason = (
         "KiCad 10's standalone WriteDRCReport segfaults: its library-parity check "
         "calls PROJECT_PCB::FootprintLibAdapter, which dereferences a null Pgm() "
-        "outside the KiCad process (KiCad issue: (to be filed))"
+        "outside the KiCad process (KiCad issue #25755: "
+        "https://gitlab.com/kicad/code/kicad/-/issues/25755)"
     )
     for item in marked:
         item.stash[_CAPABILITY_SKIP] = True
