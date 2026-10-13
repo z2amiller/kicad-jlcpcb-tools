@@ -257,7 +257,9 @@ def test_native_copy_preserves_fonts_layers_and_groups(
     saved = source.read_bytes()
     blocked = tmp_path / "not-a-file"
     blocked.mkdir()
-    with pytest.raises(IsADirectoryError):
+    # POSIX reports writing to a directory as IsADirectoryError, Windows as
+    # PermissionError; callers catch OSError.
+    with pytest.raises(OSError):
         exporter._serialize_board(blocked)
     assert exporter._board_content() == before
     target = tmp_path / "copy.kicad_pcb"
