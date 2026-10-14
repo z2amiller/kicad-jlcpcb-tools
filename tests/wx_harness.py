@@ -359,6 +359,24 @@ def mainwindow_stubs(
     return stubs
 
 
+def attach_session(window: Any, backend: Any = None) -> Any:
+    """Give a window built without its constructor the session it holds.
+
+    The window's backend, store and settings live on its session, so a test
+    attaches one before setting them. The session checks the board through
+    the window, as the constructor's does.
+    """
+    # The window's own module, which a scoped load has already unregistered.
+    mainwindow = type(window).__init__.__globals__
+    window.session = mainwindow["PluginSession"](
+        backend,
+        window,
+        mainwindow["_WindowCatalog"](window),
+        guard=window._legacy_board,
+    )
+    return window
+
+
 def load_mainwindow(package, *, wx=None, pcbnew=None, **overrides):
     """Load ``mainwindow.py`` under ``package`` with every dependency stubbed.
 

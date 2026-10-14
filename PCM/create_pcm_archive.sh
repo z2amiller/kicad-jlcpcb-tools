@@ -34,14 +34,16 @@ for file in VERSION default_settings.json ./*.py ./*.png; do
 done
 
 echo "Copy directories"
-for dir in icons lib common dblib core scripts bom_estimation enrichment variant kicad_backend; do
+for dir in icons lib common dblib core scripts bom_estimation enrichment variant kicad_backend app; do
 	cp -R "$dir" "$PLUGINS_DIR"
 done
 
 echo "Prune tests and caches from packaged plugin"
 find "$PLUGINS_DIR/common" "$PLUGINS_DIR/dblib" "$PLUGINS_DIR/core" -type f \( -name 'test_*.py' -o -name 'pytest.ini' \) -delete
 find "$PLUGINS_DIR" -type d -name '__pycache__' -prune -exec rm -rf {} +
+find "$PLUGINS_DIR" -type d -name '.ruff_cache' -prune -exec rm -rf {} +
 find "$PLUGINS_DIR" -type f -name '*.pyc' -delete
+find "$PLUGINS_DIR" -type f -name 'ruff.toml' -delete
 
 cp PCM/icon.png "$RESOURCES_DIR"
 cp PCM/metadata.template.json "$METADATA_FILE"

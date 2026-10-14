@@ -18,7 +18,7 @@ from .stock_test_support import stock_modules
 from .test_settings_defaults import plugin_dir, shipped_defaults
 from .test_settings_dialog import _dialog, _fire, _settings, _wx
 from .test_stock_concern import CellAttr, part
-from .wx_harness import load_mainwindow, wx_stubs
+from .wx_harness import attach_session, load_mainwindow, wx_stubs
 
 
 class Footprint(swig_doubles.Footprint):
@@ -162,7 +162,7 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             live: Optional[dict[str, Footprint]] = None,
         ) -> Any:
             """Initialize the state surface consumed by actual window workflows."""
-            window = object.__new__(mainwindow.JLCPCBTools)
+            window = attach_session(object.__new__(mainwindow.JLCPCBTools))
             window.settings = {"part_preferences": {"remember_lcsc_assignments": False}}
             window.bom_estimator_board_count = 5
             window.footprints = (
@@ -185,7 +185,7 @@ def workflow() -> Iterator[types.SimpleNamespace]:
             board = Board(window.footprints)
             window.store = Store(records, board)
             window.pcbnew = swig_doubles.editor(board)
-            window.backend = mainwindow.SwigBackend(window.pcbnew)
+            window.session.backend = mainwindow.SwigBackend(window.pcbnew)
             window.partlist_data_model = models.datamodel.PartListDataModel(1.0)
             window.library = MagicMock()
             window.library.is_download_running.return_value = False

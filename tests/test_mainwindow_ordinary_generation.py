@@ -69,7 +69,7 @@ def test_pre_hook_native_assignment_change_stops_export_then_retry_is_fresh(
     context.message_box.assert_called_once()
     assert "changed during generation" in context.message_box.call_args.args[0]
     assert window.fabrication.output_snapshot is None
-    assert not window._ordinary_generating
+    assert not window.session.generating
 
     context.message_box.reset_mock()
     window.run_generate_hook = MagicMock(return_value=True)
@@ -80,7 +80,7 @@ def test_pre_hook_native_assignment_change_stops_export_then_retry_is_fresh(
     assert read_rows(window.fabrication.get_bom_csv_path())[0]["LCSC"] == "C200"
     assert float(read_rows(window.fabrication.get_cpl_csv_path())[0]["Rotation"]) == 180
     assert window.fabrication.output_snapshot is None
-    assert not window._ordinary_generating
+    assert not window.session.generating
 
 
 def drc_error(context: SimpleNamespace) -> list[Any]:
@@ -110,7 +110,7 @@ def test_generation_stop_releases_snapshot_before_later_native_assignment(
 
     assert window.store.get_generation_count() == 0
     assert window.fabrication.output_snapshot is None
-    assert not window._ordinary_generating
+    assert not window.session.generating
     window.fabrication.generate_geber.assert_not_called()
     assert not Path(window.fabrication.get_bom_csv_path()).exists()
     assert not Path(window.fabrication.get_cpl_csv_path()).exists()
@@ -153,4 +153,27 @@ def test_generate_anyway_writes_what_a_clean_board_writes(
     context.message_box.assert_not_called()
     assert window.store.get_generation_count() == 2
     assert window.fabrication.output_snapshot is None
-    assert not window._ordinary_generating
+    assert not window.session.generating
+
+
+def test_an_edit_asked_for_during_generation_waits_for_it(
+    generation_window: Callable[[str], SimpleNamespace],
+) -> None:
+    """While Generate runs, the session refuses board edits; afterwards it accepts them."""
+    context = generation_window("healthy")
+    window = prepare_output(context)
+    outcomes = []
+
+    def clear_during_hook(stage: str, _env: dict[str, str], **_kwargs: Any) -> bool:
+        if stage == "pre":
+            outcomes.append(window.session.clear(["R1"]))
+        return True
+
+    window.run_generate_hook = clear_during_hook
+    window.generate_fabrication_data()
+
+    assert [outcome.ok for outcome in outcomes] == [False]
+    (r1,) = window.session.read_board().by_reference("R1")
+    assert r1.default.fields["LCSC"].text == "C100"
+    assert window.store.get_generation_count() == 1
+    assert window.session.clear(["R1"]).ok

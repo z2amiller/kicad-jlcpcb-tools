@@ -53,7 +53,7 @@ def test_plugin_reports_startup_error_without_showing_partial_window(
     run_native(check)
     assert constructor.call_count == 1
     assert constructor.call_args.args == (None,)
-    assert callable(constructor.call_args.kwargs["board_action"])
+    assert callable(constructor.call_args.kwargs["commit"])
     assert window_ui.messages == [str(error)]
 
 

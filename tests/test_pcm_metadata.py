@@ -203,3 +203,48 @@ def test_archive_copies_every_plugin_package() -> None:
         for path in sources
         if imports.search(path.read_text(encoding="utf-8"))
     ]
+
+
+def test_archive_prunes_tests_caches_and_tool_settings(tmp_path: Path) -> None:
+    """Nothing a local checkout gathers reaches the archive, ruff's cache included."""
+    shell = _shell()
+    plugins = tmp_path / "plugins"
+    for name in (
+        "common/test_filemgr.py",
+        "common/pytest.ini",
+        "common/filemgr.py",
+        "dblib/.keep",
+        "core/__pycache__/core.cpython-39.pyc",
+        "app/ruff.toml",
+        "app/.ruff_cache/0.11.4/12345",
+        "app/session.py",
+        "kicad_backend/fake.pyc",
+    ):
+        path = plugins / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    script = (_PCM / "create_pcm_archive.sh").read_text(encoding="utf-8")
+    prune = script.split('echo "Prune tests and caches from packaged plugin"\n', 1)[
+        1
+    ].split("\ncp PCM/icon.png", 1)[0]
+
+    subprocess.run(
+        [shell, "-eu", "-c", prune],
+        env={**os.environ, "PLUGINS_DIR": str(plugins)},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert sorted(
+        path.relative_to(plugins).as_posix() for path in plugins.rglob("*")
+    ) == [
+        "app",
+        "app/session.py",
+        "common",
+        "common/filemgr.py",
+        "core",
+        "dblib",
+        "dblib/.keep",
+        "kicad_backend",
+    ]

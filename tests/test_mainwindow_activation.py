@@ -60,7 +60,7 @@ def test_activation_skips_unusable_or_nested_events(
     window = make_window()
     window._closing = blocked == "closing"
     window._refreshing_board = blocked == "refreshing"
-    window._ordinary_generating = blocked == "generating"
+    window.session.generating = blocked == "generating"
     event = SimpleNamespace(Skip=MagicMock(), GetActive=lambda: blocked != "inactive")
 
     window.on_window_activated(event)
@@ -118,13 +118,13 @@ def test_stale_window_refuses_board_replacement_save_as_and_new_variants(
 
 
 def test_assignment_runs_in_native_action_before_publishing_model_and_preferences(
-    make_window: Callable[..., Any],
+    make_window: Callable[..., Any], mainwindow: Any
 ) -> None:
     """Native action ownership encloses the edit before GUI success is observable."""
     window = make_window()
     calls: list[str] = []
 
-    def board_action(change: Callable[[], None]) -> None:
+    def commit(change: Callable[[], None]) -> None:
         assert window.pcbnew.GetBoard().footprints["R1"].field.text == "C100"
         calls.append("begin")
         change()
@@ -133,7 +133,7 @@ def test_assignment_runs_in_native_action_before_publishing_model_and_preference
         window.library.save_part_preferences.assert_not_called()
         calls.append("end")
 
-    window._board_action = board_action
+    window.session.backend = mainwindow.SwigBackend(window.pcbnew, commit=commit)
     window.assign_parts(
         SimpleNamespace(references=["R1"], lcsc="C200", type="Basic", stock=27)
     )

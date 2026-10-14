@@ -1,6 +1,7 @@
 """Standalone board mutations survive subsequent native-style reads."""
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -16,10 +17,10 @@ def modules() -> Iterator[dict[str, ModuleType]]:
         "_standalone_board_state_tests",
         (
             "standalone_impl",
-            "footprint_helpers",
-            "board_part_edits",
             "store",
+            "kicad_backend",
             "kicad_backend.swig",
+            "app.assignments",
         ),
         wx_stubs(),
     ) as loaded:
@@ -29,6 +30,23 @@ def modules() -> Iterator[dict[str, ModuleType]]:
 def _fields(footprint: object) -> dict[str, str]:
     """Read a stub footprint's own fields by name, after Reference and Value."""
     return {field.GetName(): field.GetText() for field in footprint.GetFields()[2:]}
+
+
+def _assign(
+    modules: dict[str, ModuleType],
+    pcbnew: object,
+    assignments: dict[str, str],
+    **flags: bool,
+) -> None:
+    """Assign numbers by reference through the SWIG backend, as standalone mode does."""
+    backend = modules["kicad_backend.swig"].SwigBackend(pcbnew)
+    board = backend.snapshot()
+    edits = []
+    for reference, lcsc in assignments.items():
+        (component,) = board.by_reference(reference)
+        edit = modules["app.assignments"].assignment_edit(component, lcsc)
+        edits.append(replace(edit, flags=tuple(flags.items())))
+    backend.apply("apply LCSC assignments", edits)
 
 
 def test_the_store_reads_the_standalone_board(
@@ -58,14 +76,14 @@ def test_assignment_and_clear_survive_board_lookup(
     modules: dict[str, ModuleType],
 ) -> None:
     """Assignment writes update the same footprint returned on each board read."""
-    board = modules["standalone_impl"].BoardStub()
-    apply = modules["board_part_edits"].apply_board_part_edits
+    pcbnew = modules["standalone_impl"].PcbnewStub()
+    board = pcbnew.GetBoard()
     footprint = board.GetFootprints()[0]
     assert board.FindFootprintByReference("R1") is footprint
     assert board.FindFootprintByReference("missing") is None
     assert footprint.GetFieldByName("LCSC") is None
 
-    apply([(board.FindFootprintByReference("R1"), {"lcsc": " c123 "})])
+    _assign(modules, pcbnew, {"R1": " c123 "})
 
     assert _fields(board.GetFootprints()[0])["LCSC"] == "C123"
     field = footprint.GetFieldByName("LCSC")
@@ -74,7 +92,7 @@ def test_assignment_and_clear_survive_board_lookup(
     assert footprint.GetProperties() == {"LCSC": "C123"}
     assert footprint.modified is True
 
-    apply([(board.FindFootprintByReference("R1"), {"lcsc": ""})])
+    _assign(modules, pcbnew, {"R1": ""})
 
     assert _fields(footprint)["LCSC"] == ""
     assert footprint.GetFields()[2:] == [field]
@@ -87,7 +105,8 @@ def test_alias_clear_preserves_identity_visibility_and_unrelated_metadata(
     modules: dict[str, ModuleType],
 ) -> None:
     """Clearing all assignment aliases preserves descriptive fields and flags."""
-    board = modules["standalone_impl"].BoardStub()
+    pcbnew = modules["standalone_impl"].PcbnewStub()
+    board = pcbnew.GetBoard()
     footprint = board.GetFootprints()[0]
     footprint.SetField("LCSC", "C100")
     footprint.SetField("JLCPCB", "C200")
@@ -96,9 +115,7 @@ def test_alias_clear_preserves_identity_visibility_and_unrelated_metadata(
     original_fields[3].SetVisible(False)
     footprint.SetAttributes(65)
 
-    modules["board_part_edits"].apply_board_part_edits(
-        [(footprint, {"lcsc": "", "exclude_from_bom": True, "exclude_from_pos": True})]
-    )
+    _assign(modules, pcbnew, {"R1": ""}, exclude_from_bom=True, exclude_from_pos=True)
 
     assert footprint.GetFields() == original_fields
     assert footprint.GetProperties() == {
@@ -118,7 +135,8 @@ def test_failed_batch_removes_new_field_and_restores_existing_aliases(
 ) -> None:
     """A later failed setter rolls back new metadata and preceding native edits."""
     standalone = modules["standalone_impl"]
-    board = standalone.BoardStub()
+    pcbnew = standalone.PcbnewStub()
+    board = pcbnew.GetBoard()
     first = board.GetFootprints()[0]
     first.SetField("Manufacturer", "Acme")
     first.SetAttributes(1)
@@ -135,13 +153,17 @@ def test_failed_batch_removes_new_field_and_restores_existing_aliases(
             raise RuntimeError("standalone native write failed")
 
     monkeypatch.setattr(second, "SetField", fail_after_alias_write)
-    with pytest.raises(RuntimeError, match="standalone native write failed"):
-        modules["board_part_edits"].apply_board_part_edits(
-            [
-                (first, {"lcsc": "C900", "exclude_from_bom": True}),
-                (second, {"lcsc": "C900"}),
-            ]
-        )
+    backend = modules["kicad_backend.swig"].SwigBackend(pcbnew)
+    assignment_edit = modules["app.assignments"].assignment_edit
+    r1, r2 = (backend.snapshot().by_reference(ref)[0] for ref in ("R1", "R2"))
+    edits = [
+        replace(assignment_edit(r1, "C900"), flags=(("exclude_from_bom", True),)),
+        assignment_edit(r2, "C900"),
+    ]
+    with pytest.raises(
+        modules["kicad_backend"].EditRejected, match="standalone native write failed"
+    ):
+        backend.apply("apply LCSC assignments", edits)
 
     assert first.GetProperties() == {"Manufacturer": "Acme"}
     assert first.GetFieldByName("LCSC") is None

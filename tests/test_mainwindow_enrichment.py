@@ -65,8 +65,8 @@ def workflow(
         board = Board([Footprint("R1", lcsc="C100"), Footprint("R2", lcsc="C200")])
         board.filename = str(tmp_path / "board.kicad_pcb")
         window.pcbnew = swig_doubles.editor(board)
-        window.backend = main.SwigBackend(window.pcbnew)
-        window._board_identity = main.board_identity(board)
+        window.session.backend = main.SwigBackend(window.pcbnew)
+        window.session.board_token = main.board_identity(board)
         window.store = database_mainwindow.Store(window, str(tmp_path))
         window.library = MagicMock()
         window.library.get_part_details.return_value = {"type": "Basic", "stock": 100}

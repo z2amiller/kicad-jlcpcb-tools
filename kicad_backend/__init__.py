@@ -3,9 +3,9 @@
 Shared code reads the board through ``BoardBackend`` and sees only the
 immutable records in ``records``; ``fake`` holds a board in memory for
 tests. The ``swig`` package implements the interface over KiCad's SWIG
-bindings. Other code still works on SWIG objects, among them fabrication,
-DRC, the variant adapter and the board edits, until later changes move it
-behind the interface.
+bindings, and writes edits inside KiCad's undo step. Other code still works
+on SWIG objects, among them fabrication, DRC, the variant adapter and the
+editor's selection, until later changes move it behind the interface.
 """
 
 from collections.abc import Sequence
@@ -64,6 +64,13 @@ class Unsupported(BackendError):
 EDIT_RECOVERY_FAILED = (
     "Board edit recovery failed; reopen the plugin and inspect the board before editing"
 )
+# What the plugin says once the board it was opened for is gone or replaced,
+# and once a board edit could not be put back. Both stop part assignments.
+BOARD_REPLACED_REASON = "The PCB was closed, replaced, or saved under another name."
+BOARD_REPLACED = f"{BOARD_REPLACED_REASON} Reopen JLCPCB Tools."
+BOARD_UNRESTORED = (
+    "A board edit could not be restored. Inspect the PCB and reopen JLCPCB Tools."
+)
 
 
 class BoardBackend(Protocol):
@@ -106,6 +113,9 @@ class BoardBackend(Protocol):
 
 
 __all__ = [
+    "BOARD_REPLACED",
+    "BOARD_REPLACED_REASON",
+    "BOARD_UNRESTORED",
     "EDIT_RECOVERY_FAILED",
     "BackendError",
     "BoardBackend",
