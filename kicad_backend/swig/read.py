@@ -6,6 +6,7 @@ read through the caller's dialect. Code outside the backend still makes its
 own SWIG reads for what the records do not hold yet.
 """
 
+from collections.abc import Iterable
 from contextlib import suppress
 import hashlib
 from inspect import getattr_static
@@ -16,9 +17,11 @@ from ..records import (
     BoardInfo,
     BoardSnapshot,
     ComponentRecord,
+    ComponentState,
     PadRecord,
     VariantDefinition,
     component_state,
+    footprint_keys,
 )
 from .dialects import Dialect
 
@@ -68,19 +71,39 @@ def _pad(pad: Any) -> PadRecord:
     return PadRecord(_PAD_KINDS[int(pad.GetAttribute())], bool(pad.HasHole()))
 
 
-def _component(footprint: Any, dialect: Dialect) -> ComponentRecord:
-    """Read one footprint with its Default state."""
-    reference = str(footprint.GetReference())
+def read_state(footprint: Any, dialect: Dialect) -> ComponentState:
+    """Read a footprint's own fields and flags: its Default state."""
     attributes = int(footprint.GetAttributes())
-    state = component_state(
+    return component_state(
         dialect.fields(footprint),
         dnp=dialect.is_dnp(footprint),
         exclude_from_bom=bool(attributes & _EXCLUDE_FROM_BOM),
         exclude_from_pos=bool(attributes & _EXCLUDE_FROM_POS),
     )
+
+
+def footprints_by_key(board: Any, keys: Iterable[str]) -> dict[str, Any]:
+    """Return the board's footprints with these keys, by key.
+
+    Footprints are keyed as a snapshot keys them (``footprint_keys``), in
+    board order.
+    """
+    wanted = set(keys)
+    footprints = list(board.GetFootprints())
+    uuids = (str(footprint.m_Uuid.AsString()) for footprint in footprints)
+    return {
+        key: footprint
+        for key, footprint in zip(footprint_keys(uuids), footprints)
+        if key in wanted
+    }
+
+
+def _component(footprint: Any, dialect: Dialect) -> ComponentRecord:
+    """Read one footprint with its Default state."""
+    state = read_state(footprint, dialect)
     return ComponentRecord(
         str(footprint.m_Uuid.AsString()),
-        reference,
+        str(footprint.GetReference()),
         str(footprint.GetFPIDAsString()),
         str(footprint.GetPath().AsString()),
         "bottom" if footprint.IsFlipped() else "top",

@@ -33,6 +33,10 @@ class Field:
         """Return the field text."""
         return self.text
 
+    def SetText(self, text: str) -> None:
+        """Change the field text."""
+        self.text = text
+
     def IsVisible(self) -> bool:
         """Return whether the field is shown."""
         return self.visible
@@ -127,6 +131,11 @@ class Footprint:
         """Remove a user field."""
         self.fields.pop(name, None)
 
+    def Remove(self, field: Field) -> None:
+        """Remove a user field object, as KiCad 8 and later do."""
+        if self.fields.get(field.name) is field:
+            del self.fields[field.name]
+
     def GetAttributes(self) -> int:
         """Return the attribute bits."""
         return self.attributes
@@ -205,4 +214,5 @@ def editor(board: Any, version: str = "10.0.4") -> SimpleNamespace:
         GetBoard=lambda: board,
         GetBuildVersion=lambda: version,
         GetMajorMinorVersion=lambda: ".".join(version.split(".")[:2]),
+        Refresh=lambda: None,
     )

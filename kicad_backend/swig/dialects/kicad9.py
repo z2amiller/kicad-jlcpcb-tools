@@ -10,3 +10,5 @@ class KiCad9(Dialect):
     builtin_fields = ("Reference", "Value", "Datasheet", "Description")
     holds_dnp = True
     keeps_repeated_fields = True
+    shows_fields = True
+    sorts_fields = False

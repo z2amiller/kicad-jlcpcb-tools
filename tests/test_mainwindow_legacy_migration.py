@@ -479,7 +479,7 @@ def test_failed_migration_recovery_disables_native_edits_and_retains_source(
 
     monkeypatch.setattr(footprint, "SetField", partial_setter)
     monkeypatch.setattr(
-        footprint, "RemoveField", MagicMock(side_effect=RuntimeError("cannot restore"))
+        footprint, "Remove", MagicMock(side_effect=RuntimeError("cannot restore"))
     )
 
     window.init_store()
