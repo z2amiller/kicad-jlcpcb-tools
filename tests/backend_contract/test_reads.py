@@ -10,32 +10,37 @@ from .support import Board, PadSpec, Part
 MakeBoard = Callable[[Sequence[Part]], Board]
 
 
-def _fields(record: object) -> list[tuple[str, str]]:
-    """Return a record's Default fields as (name, text), in order."""
+def _fields(record: object) -> list[tuple[str, str, bool]]:
+    """Return a record's Default fields as (name, text, visible), in order."""
     return [
-        (field.name, field.text)
+        (field.name, field.text, field.visible)
         for field in record.default.fields.values()  # type: ignore[attr-defined]
     ]
 
 
 def test_a_snapshot_names_its_board(board: MakeBoard) -> None:
-    """The board's file, and a token that stays the same while it is open."""
+    """The board's file, and a token that stays the same while it is open.
+
+    ``info`` names the board as a snapshot does, without reading it.
+    """
     backend = board([Part("R1")]).backend
     info = backend.snapshot().info
 
     assert info.file_name.endswith("board.kicad_pcb")
     assert info.board_token
     assert backend.snapshot().info == info
+    assert backend.info() == info
 
 
 def test_default_fields_and_flags_read_back(board: MakeBoard) -> None:
-    """Fields keep KiCad's order; the three flags are independent.
+    """Fields keep KiCad's order and visibility; the three flags are independent.
 
-    Each KiCad gives a footprint its own built-in fields, and KiCad 7 has no
-    DNP flag, so a part marked DNP reads as fitted there.
+    Each KiCad gives a footprint its own built-in fields. KiCad 7 shows no
+    field but Reference and Value, and has no DNP flag, so a part marked DNP
+    reads as fitted there.
     """
     parts = [
-        Part("R1", fields=(("LCSC", "C25804"), ("MPN", "RC0603"))),
+        Part("R1", fields=(("LCSC", "C25804"), ("MPN", "RC0603")), hidden=("LCSC",)),
         Part("R2", dnp=True),
         Part("R3", exclude_from_bom=True),
         Part("R4", exclude_from_pos=True),
@@ -46,11 +51,11 @@ def test_default_fields_and_flags_read_back(board: MakeBoard) -> None:
     assert [variant.name for variant in snapshot.variants] == [""]
     first = snapshot.components[0]
     assert _fields(first) == [
-        ("Reference", "R1"),
-        ("Value", "10k"),
-        *((name, "") for name in made.builtin_fields[2:]),
-        ("LCSC", "C25804"),
-        ("MPN", "RC0603"),
+        ("Reference", "R1", True),
+        ("Value", "10k", True),
+        *((name, "", False) for name in made.builtin_fields[2:]),
+        ("LCSC", "C25804", False),
+        ("MPN", "RC0603", made.shows_fields),
     ]
     assert [
         (
@@ -121,10 +126,10 @@ def test_a_repeated_field_name_reads_as_kicad_reopens_the_board(
     snapshot = made.backend.snapshot()
 
     repeated, plain = snapshot.components
-    kept = made.keeps_repeated_fields
+    kept, shown = made.keeps_repeated_fields, made.shows_fields
     assert _fields(repeated)[len(made.builtin_fields) :] == [
-        ("LCSC", "C2"),
-        ("MPN", "X"),
+        ("LCSC", "C2", shown),
+        ("MPN", "X", shown),
     ]
     assert _fields(repeated)[1:] == _fields(plain)[1:]
     assert [(field.name, field.text) for field in repeated.default.replaced_fields] == (
@@ -132,6 +137,7 @@ def test_a_repeated_field_name_reads_as_kicad_reopens_the_board(
     )
     assert repeated.default.duplicate_names == (("LCSC",) if kept else ())
     assert plain.default.duplicate_names == ()
+    assert repeated.default.revision != plain.default.revision
 
 
 def test_footprints_sharing_a_uuid_are_read_apart(board: MakeBoard) -> None:
@@ -155,12 +161,35 @@ def test_footprints_sharing_a_uuid_are_read_apart(board: MakeBoard) -> None:
     } == {"R1": "10k", "R2": "22k"}
 
 
+def test_revisions_follow_the_state(board: MakeBoard) -> None:
+    """Equal Default states share a revision; another text or visibility changes it."""
+    made = board(
+        [
+            Part("R1", fields=(("LCSC", "C1"),)),
+            Part("R1", fields=(("LCSC", "C1"),)),
+            Part("R1", fields=(("LCSC", "C2"),)),
+            Part("R1", fields=(("LCSC", "C1"),), hidden=("LCSC",)),
+        ]
+    )
+    snapshot = made.backend.snapshot()
+
+    first, same, other, hidden = (
+        record.default.revision for record in snapshot.components
+    )
+    assert first == same
+    assert other not in {first, hidden}
+    # A KiCad that never shows a field cannot hide one either.
+    assert (hidden != first) is made.shows_fields
+
+
 def test_a_closed_board_raises_board_changed(
     board: MakeBoard, backend_modules: SimpleNamespace
 ) -> None:
-    """Once the editor has no board, a read returns none."""
+    """Once the editor has no board, neither read returns one."""
     made = board([Part("R1")])
     made.close()
 
+    with pytest.raises(backend_modules.api.BoardChanged):
+        made.backend.info()
     with pytest.raises(backend_modules.api.BoardChanged):
         made.backend.snapshot()

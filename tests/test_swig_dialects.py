@@ -87,11 +87,37 @@ def _probe(pcbnew: Any) -> dict[str, Any]:
     else:
         held = [str(twice.GetProperties()["Twice"])]
 
+    # A field KiCad adds is shown, and can be hidden and shown again; a
+    # property has nothing to show it by.
+    shows_fields = False
+    if field_objects:
+        footprint.SetField("Shown", "x")
+        (shown,) = (f for f in footprint.GetFields() if f.GetName() == "Shown")
+        added = bool(shown.IsVisible())
+        shown.SetVisible(False)
+        hidden = not shown.IsVisible()
+        shown.SetVisible(True)
+        shows_fields = added and hidden and bool(shown.IsVisible())
+
+    # Two fields added in reverse order of their names.
+    order = pcbnew.FOOTPRINT(pcbnew.BOARD())
+    for name in ("Zeta", "Alpha"):
+        if field_objects:
+            order.SetField(name, "x")
+        else:
+            order.SetProperty(name, "x")
+    if field_objects:
+        added = [str(f.GetName()) for f in order.GetFields()][len(builtin) :]
+    else:
+        added = [str(name) for name in order.GetProperties()]
+
     return {
         "major": int(str(pcbnew.Version()).split(".", 1)[0]),
         "builtin_fields": builtin,
         "holds_dnp": holds_dnp,
         "keeps_repeated_fields": held == ["first", "second"],
+        "shows_fields": shows_fields,
+        "sorts_fields": added == ["Alpha", "Zeta"],
     }
 
 

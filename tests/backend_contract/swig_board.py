@@ -1,6 +1,6 @@
 """Build a described board in real KiCad and read it through the SWIG backend."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,16 +18,85 @@ _PAD_LAYOUTS = {
 }
 
 
+class _FailingFootprint:
+    """A real footprint whose field writes change it and then fail.
+
+    The first write fails after changing the footprint, as a KiCad setter
+    can. Later writes and removals, which put the footprint back, work unless
+    ``restore`` is false; then they fail without changing anything. KiCad 7
+    writes its property map whole, KiCad 8 and later one field at a time.
+    """
+
+    def __init__(self, footprint: Any, restore: bool) -> None:
+        self._footprint = footprint
+        self._restore = restore
+        self._failed = False
+
+    def __getattr__(self, name: str) -> Any:
+        """Reach every other footprint method."""
+        return getattr(self._footprint, name)
+
+    def _write(self, write: Callable[[], None]) -> None:
+        """Write, then fail the first time; fail later writes unless restoring."""
+        if self._failed and not self._restore:
+            raise RuntimeError("KiCad refused to put the footprint back")
+        write()
+        if not self._failed:
+            self._failed = True
+            raise RuntimeError("KiCad refused the write")
+
+    def SetField(self, name: str, text: str) -> None:
+        """Write the field, then fail the first time."""
+        self._write(lambda: self._footprint.SetField(name, text))
+
+    def SetProperties(self, properties: dict[str, str]) -> None:
+        """Write KiCad 7's property map, then fail the first time."""
+        self._write(lambda: self._footprint.SetProperties(properties))
+
+    def Remove(self, item: Any) -> None:
+        """Remove a field, unless putting the footprint back is to fail."""
+        if self._failed and not self._restore:
+            raise RuntimeError("KiCad refused to put the footprint back")
+        self._footprint.Remove(item)
+
+
+class _Board:
+    """The real board, with some footprints, by place, standing in for themselves."""
+
+    def __init__(self, board: Any, footprints: dict[int, Any]) -> None:
+        self._board = board
+        self.footprints = footprints
+
+    def __getattr__(self, name: str) -> Any:
+        """Reach every other board method."""
+        return getattr(self._board, name)
+
+    def GetFootprints(self) -> list[Any]:
+        """Return the board's footprints, in its order, with the stand-ins."""
+        return [
+            self.footprints.get(place, footprint)
+            for place, footprint in enumerate(self._board.GetFootprints())
+        ]
+
+
 class _Editor:
-    """The pcbnew module, with this board open in its editor."""
+    """The pcbnew module, with this board open in its editor.
+
+    ``running`` stands for KiCad's action wrapper being open.
+    """
 
     def __init__(self, pcbnew: Any, board: Any) -> None:
         self._pcbnew = pcbnew
         self.board = board
+        self.running = False
 
     def GetBoard(self) -> Any:
         """Return the open board, or None once it is closed."""
         return self.board
+
+    def IsActionRunning(self) -> bool:
+        """Report whether KiCad's action wrapper is open."""
+        return self.running
 
     def __getattr__(self, name: str) -> Any:
         """Reach every other pcbnew function."""
@@ -54,6 +123,12 @@ def _footprint(pcbnew: Any, dialect: Any, board: Any, part: Part) -> Any:
         else:
             named.add(name)
             set_native_field(footprint, name, text)
+    # Where a KiCad can show no field but Reference and Value, the others
+    # are hidden already.
+    if dialect.shows_fields:
+        for field in footprint.GetFields():
+            if field.GetName() in part.hidden:
+                field.SetVisible(False)
     if part.side == "bottom":
         footprint.SetLayerAndFlip(pcbnew.B_Cu)
     kinds = {pad.kind for pad in part.pads}
@@ -84,13 +159,13 @@ def _footprint(pcbnew: Any, dialect: Any, board: Any, part: Part) -> Any:
     return footprint
 
 
-def swig_board(
+def kicad_editor(
     modules: SimpleNamespace, parts: Sequence[Part], request: pytest.FixtureRequest
-) -> Board:
+) -> Any:
     """Create a saved KiCad board holding the parts, open in a stand-in editor.
 
-    The expectations of what this KiCad holds are taken from the facts of the
-    dialect the backend speaks.
+    It decides how to build the board from the facts of the dialect the
+    backend speaks.
     """
     pcbnew = request.getfixturevalue("native_bindings").pcbnew
     dialect = modules.dialects.select(pcbnew)
@@ -116,15 +191,38 @@ def swig_board(
             text = text.replace(uuid, owner)
         path.write_text(text, encoding="utf-8")
         board = pcbnew.LoadBoard(filename)
-    editor = _Editor(pcbnew, board)
+    return _Editor(pcbnew, _Board(board, {}))
+
+
+def swig_board(
+    modules: SimpleNamespace, parts: Sequence[Part], request: pytest.FixtureRequest
+) -> Board:
+    """Read the parts' board in real KiCad through the SWIG backend.
+
+    What this KiCad holds is taken from the backend's dialect.
+    """
+    editor = kicad_editor(modules, parts, request)
+    dialect = modules.dialects.select(editor)
+    board = editor.board
 
     def close() -> None:
         editor.board = None
 
+    def fail_writes(reference: str, restore: bool = True) -> None:
+        ((place, footprint),) = (
+            (place, fp)
+            for place, fp in enumerate(board.GetFootprints())
+            if fp.GetReference() == reference
+        )
+        board.footprints[place] = _FailingFootprint(footprint, restore)
+
     return Board(
         modules.swig.SwigBackend(editor),
         close,
+        fail_writes,
         builtin_fields=dialect.builtin_fields,
         holds_dnp=dialect.holds_dnp,
         keeps_repeated_fields=dialect.keeps_repeated_fields,
+        shows_fields=dialect.shows_fields,
+        sorts_fields=dialect.sorts_fields,
     )

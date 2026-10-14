@@ -120,8 +120,7 @@ from .helpers import (
 )
 from .kicad_backend import BoardChanged, BoardSnapshot
 from .kicad_backend.swig import SwigBackend
-from .kicad_backend.swig.legacy import live_footprints
-from .kicad_backend.swig.read import board_identity
+from .kicad_backend.swig.read import board_identity, footprints_by_key
 from .kicad_drc import DRCViolationCounter
 from .lcsc import Lcsc, LcscDict, extract_lcsc
 from .lcsc_entry_dialog import LcscEntryDialog
@@ -955,7 +954,7 @@ class JLCPCBTools(wx.Frame):
 
         Transitional, until edits and selection go through the backend.
         """
-        return live_footprints(self._legacy_board(), keys)
+        return footprints_by_key(self._legacy_board(), keys)
 
     def _held_board(self) -> BoardSnapshot:
         """Return the snapshot last read, once the board is checked to be open.
