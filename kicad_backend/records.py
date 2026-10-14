@@ -1,13 +1,16 @@
 """Immutable facts about the open board, the same whichever backend read them.
 
 Records hold KiCad's raw facts only, and only the facts the plugin reads:
-field text, the assembly flags, the side and the pads' kinds. Interpreting
+field text and visibility, the assembly flags, the side and the pads' kinds. Interpreting
 them (assignment aliases, LCSC numbers) is the job of shared code.
 """
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
+import hashlib
+import json
 from types import MappingProxyType
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,7 @@ class FieldRecord:
 
     name: str
     text: str
+    visible: bool
 
 
 @dataclass(frozen=True)
@@ -41,9 +45,9 @@ class ComponentState:
     A footprint can hold two fields with one name: KiCad's footprint dialog
     accepts a second, and the footprint keeps both until the board is
     reopened. Reopening keeps one field of each name, in the first one's
-    place, with the last one's text. ``fields`` holds the fields as reopening
-    leaves them; ``replaced_fields`` holds the ones it replaces, in the order
-    it replaces them.
+    place, with the last one's text and visibility. ``fields`` holds the
+    fields as reopening leaves them; ``replaced_fields`` holds the ones it
+    replaces, in the order it replaces them.
 
     Build states with ``component_state``.
     """
@@ -53,6 +57,7 @@ class ComponentState:
     exclude_from_bom: bool
     exclude_from_pos: bool
     replaced_fields: tuple[FieldRecord, ...] = ()
+    _revision: str = field(default="", init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Freeze the fields."""
@@ -64,6 +69,29 @@ class ComponentState:
             raise ValueError("A replaced field needs a later field of its name")
         object.__setattr__(self, "fields", MappingProxyType(fields))
         object.__setattr__(self, "replaced_fields", replaced)
+
+    @property
+    def revision(self) -> str:
+        """Return the digest of this state; an edit quotes the one it was made from.
+
+        It covers every field's name, text and visibility, the three flags
+        and the replaced fields. A read that never quotes it never pays for
+        it: it is computed when first asked for.
+        """
+        if not self._revision:
+            content = (
+                [[r.name, r.text, r.visible] for r in self.fields.values()],
+                [
+                    bool(self.dnp),
+                    bool(self.exclude_from_bom),
+                    bool(self.exclude_from_pos),
+                ],
+                [[r.name, r.text, r.visible] for r in self.replaced_fields],
+            )
+            encoded = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
+            digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+            object.__setattr__(self, "_revision", digest)
+        return self._revision
 
     @property
     def duplicate_names(self) -> tuple[str, ...]:
@@ -139,6 +167,38 @@ def footprint_keys(uuids: Iterable[str]) -> list[str]:
         counts[uuid] = counts.get(uuid, 0) + 1
         keys.append(uuid if counts[uuid] == 1 else f"{uuid}#{counts[uuid]}")
     return keys
+
+
+@dataclass(frozen=True)
+class ComponentEdit:
+    """Changes to one footprint, made from a state the caller read.
+
+    ``key`` is the footprint's key in the snapshot the edit was made from
+    (see ``footprint_keys``), and ``based_on`` the ``ComponentState.revision``
+    it was computed from; a backend writes nothing once the footprint has
+    changed since.
+    Names are KiCad's field and flag names. Which field holds an assignment,
+    and whether it is shown, is decided by the caller; the backend only
+    performs the operations it is given.
+    """
+
+    key: str
+    based_on: str
+    set_fields: tuple[tuple[str, str], ...] = ()
+    field_visibility: tuple[tuple[str, bool], ...] = ()
+    flags: tuple[tuple[str, bool], ...] = ()  # exclude_from_bom, exclude_from_pos
+
+    def __post_init__(self) -> None:
+        """Hold every operation as a tuple, so an edit cannot change once made."""
+        for name in ("set_fields", "field_visibility", "flags"):
+            object.__setattr__(
+                self, name, tuple(tuple(pair) for pair in getattr(self, name))
+            )
+
+
+def default_edit(component: ComponentRecord, **operations: Any) -> ComponentEdit:
+    """Edit a footprint's own fields and flags, from the state it was read in."""
+    return ComponentEdit(component.key, component.default.revision, **operations)
 
 
 @dataclass(frozen=True)

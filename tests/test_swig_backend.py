@@ -31,7 +31,7 @@ def swig() -> Iterator[SimpleNamespace]:
 
 
 def test_snapshot_reads_each_footprint_in_board_order(swig: SimpleNamespace) -> None:
-    """Fields, the exclusion bits, DNP, the side and the pads become plain records."""
+    """Fields and their visibility, the exclusion bits, DNP, the side and the pads."""
     pads = [Pad("1", "smd"), Pad("2", "pth"), Pad("", "npth"), Pad("3", "conn")]
     connector = Footprint(
         "J1",
@@ -42,6 +42,7 @@ def test_snapshot_reads_each_footprint_in_board_order(swig: SimpleNamespace) -> 
         pads=pads,
         path="/root/symbol",
     )
+    connector.fields["LCSC"].visible = False
     chip = Footprint("U1", attributes=0x08 | 0x10, dnp=True, flipped=True)
     board = Board([connector, chip])
 
@@ -53,12 +54,12 @@ def test_snapshot_reads_each_footprint_in_board_order(swig: SimpleNamespace) -> 
         "J1",
         "Connector:Header_1x02",
     )
-    assert [(f.name, f.text) for f in first.default.fields.values()] == [
-        ("Reference", "J1"),
-        ("Value", "Header"),
-        ("Datasheet", ""),
-        ("Description", ""),
-        ("LCSC", "C1"),
+    assert [(f.name, f.text, f.visible) for f in first.default.fields.values()] == [
+        ("Reference", "J1", True),
+        ("Value", "Header", True),
+        ("Datasheet", "", False),
+        ("Description", "", False),
+        ("LCSC", "C1", False),
     ]
     assert (first.schematic_path, first.side) == ("/root/symbol", "top")
     assert (first.default.exclude_from_bom, first.default.exclude_from_pos) == (
@@ -93,10 +94,15 @@ def test_default_label_follows_kicads_variant_api(
 
 
 def test_a_snapshot_names_its_board_and_file(swig: SimpleNamespace) -> None:
-    """The token is the board's identity; saving under another name changes it."""
-    board = Board()
+    """The token is the board's identity; saving under another name changes it.
+
+    ``info`` names the board as a snapshot does, without reading a footprint.
+    """
+    board = Board([Footprint("R1")])
     info = swig.backend(editor(board)).snapshot().info
 
+    board.footprints = []
+    assert swig.backend(editor(board)).info() == info
     assert info.file_name == "/project/board.kicad_pcb"
     assert info.board_token == swig.read.board_identity(board)
     board.filename = "/project/saved-as.kicad_pcb"
@@ -108,13 +114,13 @@ def test_two_fields_with_one_name_read_as_kicad_reopens_the_board(
 ) -> None:
     """Every field is read; the state keeps the later one and records the other."""
     footprint = Footprint("R2", fields={"LCSC": "C1"})
-    footprint.fields["Second LCSC"] = Field("LCSC", "C2")
+    footprint.fields["Second LCSC"] = Field("LCSC", "C2", visible=False)
 
     snapshot = swig.backend(editor(Board([Footprint("R1"), footprint]))).snapshot()
 
     state = snapshot.components[1].default
-    assert state.fields["LCSC"] == swig.records.FieldRecord("LCSC", "C2")
-    assert state.replaced_fields == (swig.records.FieldRecord("LCSC", "C1"),)
+    assert state.fields["LCSC"] == swig.records.FieldRecord("LCSC", "C2", False)
+    assert state.replaced_fields == (swig.records.FieldRecord("LCSC", "C1", True),)
     assert state.duplicate_names == ("LCSC",)
 
 
@@ -131,19 +137,35 @@ def test_footprints_sharing_a_uuid_are_read_apart(swig: SimpleNamespace) -> None
 
 
 def test_a_closed_editor_raises_board_changed(swig: SimpleNamespace) -> None:
-    """With no board open a read returns none."""
+    """With no board open neither read returns one."""
     backend = swig.backend(editor(None))
 
+    with pytest.raises(swig.api.BoardChanged, match="no longer has an open board"):
+        backend.info()
     with pytest.raises(swig.api.BoardChanged, match="no longer has an open board"):
         backend.snapshot()
 
 
 class _KiCad7Footprint(Footprint):
-    """A KiCad 7 footprint: a property map instead of fields, and no DNP flag."""
+    """A KiCad 7 footprint: a property map instead of fields, and no DNP flag.
 
-    def __init__(self, properties: dict[str, str]) -> None:
+    Reference and Value are text items of their own, shown unless hidden.
+    """
+
+    def __init__(
+        self, properties: dict[str, str], hidden: tuple[str, ...] = ()
+    ) -> None:
         super().__init__("R7", value="4k7")
         self.properties = properties
+        self.hidden = hidden
+
+    def Reference(self) -> SimpleNamespace:
+        """Return the reference's text item."""
+        return SimpleNamespace(IsVisible=lambda: "Reference" not in self.hidden)
+
+    def Value(self) -> SimpleNamespace:
+        """Return the value's text item."""
+        return SimpleNamespace(IsVisible=lambda: "Value" not in self.hidden)
 
     def GetFields(self) -> list:
         """Fail as KiCad 7's footprints do."""
@@ -161,15 +183,17 @@ class _KiCad7Footprint(Footprint):
 
 
 def test_kicad7_footprints_read_their_property_maps(swig: SimpleNamespace) -> None:
-    """Reference and Value stand first, then the property map; no DNP."""
-    footprint = _KiCad7Footprint({"LCSC": " c25804 ", "MPN": "RC0603"})
+    """Reference and Value stand first, shown or not; properties are hidden; no DNP."""
+    footprint = _KiCad7Footprint(
+        {"LCSC": " c25804 ", "MPN": "RC0603"}, hidden=("Reference",)
+    )
 
     (record,) = swig.backend(editor(Board([footprint]), "7.0.11")).snapshot().components
 
-    assert [(f.name, f.text) for f in record.default.fields.values()] == [
-        ("Reference", "R7"),
-        ("Value", "4k7"),
-        ("LCSC", " c25804 "),
-        ("MPN", "RC0603"),
+    assert [(f.name, f.text, f.visible) for f in record.default.fields.values()] == [
+        ("Reference", "R7", False),
+        ("Value", "4k7", True),
+        ("LCSC", " c25804 ", False),
+        ("MPN", "RC0603", False),
     ]
     assert record.default.dnp is False
