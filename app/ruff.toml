@@ -1,0 +1,8 @@
+# The application layer must not depend on wx, so another kind of view can
+# use it. Ruff's banned-api table replaces the inherited one, so the pcbnew
+# ban is repeated here.
+extend = "../pyproject.toml"
+
+[lint.flake8-tidy-imports.banned-api]
+"pcbnew".msg = "Reach KiCad through kicad_backend; only plugin.py imports pcbnew and hands it to the backend."
+"wx".msg = "The application layer has no wx; the window adapts its results."

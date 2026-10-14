@@ -118,7 +118,7 @@ def seed(window: Any, schematic: Optional[str] = None, *, second: bool = False) 
 
 @pytest.mark.parametrize("schematic", [None, "C123"])
 def test_init_store_recovers_legacy_before_preferences_and_initial_rows(
-    make_window: Callable[..., Any], schematic: Optional[str]
+    make_window: Callable[..., Any], mainwindow: Any, schematic: Optional[str]
 ) -> None:
     """Actual initialization recovers absent native fields without catalog lookup."""
     footprint = LinkedFootprint(fields={})
@@ -133,7 +133,7 @@ def test_init_store_recovers_legacy_before_preferences_and_initial_rows(
         batches.append(dict(footprint.fields))
         change()
 
-    window._board_action = transaction
+    window.session.backend = mainwindow.SwigBackend(window.pcbnew, commit=transaction)
     window.init_store()
 
     assert "LCSC" in footprint.fields, window.logger.warning.call_args_list
@@ -225,15 +225,16 @@ def test_legacy_read_failure_preserves_rows_and_blocks_preference_fallback(
 
 
 @pytest.mark.parametrize("change", ["path", "native", "legacy"])
-def test_migration_rechecks_sources_inside_native_transaction(
-    make_window: Callable[..., Any], change: str
+def test_migration_rechecks_its_sources_before_writing(
+    make_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
-    """Source changes while entering the host action cannot apply a stale recovery plan."""
+    """Sources that change once the recovery is planned stop it before any write."""
     footprint = LinkedFootprint(fields={})
     window = make_window(footprints=[footprint])
     database = seed(window)
+    edits_needed = window.backend.edits_needed
 
-    def transaction(apply: Callable[[], None]) -> None:
+    def change_then_check(edits: Any) -> bool:
         if change == "path":
             footprint.schematic_path = "/root/other-symbol"
         elif change == "native":
@@ -241,12 +242,32 @@ def test_migration_rechecks_sources_inside_native_transaction(
         else:
             with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("UPDATE part_info SET lcsc = 'C456'")
-        apply()
+        return edits_needed(edits)
 
-    window._board_action = transaction
+    monkeypatch.setattr(window.backend, "edits_needed", change_then_check)
     window.init_store()
 
     assert window.store.get_part("R1")["lcsc"] == ("C456" if change == "native" else "")
+    assert window._legacy_migration_failed
+    assert not window._project_storage_unavailable
+
+
+def test_a_footprint_changed_as_kicads_undo_step_opens_is_not_overwritten(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """The recovery's edits quote the footprint they were planned from."""
+    footprint = LinkedFootprint(fields={})
+    window = make_window(footprints=[footprint])
+    seed(window)
+
+    def transaction(apply: Callable[[], None]) -> None:
+        footprint.SetField("LCSC", "C456")
+        apply()
+
+    window.session.backend = mainwindow.SwigBackend(window.pcbnew, commit=transaction)
+    window.init_store()
+
+    assert window.store.get_part("R1")["lcsc"] == "C456"
     assert window._legacy_migration_failed
     assert not window._project_storage_unavailable
 
@@ -330,13 +351,13 @@ def test_no_active_table_never_calls_unguarded_archive_after_close(
 
 
 def test_same_assignment_and_repeated_clear_do_not_enter_native_host_action(
-    make_window: Callable[..., Any],
+    make_window: Callable[..., Any], mainwindow: Any
 ) -> None:
     """No-op Default actions update views without creating host undo or dirty state."""
     footprint = LinkedFootprint(lcsc="C123")
     window = make_window(footprints=[footprint])
     host = MagicMock(side_effect=lambda change: change())
-    window._board_action = host
+    window.session.backend = mainwindow.SwigBackend(window.pcbnew, commit=host)
 
     assert window._apply_lcsc_assignments({"R1": "C123"}) == ["R1"]
     host.assert_not_called()
@@ -346,8 +367,8 @@ def test_same_assignment_and_repeated_clear_do_not_enter_native_host_action(
     assert host.call_count == 1 and footprint.field.text == ""
 
 
-def test_migration_rechecks_resolved_file_when_sheet_file_changes_in_transaction(
-    make_window: Callable[..., Any],
+def test_migration_rechecks_resolved_file_when_sheet_file_changes_before_writing(
+    make_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Unchanged native UUID paths cannot hide a changed physical schematic target."""
     footprint = LinkedFootprint(fields={})
@@ -362,17 +383,18 @@ def test_migration_rechecks_resolved_file_when_sheet_file_changes_in_transaction
         '(kicad_sch (uuid "root") (sheet (uuid "sheet") (property "Sheetfile" "first.kicad_sch")))',
         encoding="utf-8",
     )
+    edits_needed = window.backend.edits_needed
 
-    def transaction(apply: Callable[[], None]) -> None:
+    def change_then_check(edits: Any) -> bool:
         root.write_text(
             root.read_text(encoding="utf-8").replace(
                 "first.kicad_sch", "second.kicad_sch"
             ),
             encoding="utf-8",
         )
-        apply()
+        return edits_needed(edits)
 
-    window._board_action = transaction
+    monkeypatch.setattr(window.backend, "edits_needed", change_then_check)
     window.init_store()
 
     assert footprint.fields == {}
@@ -484,13 +506,123 @@ def test_failed_migration_recovery_disables_native_edits_and_retains_source(
 
     window.init_store()
 
-    assert window._board_unreliable and window._project_storage_unavailable
+    assert not window.session.reliable and window._project_storage_unavailable
     assert window.store is None and window.test_rows == {}
     assert window._legacy_migration_failed
     with closing(sqlite3.connect(database)) as connection:
         assert connection.execute("SELECT lcsc FROM part_info").fetchall() == [
             ("C123",)
         ]
+
+
+def test_a_refused_recovery_write_holds_its_footprints_back_from_preferences(
+    make_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opening preferences cannot fill a footprint whose recovery was refused.
+
+    The refused write is undone, so the footprint is empty again; filling it
+    from a preference would replace the number the legacy data still holds.
+    """
+    footprint = LinkedFootprint(fields={})
+    window = make_window(
+        footprints=[footprint], part_preferences={("R_0603", "10k"): "C999"}
+    )
+    seed(window)
+    setter = footprint.SetField
+    refused: list[str] = []
+
+    def refuse_recovery(name: str, value: str) -> None:
+        setter(name, value)
+        if not refused:
+            refused.append(value)
+            raise RuntimeError("recovery setter failed")
+
+    monkeypatch.setattr(footprint, "SetField", refuse_recovery)
+
+    window.init_store()
+
+    assert refused == ["C123"] and footprint.fields == {}
+    assert window._legacy_migration_failed and window.session.reliable
+    assert footprint.m_Uuid.AsString() in window._legacy_migration_blocked_ids
+    assert not window._project_storage_unavailable
+
+
+def _logged(call: Any) -> str:
+    """Return a logger call's message as it is written."""
+    return call.args[0] % call.args[1:] if len(call.args) > 1 else call.args[0]
+
+
+def test_a_recovery_edit_that_cannot_be_built_is_held_back_like_a_refused_write(
+    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the footprints the recovery would write are held back, as before.
+
+    The edit fails before KiCad's undo step opens. The log says so as it says
+    of a refused write, and opening preferences still fill the others.
+    """
+    recovered, other = LinkedFootprint(fields={}), LinkedFootprint("R2", fields={})
+    window = make_window(
+        footprints=[recovered, other], part_preferences={("R_0603", "10k"): "C999"}
+    )
+    seed(window)
+
+    def refuse(component: Any, lcsc: str) -> Any:
+        raise ValueError("LCSC must be empty or a C followed by digits")
+
+    monkeypatch.setattr(mainwindow, "assignment_edit", refuse)
+
+    window.init_store()
+
+    warnings = [_logged(call) for call in window.logger.warning.call_args_list]
+    assert (
+        "Unable to recover legacy assignments: "
+        "LCSC must be empty or a C followed by digits"
+    ) in warnings, warnings
+    assert window._legacy_migration_failed
+    assert not window._legacy_migration_block_preferences
+    assert window._legacy_migration_blocked_ids == {recovered.m_Uuid.AsString()}
+    assert recovered.fields == {}
+    assert other.field.text == "C999"
+    assert not window._project_storage_unavailable
+
+
+@pytest.mark.parametrize("mode", ["plain", "variant"])
+def test_initialisation_stops_once_recovery_leaves_the_board_unreliable(
+    make_window: Callable[..., Any], monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    """Nothing after recovery runs, so the board is never shown as usable again."""
+    footprint = LinkedFootprint(fields={})
+    window = make_window(footprints=[footprint])
+    seed(window)
+    setter = footprint.SetField
+
+    def partial_setter(name: str, value: str) -> None:
+        setter(name, value)
+        raise RuntimeError("native write failed after changing its field")
+
+    monkeypatch.setattr(footprint, "SetField", partial_setter)
+    monkeypatch.setattr(
+        footprint, "Remove", MagicMock(side_effect=RuntimeError("cannot restore"))
+    )
+    controller = SimpleNamespace(
+        cache=window.store,
+        session=SimpleNamespace(_check_board=lambda: None, reliable=True),
+        refresh=MagicMock(),
+        _update_enabled=MagicMock(),
+    )
+    if mode == "variant":
+        window._variant_mode = True
+        window._variant_controller = controller
+    window._initialize_catalog_parts = MagicMock()
+
+    window.init_store()
+
+    assert not window.session.reliable
+    assert window._project_storage_unavailable and window.store is None
+    window._maybe_show_schematic_storage_notice.assert_not_called()
+    window._initialize_catalog_parts.assert_not_called()
+    controller.refresh.assert_not_called()
+    controller._update_enabled.assert_not_called()
 
 
 @pytest.mark.parametrize("source", ["pcb_only", "pcb_only_root", "no_schematic"])
@@ -613,8 +745,8 @@ def test_native_disk_parser_keeps_unsaved_override_out_of_archive_proof(
     # The window now edits a board of the running KiCad, so it speaks its dialect.
     window.pcbnew.GetBoard = lambda: board
     window.pcbnew.GetMajorMinorVersion = pcbnew.GetMajorMinorVersion
-    window.backend = mainwindow.SwigBackend(window.pcbnew)
-    window._board_identity = mainwindow.board_identity(board)
+    window.session.backend = mainwindow.SwigBackend(window.pcbnew)
+    window.session.board_token = mainwindow.board_identity(board)
     cached_loader = MagicMock(return_value=board)
     window.pcbnew.LoadBoard = cached_loader
     monkeypatch.setattr(mainwindow, "kicad_pcbnew", pcbnew)

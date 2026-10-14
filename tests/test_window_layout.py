@@ -500,6 +500,7 @@ def _open_main(
     monkeypatch: pytest.MonkeyPatch,
     settings: dict,
     fail_at: Optional[str] = None,
+    commit: Optional[Callable[[Callable[[], None]], None]] = None,
 ) -> Any:
     control = _control(scale=2, client_width=0, stretch=True)
     monkeypatch.setattr(mainwindow.dv.DataViewCtrl, "return_value", control)
@@ -551,7 +552,7 @@ def _open_main(
         with pytest.raises(RuntimeError, match="UI construction failed"):
             mainwindow.JLCPCBTools.__init__(window, None, provider)
     else:
-        mainwindow.JLCPCBTools.__init__(window, None, provider)
+        mainwindow.JLCPCBTools.__init__(window, None, provider, commit=commit)
     window.library = SimpleNamespace(categories=[])
     window._catalog_ready = True
     window.save_settings = MagicMock()
@@ -571,6 +572,43 @@ def test_a_kicad_with_no_dialect_is_refused_before_the_window_opens() -> None:
         backend.Unsupported, match=r"KiCad 7 to 10; this is KiCad 11\.0"
     ):
         mainwindow.JLCPCBTools.__init__(window, None, provider)
+
+
+def test_the_window_checks_its_board_and_writes_through_the_plugins_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The session checks the board through the window and writes in KiCad's wrapper."""
+    calls: list[str] = []
+
+    def commit(write: Callable[[], None]) -> None:
+        calls.append("wrapper")
+        write()
+
+    window = _open_main(monkeypatch, {}, commit=commit)
+    window.session.check_board()
+    window.backend.legacy_variant_edit(lambda: calls.append("write"), lambda: True)
+    board = window.pcbnew.GetBoard()
+    board.GetVariantNamesForUI.return_value = ["Default", "A"]
+
+    assert calls == ["wrapper", "write"]
+    with pytest.raises(mainwindow.BoardChanged, match="now contains variants"):
+        window.session.check_board()
+    board.GetVariantNamesForUI.return_value = ["Default"]
+    window.session.reliable = False
+    with pytest.raises(mainwindow.BoardChanged, match="could not be restored"):
+        window._legacy_board()
+
+
+def test_the_window_refuses_a_board_it_was_not_opened_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The session knows which board the window opened, and refuses another."""
+    window = _open_main(monkeypatch, {})
+    window.session.check_board()
+    window.pcbnew.GetBoard().GetFileName.return_value = "saved-as.kicad_pcb"
+
+    with pytest.raises(mainwindow.BoardChanged, match="closed, replaced"):
+        window.session.check_board()
 
 
 def test_main_type_hover_uses_existing_column_and_live_assembly_metadata(

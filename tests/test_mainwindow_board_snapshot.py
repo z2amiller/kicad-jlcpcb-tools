@@ -33,7 +33,7 @@ REPEATED_FIELD_NOTE = (
 
 
 class CountingBackend:
-    """Count the full board reads a window makes."""
+    """Count the full board reads a window makes, an edit's read-back included."""
 
     def __init__(self, backend: Any) -> None:
         self.backend = backend
@@ -44,10 +44,19 @@ class CountingBackend:
         self.snapshots += 1
         return self.backend.snapshot()
 
+    def edits_needed(self, edits: Any) -> bool:
+        """Check a batch."""
+        return self.backend.edits_needed(edits)
+
+    def apply(self, label: str, edits: Any) -> Any:
+        """Write a batch; the snapshot it returns is a read of the board."""
+        self.snapshots += 1
+        return self.backend.apply(label, edits)
+
 
 def _counted(window: Any) -> CountingBackend:
     """Count the window's board reads from now on."""
-    window.backend = CountingBackend(window.backend)
+    window.session.backend = CountingBackend(window.backend)
     return window.backend
 
 
@@ -88,7 +97,7 @@ def test_each_edit_is_read_back_once_before_its_rows_are_published(
 
     expected = "" if action == "clear" else "C200"
     assert (
-        window._board_snapshot.by_reference("R1")[0].default.fields["LCSC"].text
+        window.session.board.by_reference("R1")[0].default.fields["LCSC"].text
         == expected
     )
     assert all(lcsc == stored for lcsc, stored in published)
@@ -233,6 +242,43 @@ def test_an_activation_reads_the_board_once(
     assert backend.snapshots == after_paste + 2
 
 
+def test_an_edit_before_the_scheduled_estimate_makes_it_read_again(
+    make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An edit is not part of an activation's refresh, so its read no longer stands.
+
+    The edit reads the board when it starts and again once it has written;
+    the estimate the refresh scheduled then reads the board for itself.
+    """
+    window = _refreshing_window(make_window)
+    backend = _counted(window)
+    _activate(window, True)
+    assert backend.snapshots == 1
+
+    window.footprint_list.GetSelections.return_value = ["R1"]
+    act("paste", window, mainwindow, monkeypatch, "C300")
+    after_paste = backend.snapshots
+    window._run_coalesced_bom_recompute()
+
+    assert backend.snapshots == after_paste + 1
+
+
+def test_a_read_inside_a_refresh_still_checks_the_live_board(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """Later reads in the block take the first one only while the board is the same."""
+    window = make_window(footprints=[Footprint("R1")])
+    replacement = support.Board([Footprint("R1", lcsc="C900")])
+    replacement.filename = window.pcbnew.GetBoard().filename
+
+    with window._reading_once():
+        first = window._read_board()
+        assert window._read_board() is first
+        window.pcbnew.GetBoard = lambda: replacement
+        with pytest.raises(mainwindow.BoardChanged):
+            window._read_board()
+
+
 def test_two_fields_of_one_name_are_noted_once_per_activation(
     make_window: Callable[..., Any], mainwindow: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -296,22 +342,79 @@ def test_toggles_flip_the_flags_the_snapshot_read(
     window._toggle_exclusions(bom=bom, pos=pos)
 
     assert footprint.attributes == 12 - bits
-    assert window._board_snapshot.by_reference("R1")[0].default.exclude_from_bom is (
+    assert window.session.board.by_reference("R1")[0].default.exclude_from_bom is (
         not bom
+    )
+    # The row shows the flags the board now holds, both of them.
+    window.partlist_data_model.set_bom_pos.assert_called_once_with(
+        "R1", exclude_from_bom=not bom, exclude_from_pos=not pos
     )
 
 
+def test_a_toggle_that_is_not_written_leaves_the_list_as_it_was(
+    make_window: Callable[..., Any], mainwindow: Any
+) -> None:
+    """While generation runs, nothing is written and no row changes."""
+    window = make_window(footprints=[Footprint("R1")])
+    window.session.generating = True
+
+    window._toggle_exclusions(bom=True, pos=True)
+
+    assert window.pcbnew.GetBoard().footprints["R1"].attributes == 0
+    window.partlist_data_model.set_bom_pos.assert_not_called()
+    mainwindow.wx.PostEvent.assert_not_called()
+
+
 @pytest.mark.parametrize("action", ["picker", "paste", "enter", "clear", "toggle"])
-def test_an_edit_of_a_footprint_with_two_fields_of_one_name_is_refused(
+def test_a_write_that_could_not_be_undone_stops_every_later_action(
     make_window: Callable[..., Any],
     mainwindow: Any,
     monkeypatch: pytest.MonkeyPatch,
     action: str,
 ) -> None:
-    """The edit refuses the whole batch, writes nothing and says why in the log.
+    """Until the plugin is reopened, nothing more is written to the board."""
+    first, second = Footprint("R1"), Footprint("R2", fields={})
+    window = make_window(footprints=[first, second])
+    set_field = second.SetField
 
-    The edit cannot tell which of R2's LCSC fields to write. The window
-    stays usable: the list and every other action keep working.
+    def write_then_fail(name: str, text: str) -> None:
+        set_field(name, text)
+        raise RuntimeError("write failed after changing the field")
+
+    second.SetField = write_then_fail
+    second.Remove = MagicMock(side_effect=RuntimeError("cannot restore"))
+    rows = dict(window.test_rows)
+    window._apply_lcsc_assignments({"R1": "C200", "R2": "C200"})
+    assert not window.session.reliable
+    # The user retries with the storage notice gone and the list still shown.
+    del second.SetField, second.Remove
+    window._set_project_storage_error(None)
+    window.store = mainwindow.Store(window, window.project_path)
+    window.test_rows.update(rows)
+    window.footprint_list.GetSelections.return_value = ["R1"]
+    before = (first.field.text, first.attributes)
+
+    if action == "toggle":
+        window._toggle_exclusions(bom=True, pos=False)
+    else:
+        act(action, window, mainwindow, monkeypatch, "C300")
+
+    assert (first.field.text, first.attributes) == before
+    assert window._project_storage_unavailable is True
+
+
+@pytest.mark.parametrize("action", ["picker", "paste", "enter", "clear", "toggle"])
+def test_an_edit_of_a_footprint_with_two_fields_of_one_name_writes_each(
+    make_window: Callable[..., Any],
+    mainwindow: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    """Both of R2's LCSC fields take the number or are cleared; the log says so.
+
+    KiCad keeps the later field when the board is reopened, so writing both
+    keeps the edit whichever it is, and neither is removed. The exclusion
+    toggles write no field and say nothing about R2's.
     """
     window = _repeated_field_window(make_window)
     board = window.pcbnew.GetBoard()
@@ -321,17 +424,22 @@ def test_an_edit_of_a_footprint_with_two_fields_of_one_name_is_refused(
     else:
         act(action, window, mainwindow, monkeypatch, "C200")
 
+    lcsc = {"clear": "", "toggle": None}.get(action, "C200")
+    texts = [f.text for f in board.footprints["R2"].GetFields() if f.name == "LCSC"]
+    assert texts == (["C100", "C555"] if lcsc is None else [lcsc, lcsc])
+    assert board.footprints["R2"].GetAttributes() == (0x08 if lcsc is None else 0)
+    holds = {"": "each is now empty", None: ""}.get(lcsc, f"each now holds {lcsc}")
     assert [
-        (footprint.field.text, footprint.GetAttributes())
-        for footprint in board.footprints.values()
-    ] == [("", 0), ("C100", 0)]
-    assert any(
-        message.endswith(": Duplicate native footprint field: LCSC")
-        for message in (
-            call.args[0] % call.args[1:]
-            for call in window.logger.warning.call_args_list
-        )
+        call.args[0]
+        for call in window.logger.warning.call_args_list
+        if "more than one field named" in call.args[0] and "each" in call.args[0]
+    ] == (
+        [f'Footprint R2 has more than one field named "LCSC"; {holds}.']
+        if holds
+        else []
     )
+    if lcsc is not None:
+        assert window.store.get_part("R2")["lcsc"] == lcsc
     assert window._project_storage_unavailable is False
 
 
@@ -518,9 +626,11 @@ def test_a_read_back_that_finds_another_board_stops_further_edits(
         apply()
         window.pcbnew.GetBoard = lambda: replacement
 
-    window._board_action = run_then_replace
+    window.session.backend = mainwindow.SwigBackend(
+        window.pcbnew, commit=run_then_replace
+    )
 
     act("picker", window, mainwindow, monkeypatch, "C200")
 
-    assert window._board_unreliable is True
+    assert window.session.reliable is False
     assert window._project_storage_unavailable is True

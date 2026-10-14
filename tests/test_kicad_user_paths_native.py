@@ -229,12 +229,12 @@ def plugin(native_bindings: SimpleNamespace) -> Iterator[SimpleNamespace]:
     with load_siblings(
         "_user_paths_native_test",
         (
-            "board_part_edits",
+            "app.session",
             "board_parts",
             "fabrication",
+            "kicad_backend.swig",
             "kicad_backend.swig.dialects",
             "kicad_backend.swig.read",
-            "footprint_helpers",
             "schematic_discovery",
             "schematic_safety",
             "schematicexport",
@@ -246,6 +246,37 @@ def plugin(native_bindings: SimpleNamespace) -> Iterator[SimpleNamespace]:
             pcbnew=native_bindings.pcbnew,
             **{name.replace(".", "_"): module for name, module in modules.items()},
         )
+
+
+def plugin_session(plugin: SimpleNamespace, board: Any) -> tuple[Any, list[Any]]:
+    """Return a session editing the board as the window's does, and its notices.
+
+    The catalog lists no parts and the project stores none, so only the
+    board is written.
+    """
+    pcbnew = plugin.pcbnew
+    editor = SimpleNamespace(
+        GetBoard=lambda: board,
+        GetBuildVersion=pcbnew.GetBuildVersion,
+        GetMajorMinorVersion=pcbnew.GetMajorMinorVersion,
+        Refresh=pcbnew.Refresh,
+    )
+    catalog = SimpleNamespace(
+        available=lambda: True,
+        updating=lambda: False,
+        part_details=lambda part: {},
+        part_preference=lambda footprint, value: None,
+        save_part_preferences=lambda preferences: 0,
+    )
+    notices: list[Any] = []
+    session = plugin.app_session.PluginSession(
+        plugin.kicad_backend_swig.SwigBackend(editor),
+        SimpleNamespace(notice=notices.append),
+        catalog,
+    )
+    session.store = SimpleNamespace(get_part=lambda reference: None)
+    session.settings = {}
+    return session, notices
 
 
 @pytest.fixture
@@ -354,14 +385,11 @@ def test_assignments_save_in_the_board_and_leave_other_fields_alone(
         part.reference: board.FindFootprintByReference(part.reference) for part in PARTS
     }
     before = {reference: native_fields(fp) for reference, fp in footprints.items()}
-    plugin.board_part_edits.apply_board_part_edits(
-        [
-            (footprints["D1"], {"lcsc": "C2286"}),
-            (footprints["J1"], {"lcsc": "C49661"}),
-            (footprints["R2"], {"lcsc": ""}),
-            (footprints["C1"], {"exclude_from_bom": True, "exclude_from_pos": True}),
-        ]
-    )
+    session, notices = plugin_session(plugin, board)
+    assert session.assign({"D1": "C2286", "J1": "C49661"}).ok
+    assert session.clear(["R2"]).ok
+    assert session.toggle(["C1"], bom=True, pos=True).ok
+    assert notices == []
     saved = tmp_path / "assigned.kicad_pcb"
     assert pcbnew.SaveBoard(str(saved), board)
     reloaded = pcbnew.LoadBoard(str(saved))
@@ -685,9 +713,9 @@ def test_assignments_export_to_this_kicads_own_schematic(
     for reference, symbol in SYMBOLS.items():
         link = f"/{ROOT_SHEET}/{symbol}" if rooted else f"/{symbol}"
         board.FindFootprintByReference(reference).SetPath(pcbnew.KIID_PATH(link))
-    plugin.footprint_helpers.set_lcsc_value(
-        board.FindFootprintByReference("R2"), "C25744"
-    )
+    session, notices = plugin_session(plugin, board)
+    assert session.assign({"R2": "C25744"}).ok
+    assert notices == []
     host = SimpleNamespace(
         GetBoard=lambda: board, GetSettingsManager=pcbnew.GetSettingsManager
     )

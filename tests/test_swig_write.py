@@ -793,6 +793,29 @@ def test_writes_go_through_the_commit_and_the_editor_is_redrawn(
     )
 
 
+@pytest.mark.parametrize(
+    ("has_commit", "needed", "expected"),
+    [
+        (False, True, ["apply"]),
+        (True, False, ["apply"]),
+        (True, True, ["enter", "apply"]),
+    ],
+)
+def test_a_variant_edit_enters_the_commit_only_when_it_changes_the_board(
+    swig: SimpleNamespace, has_commit: bool, needed: bool, expected: list[str]
+) -> None:
+    """The transitional route for variant edits mirrors ``apply``'s rule."""
+    calls: list[str] = []
+
+    def commit(write: Callable[[], None]) -> None:
+        calls.append("enter")
+        write()
+
+    backend = make(swig, Footprint("R1"), commit=commit if has_commit else None)
+    backend.legacy_variant_edit(lambda: calls.append("apply"), lambda: needed)
+    assert calls == expected
+
+
 def _running_kicad(pcbnew: Any, board: Any) -> SimpleNamespace:
     """Return the pcbnew module, with this board open in its editor."""
     return SimpleNamespace(

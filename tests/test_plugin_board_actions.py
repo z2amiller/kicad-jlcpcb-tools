@@ -139,13 +139,13 @@ def harness() -> Iterator[Any]:
         if state.open_failure is not None:
             raise state.open_failure
         window = SimpleNamespace(
-            board_action=kwargs.get("board_action", lambda action: action()),
+            commit=kwargs.get("commit", lambda action: action()),
             Center=lambda: None,
             Show=lambda: None,
         )
         windows.append(window)
         if state.autofill:
-            window.board_action(state.autofill)
+            window.commit(state.autofill)
         return window
 
     package = "_plugin_board_actions_tests"
@@ -182,7 +182,7 @@ def harness() -> Iterator[Any]:
 def open_window(harness: Any) -> Callable[[Callable[[], None]], None]:
     """Launch through the simulated editor and return the actual callback runner."""
     harness.editor.native_run()
-    return harness.windows[-1].board_action
+    return harness.windows[-1].commit
 
 
 def test_edit_after_save_uses_native_action_without_opening_another_window(

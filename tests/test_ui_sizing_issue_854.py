@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from .wx_harness import (
+    attach_session,
     load,
     load_correction_modules,
     load_mainwindow,
@@ -413,7 +414,7 @@ def _create_mainwindow_test_env(
     provider.get_pcbnew().GetBoard().GetFileName.return_value = _board_path
     provider.get_pcbnew().GetMajorMinorVersion.return_value = "10.0"
 
-    window = object.__new__(mw_module.JLCPCBTools)
+    window = attach_session(object.__new__(mw_module.JLCPCBTools))
     mw_module.JLCPCBTools.__init__(window, None, provider)
     window.library = SimpleNamespace(categories=[])
 

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from . import swig_doubles
-from .wx_harness import ROOT, load_siblings, mainwindow_stubs, wx_stubs
+from .wx_harness import ROOT, attach_session, load_siblings, mainwindow_stubs, wx_stubs
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
         board: Optional[Board] = None,
         fabrication_initialized: bool = True,
     ) -> Any:
-        window = object.__new__(mainwindow.JLCPCBTools)
+        window = attach_session(object.__new__(mainwindow.JLCPCBTools))
         window._variant_mode = False
         window.settings = {} if settings is None else settings
         window.project_path = str(tmp_path)
@@ -148,11 +148,8 @@ def make_window(mainwindow: types.ModuleType, tmp_path: Path) -> Callable[..., A
             filename.write_text("(kicad_pcb)\n", encoding="utf-8")
             board.filename = str(filename)
         window.pcbnew = swig_doubles.editor(board)
-        window.backend = mainwindow.SwigBackend(window.pcbnew)
-        window._board_identity = mainwindow.board_identity(board)
-        window._board_action = None
-        window._board_unreliable = False
-        window._ordinary_generating = False
+        window.session.backend = mainwindow.SwigBackend(window.pcbnew)
+        window.session.board_token = mainwindow.board_identity(board)
         window._refreshing_board = False
         window.logger = MagicMock()
         library = window.library = object.__new__(mainwindow.Library)

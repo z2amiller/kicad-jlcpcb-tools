@@ -116,9 +116,9 @@ def open_window(
             dbfile=str(tmp_path / "jlcpcb" / "project.db"),
         )
         window.library.read_correction_data = lambda: SimpleNamespace(corrections=())
-        window.backend = fake.FakeBackend(
+        window.session.backend = fake.FakeBackend(
             [fake.component(part["reference"]) for part in parts],
-            info=fake.board_info(token=window._board_identity),
+            info=fake.board_info(token=window.session.board_token),
         )
         window.pcbnew.GetCurrentSelection.return_value = []
         selections: list[str] = []

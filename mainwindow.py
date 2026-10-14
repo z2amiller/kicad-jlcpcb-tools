@@ -23,11 +23,9 @@ import wx  # pylint: disable=import-error
 import wx.dataview as dv  # pylint: disable=import-error
 from wx import adv  # pylint: disable=import-error
 
-from .board_part_edits import (
-    BoardEditRecoveryError,
-    apply_board_part_edits,
-    board_part_edits_needed,
-)
+from .app.assignments import Outcome, TypedPart, assignment_edit
+from .app.notify import Message, Notice
+from .app.session import PluginSession
 from .legacy_part_storage import retire_legacy_part_info
 from .part_assignments import safe_assignment_value
 from .saved_pcb_assignments import read_saved_pcb_assignments
@@ -56,10 +54,7 @@ from .bom_estimation.help_text import show_bom_estimator_help
 from .board_parts import (
     find_component,
     find_components,
-    library_item_name,
-    occupied_assignment,
     repeated_field_names,
-    value_text,
     with_current_flags,
 )
 from .bom_widget import BomEstimatorController, BomEstimatorWidget
@@ -118,7 +113,13 @@ from .helpers import (
     getVersion,
     loadBitmapScaled,
 )
-from .kicad_backend import BoardChanged, BoardSnapshot
+from .kicad_backend import (
+    BOARD_REPLACED,
+    BOARD_REPLACED_REASON,
+    BOARD_UNRESTORED,
+    BoardChanged,
+    BoardSnapshot,
+)
 from .kicad_backend.swig import SwigBackend
 from .kicad_backend.swig.read import board_identity, footprints_by_key
 from .kicad_drc import DRCViolationCounter
@@ -205,6 +206,37 @@ class KicadProvider:
         return kicad_pcbnew
 
 
+class _WindowCatalog:
+    """The parts library as the session reads it, through the window's detail cache.
+
+    The cache stays with the window, which publishes each part's catalog
+    facts to the parts list the first time it reads them.
+    """
+
+    def __init__(self, window: JLCPCBTools) -> None:
+        self._window = window
+
+    def available(self) -> bool:
+        """Return whether the selected catalog has completed initialization."""
+        return self._window.is_catalog_available()
+
+    def updating(self) -> bool:
+        """Return whether Update library is rewriting the catalog."""
+        return self._window.library.is_download_running()
+
+    def part_details(self, part: Lcsc) -> dict[str, Any]:
+        """Return the catalog's facts for a part, raising when it cannot be read."""
+        return self._window._catalog_get_part_details(part, strict=True)
+
+    def part_preference(self, footprint: str, value: str) -> Optional[str]:
+        """Return the part remembered for a footprint and value."""
+        return self._window.library.get_part_preference(footprint, value)
+
+    def save_part_preferences(self, preferences: Sequence[tuple[str, str, str]]) -> int:
+        """Remember parts by footprint and value."""
+        return self._window.library.save_part_preferences(preferences)
+
+
 class JLCPCBTools(wx.Frame):
     """JLCPCBTools main application window."""
 
@@ -212,26 +244,32 @@ class JLCPCBTools(wx.Frame):
         self,
         parent: Optional[wx.Window],
         kicad_provider: KicadProvider = KicadProvider(),
-        board_action: Optional[Callable[[Callable[[], None]], None]] = None,
+        commit: Optional[Callable[[Callable[[], None]], None]] = None,
     ) -> None:
+        """Open the window for the board the provider's PCB editor has open.
+
+        ``commit`` runs a board write inside KiCad's action wrapper, for one
+        undo step; the action plugin supplies it.
+        """
         self.library: Optional[Library] = None
         self._catalog_details: LcscDict[dict[str, Any]] = LcscDict()
         self._catalog_ready = False
         self._catalog_switch_pending = False
-        self.store: Optional[Store] = None
         self._variant_controller = None
         self._closing = False
         self._saving_on_close = False
         self._generating = False
         self.pcbnew = kicad_provider.get_pcbnew()
-        self.backend = SwigBackend(self.pcbnew)
-        self._board_snapshot: Optional[BoardSnapshot] = None
         board = self.pcbnew.GetBoard()
         self._schematic_board_identity = board_identity(board)
-        self._board_identity = board_identity(board)
-        self._board_action = board_action
-        self._board_unreliable = False
-        self._ordinary_generating = False
+        self.session = PluginSession(
+            SwigBackend(self.pcbnew, commit=commit),
+            self,
+            _WindowCatalog(self),
+            board_token=board_identity(board),
+            guard=self._legacy_board,
+        )
+        self.store: Optional[Store] = None
         self._refreshing_board = False
         board_filename = str(board.GetFileName())
         if not board_filename.strip():
@@ -860,6 +898,48 @@ class JLCPCBTools(wx.Frame):
             raise
         self.Bind(wx.EVT_ACTIVATE, self.on_window_activated)
 
+    @property
+    def backend(self) -> SwigBackend:
+        """The board backend, held by the session."""
+        return self.session.backend
+
+    @property
+    def store(self) -> Optional[Store]:
+        """The project's parts store, held by the session; None while unavailable."""
+        return self.session.store
+
+    @store.setter
+    def store(self, store: Optional[Store]) -> None:
+        self.session.store = store
+
+    @property
+    def settings(self) -> dict[str, Any]:
+        """The plugin's settings, held by the session."""
+        return self.session.settings
+
+    @settings.setter
+    def settings(self, settings: dict[str, Any]) -> None:
+        self.session.settings = settings
+
+    def notice(self, notice: Notice) -> None:
+        """Show a problem a session operation met.
+
+        One that blocks editing makes part assignments unavailable, with the
+        reason shown above the parts list; any other goes to the log.
+        """
+        if notice.blocking:
+            self._set_project_storage_error(notice.error or BoardChanged(notice.text))
+        else:
+            self.logger.warning(notice.text)
+
+    def _log_messages(self, messages: Iterable[Message]) -> None:
+        """Log the lines an operation returned, at their own level."""
+        for message in messages:
+            if message.level == "warning":
+                self.logger.warning(message.text)
+            else:
+                self.logger.info(message.text)
+
     def Layout(self) -> bool:
         """Lay out the form after resizing or changing the visible controls."""
         result = wx.Frame.Layout(self)
@@ -892,19 +972,17 @@ class JLCPCBTools(wx.Frame):
 
         Transitional: for code that still plots, saves, runs DRC, reads
         drawings and variants, or checks the board through SWIG. Reads of
-        footprints go through ``_read_board`` instead.
+        footprints go through ``_read_board`` instead. It is also the
+        session's check of the board, until the session can tell from the
+        backend whether the board has gained design variants.
         """
         board = self.pcbnew.GetBoard()
         identity = board_identity(board)
-        if identity != getattr(self, "_board_identity", identity):
-            raise BoardChanged(
-                "The PCB was closed, replaced, or saved under another name. "
-                "Reopen JLCPCB Tools."
-            )
-        if getattr(self, "_board_unreliable", False):
-            raise BoardChanged(
-                "A board edit could not be restored. Inspect the PCB and reopen JLCPCB Tools."
-            )
+        expected = self.session.board_token
+        if expected is not None and identity != expected:
+            raise BoardChanged(BOARD_REPLACED)
+        if not self.session.reliable:
+            raise BoardChanged(BOARD_UNRESTORED)
         if not getattr(self, "_variant_mode", False) and _board_has_variants(board):
             raise BoardChanged(
                 "The PCB now contains variants. Reopen JLCPCB Tools to edit them."
@@ -912,18 +990,18 @@ class JLCPCBTools(wx.Frame):
         return board
 
     def _read_board(self) -> BoardSnapshot:
-        """Read the open board again through the backend and hold the snapshot.
+        """Read the open board again through the session, which holds the snapshot.
 
-        The live board is checked first, as for every board access, so the
-        snapshot is of the board this window was opened for. Inside
-        ``_reading_once`` only the first read reads the board.
+        The session checks the live board first, as for every board access,
+        so the snapshot is of the board this window was opened for. Inside
+        ``_reading_once`` only the first read reads the board; the others
+        check it and take that read.
         """
-        self._legacy_board()
         once = getattr(self, "_read_once", None)
         if once:
+            self.session.check_board()
             return once[0]
-        snapshot = self.backend.snapshot()
-        self._board_snapshot = snapshot
+        snapshot = self.session.read_board()
         if once is not None:
             once.append(snapshot)
         return snapshot
@@ -950,9 +1028,9 @@ class JLCPCBTools(wx.Frame):
             self._read_once = None
 
     def _legacy_footprints(self, keys: Iterable[str]) -> dict[str, Any]:
-        """Return live SWIG footprints by key, for edits and the editor selection.
+        """Return live SWIG footprints by key, for the editor selection.
 
-        Transitional, until edits and selection go through the backend.
+        Transitional, until selection goes through the backend.
         """
         return footprints_by_key(self._legacy_board(), keys)
 
@@ -960,11 +1038,9 @@ class JLCPCBTools(wx.Frame):
         """Return the snapshot last read, once the board is checked to be open.
 
         The window reads the board again when the parts list is rebuilt,
-        which activation does, and after each of its own edits.
+        which activation does, and the session after each of its edits.
         """
-        self._legacy_board()
-        snapshot = getattr(self, "_board_snapshot", None)
-        return snapshot if snapshot is not None else self._read_board()
+        return self.session.held_board()
 
     def on_window_activated(self, event: wx.ActivateEvent) -> None:
         """Refresh external PCB edits and undo without applying opening preferences."""
@@ -979,7 +1055,7 @@ class JLCPCBTools(wx.Frame):
             not event.GetActive()
             or getattr(self, "_closing", False)
             or getattr(self, "_refreshing_board", False)
-            or getattr(self, "_ordinary_generating", False)
+            or self.session.generating
             or getattr(self, "_variant_controller", None)
             or self.store is None
         ):
@@ -1009,48 +1085,6 @@ class JLCPCBTools(wx.Frame):
         for row in self.partlist_data_model.get_all():
             if row[PartListDataModel.columns["REF_COL"]] in selected:
                 self.footprint_list.Select(self.partlist_data_model.ObjectToItem(row))
-
-    def _apply_board_change(
-        self,
-        change: Callable[[], None],
-        action: str,
-        *,
-        needs_change: Optional[Callable[[], bool]] = None,
-    ) -> bool:
-        """Execute one native edit before publishing its dependent UI state."""
-        try:
-            self._legacy_board()
-            if getattr(self, "_ordinary_generating", False):
-                raise RuntimeError("Finish generation before editing part assignments.")
-            if needs_change is not None and not needs_change():
-                return True
-
-            def apply() -> None:
-                self._legacy_board()
-                change()
-
-            callback = getattr(self, "_board_action", None)
-            if callback is None:
-                apply()
-            else:
-                callback(apply)
-            self._read_board()
-        except (BoardChanged, BoardEditRecoveryError) as error:
-            self._board_unreliable = True
-            self._set_project_storage_error(error)
-            return False
-        except Exception as error:
-            self.logger.warning("Unable to %s: %s", action, error)
-            return False
-        # Redraw failure cannot undo a verified native transaction or suppress
-        # publication of its current assignment in the plugin's own controls.
-        try:
-            refresh = getattr(self.pcbnew, "Refresh", None)
-            if callable(refresh):
-                refresh()
-        except Exception as error:
-            self.logger.warning("Unable to redraw the PCB after %s: %s", action, error)
-        return True
 
     def _set_standard_only_refs(self, refs: Iterable[str]) -> None:
         """Update computed Standard-only cells and refresh the current row help."""
@@ -1332,7 +1366,7 @@ class JLCPCBTools(wx.Frame):
                 controller.session._check_board()
                 self.store = controller.cache
                 self._migrate_legacy_assignments()
-                if getattr(self, "_board_unreliable", False):
+                if not self.session.reliable:
                     return
                 controller.refresh()
                 if not controller.session.reliable:
@@ -1373,7 +1407,7 @@ class JLCPCBTools(wx.Frame):
                 )
             self._set_project_storage_error(None)
             self._migrate_legacy_assignments()
-            if getattr(self, "_board_unreliable", False):
+            if not self.session.reliable:
                 return
             self._maybe_show_schematic_storage_notice(project_db_preexisted)
             if self._variant_mode:
@@ -1421,26 +1455,27 @@ class JLCPCBTools(wx.Frame):
 
     def _migration_footprints(
         self, board: BoardSnapshot
-    ) -> tuple[tuple[MigrationFootprint, ...], Any, dict[str, Any]]:
-        """Capture detached recovery values, and the live footprints to edit."""
+    ) -> tuple[tuple[MigrationFootprint, ...], Any]:
+        """Capture detached recovery values from one read of the board."""
         snapshot = capture_board(board)
-        parts = migration_footprints(snapshot.parts, board)
-        # The capture refuses footprints sharing a UUID, so each UUID is a key.
-        footprints = self._legacy_footprints(part.component_id for part in parts)
-        return parts, snapshot, footprints
+        return migration_footprints(snapshot.parts, board), snapshot
 
     def _legacy_migration_state(
         self,
-    ) -> tuple[LegacyMigrationPlan, tuple[object, ...], dict[str, Any]]:
-        """Read current recovery coverage without changing native or stored values."""
+    ) -> tuple[LegacyMigrationPlan, tuple[object, ...], Optional[BoardSnapshot]]:
+        """Read current recovery coverage without changing native or stored values.
+
+        The board read the coverage came from is returned with it, for the
+        recovery edits to quote.
+        """
         dbfile = self.store.dbfile
         initial = plan_legacy_migration(dbfile, (), lambda _component_id: None)
         if not initial.active_table:
-            return initial, (), {}
+            return initial, (), None
         if not initial.rows or all(row.status == "ignored" for row in initial.rows):
-            return initial, ((),), {}
+            return initial, ((),), None
         board = self._read_board()
-        parts, snapshot, footprints = self._migration_footprints(board)
+        parts, snapshot = self._migration_footprints(board)
         project_name = authenticated_project_name(self.pcbnew, self.project_path)
         discovery = discover_project_schematics(
             self.project_path,
@@ -1515,7 +1550,7 @@ class JLCPCBTools(wx.Frame):
                 discovery.source_state,
                 tuple(sorted(index.texts.items())),
             ),
-            footprints,
+            board,
         )
 
     def _migrate_legacy_assignments(self) -> None:
@@ -1530,7 +1565,7 @@ class JLCPCBTools(wx.Frame):
         self._legacy_migration_failed = False
         self._legacy_migration_block_preferences = False
         try:
-            plan, state, _footprints = self._legacy_migration_state()
+            plan, state, board = self._legacy_migration_state()
             self._legacy_migration_blocked_ids = set(plan.blocked_component_ids)
             for row in plan.unresolved:
                 self.logger.warning(
@@ -1541,30 +1576,27 @@ class JLCPCBTools(wx.Frame):
                 )
             if plan.assignments:
 
-                def apply() -> None:
-                    current_plan, current_state, current_footprints = (
-                        self._legacy_migration_state()
-                    )
+                def recheck() -> None:
+                    current_plan, current_state, _board = self._legacy_migration_state()
                     if current_plan != plan or current_state != state:
                         raise RuntimeError(
                             "Legacy recovery sources changed; retry initialization."
                         )
-                    apply_board_part_edits(
-                        [
-                            (current_footprints[key], {"lcsc": code})
-                            for key, code in plan.assignments
-                        ]
-                    )
 
-                if not self._apply_board_change(
-                    apply,
-                    "recover legacy assignments",
-                    needs_change=lambda: board_part_edits_needed(
-                        [
-                            (_footprints[key], {"lcsc": code})
-                            for key, code in plan.assignments
-                        ]
-                    ),
+                # The capture refuses footprints sharing a UUID, so each
+                # component id is the footprint's key. Edits that cannot be
+                # made hold their footprints back as a refused write does.
+                label = "recover legacy assignments"
+                try:
+                    edits = [
+                        assignment_edit(board.get(key), code)
+                        for key, code in plan.assignments
+                    ]
+                except Exception as error:
+                    self.session.report(error, f"Unable to {label}: {error}")
+                    edits = None
+                if edits is None or not self.session.apply(
+                    label, edits, recheck=recheck
                 ):
                     self._legacy_migration_failed = True
                     self._legacy_migration_blocked_ids.update(
@@ -1989,26 +2021,17 @@ class JLCPCBTools(wx.Frame):
             return
         if controller := getattr(self, "_variant_controller", None):
             return controller.assign_parts(e)
-        try:
-            details = self._catalog_get_part_details(e.lcsc, strict=True)
-            # An unlisted number must stay a cached miss, or it reads as listed.
-            listed = bool(details)
-            details.update(type=e.type, stock=e.stock)
-            assigned = self._apply_lcsc_assignments(
-                dict.fromkeys(e.references, e.lcsc),
-                details={e.lcsc: details},
-                remember_part_preferences=True,
+        outcome = self.session.assign_selected(e.references, e.lcsc, e.type, e.stock)
+        self._show_assignments(outcome)
+        if outcome.details is not None and (part := Lcsc.parse(e.lcsc)) is not None:
+            details = outcome.details
+            self._catalog_details[part] = deepcopy(dict(details))
+            self.partlist_data_model.set_catalog_details(
+                str(part),
+                details.get("type", ""),
+                details.get("stock", ""),
+                params_for_part(details),
             )
-            if assigned and listed and (part := Lcsc.parse(e.lcsc)) is not None:
-                self._catalog_details[part] = deepcopy(details)
-                self.partlist_data_model.set_catalog_details(
-                    str(part),
-                    details.get("type", ""),
-                    details.get("stock", ""),
-                    params_for_part(details),
-                )
-        except (sqlite3.Error, OSError) as error:
-            self.logger.warning("Unable to read the selected part: %s", error)
 
     def _apply_lcsc_assignments(
         self,
@@ -2019,102 +2042,36 @@ class JLCPCBTools(wx.Frame):
         notify: bool = True,
         require_catalog: bool = True,
     ) -> list[str]:
-        """Apply a verified native batch before publishing assignments or preferences.
+        """Assign LCSC numbers through the session and show what changed."""
+        outcome = self.session.assign(
+            assignments,
+            details=details,
+            remember=remember_part_preferences,
+            require_catalog=require_catalog,
+        )
+        return self._show_assignments(outcome, notify=notify)
 
-        Assignments arrive as strings from the part selector, the clipboard,
-        the Enter LCSC prompt and saved preferences, so they are parsed once
-        here, at the boundary. What the board field, the model and the saved
-        preferences see below is the canonical number of a part that is known
-        to be one.
-        """
-        if self.store is None or (require_catalog and not self.is_catalog_available()):
-            return []
-        try:
-            board = self._read_board()
-        except BoardChanged as error:
-            self._set_project_storage_error(error)
-            return []
-        parts = {}
-        for reference, number in assignments.items():
-            # Skipped like a reference the board no longer has: one bad entry
-            # is not a reason to abandon the rest of the action.
-            if (part := Lcsc.parse(number)) is None:
-                self.logger.warning(
-                    "Skipped %s: %r does not name an LCSC part.", reference, number
-                )
-            else:
-                parts[reference] = part
-        footprints = find_components(board, parts)
-        if not footprints:
-            return []
-        # The caller's details are keyed by whatever string it holds, so they
-        # are parsed too rather than compared against a canonical key.
-        supplied = {
-            part: row
-            for number, row in (details or {}).items()
-            if (part := Lcsc.parse(number)) is not None
-        }
-        catalog = {}
-        try:
-            for part in dict.fromkeys(parts[ref] for ref in footprints):
-                row = supplied.get(part)
-                if row is None:
-                    row = self._catalog_get_part_details(part, strict=True)
-                catalog[part] = (row, params_for_part(row))
-        except (sqlite3.Error, OSError) as error:
-            self.logger.warning("Unable to apply LCSC assignments: %s", error)
-            return []
-
-        live = self._legacy_footprints(fp.key for fp in footprints.values())
-        edits = [
-            (live[fp.key], {"lcsc": str(parts[ref])}) for ref, fp in footprints.items()
-        ]
-        if not self._apply_board_change(
-            lambda: apply_board_part_edits(edits),
-            "apply LCSC assignments",
-            needs_change=lambda: board_part_edits_needed(edits),
-        ):
-            return []
-
-        preferences = []
-        for reference, footprint in footprints.items():
-            try:
-                current_part = self.store.get_part(reference)
-            except BoardChanged as error:
-                self._set_project_storage_error(error)
-                return []
-            part = parts[reference]
-            lcsc = str(part)
-            row, params = catalog[part]
-            stock = row.get("stock")
+    def _show_assignments(self, outcome: Outcome, *, notify: bool = True) -> list[str]:
+        """Show an assignment's rows and log lines, then refresh what depends on them."""
+        for update in outcome.updates:
             self.partlist_data_model.set_lcsc(
-                reference,
-                lcsc,
-                row.get("type", ""),
-                stock if stock is not None else "",
-                params,
+                update.reference,
+                update.lcsc,
+                update.part_type,
+                update.stock,
+                update.params,
             )
             # Assigning clears the row's old facts. A cached code needs no
             # supplier callback, so publish its current facts immediately.
-            if current_part is not None:
+            if update.part is not None:
                 self.partlist_data_model.set_assembly_metadata(
-                    reference,
-                    current_part,
-                    pending=current_part["lcsc"] in self.assembly_lookup.pending,
+                    update.reference,
+                    update.part,
+                    pending=update.part["lcsc"] in self.assembly_lookup.pending,
                 )
-            preferences.append(
-                (
-                    library_item_name(footprint.footprint_lib_id),
-                    value_text(footprint),
-                    lcsc,
-                )
-            )
-        if remember_part_preferences and self.settings.get("part_preferences", {}).get(
-            "remember_lcsc_assignments", True
-        ):
-            self._save_part_preferences(preferences, automatic=True)
-        assigned = list(footprints)
-        if notify:
+        self._log_messages(outcome.messages)
+        assigned = outcome.references
+        if assigned and notify:
             self.start_assembly_enrichment(assigned)
             self.refresh_corrections(assigned)
             wx.PostEvent(self, BomDataChangedEvent(source="assign_parts"))
@@ -2122,29 +2079,11 @@ class JLCPCBTools(wx.Frame):
 
     def _save_part_preferences(
         self, preferences: Iterable[tuple[str, str, str]], *, automatic: bool = False
-    ) -> int:
+    ) -> None:
         """Remember one action's complete preferences without losing its assignments."""
-        complete = [
-            preference
-            for preference in preferences
-            if all(isinstance(text, str) and text.strip() for text in preference[:2])
-        ]
-        if not complete:
-            return 0
-        try:
-            saved = self.library.save_part_preferences(complete)
-        except sqlite3.Error as error:
-            self.logger.warning("Unable to save part preferences: %s", error)
-            return 0
-        if saved:
-            message = "Saved %d part preference(s)."
-            if automatic:
-                message += (
-                    " To disable automatic remembering, clear 'Remember my part preferences'"
-                    " in Settings > Part preferences."
-                )
-            self.logger.info(message, saved)
-        return saved
+        self._log_messages(
+            self.session.remember(preferences, automatic=automatic).messages
+        )
 
     def _fill_empty_lcsc_assignments_from_part_preferences(self) -> None:
         """Fill truly empty eligible native fields once per plugin opening."""
@@ -2152,51 +2091,10 @@ class JLCPCBTools(wx.Frame):
             self, "_legacy_migration_block_preferences", False
         ):
             return
-        board = self._read_board()
-        part_preferences = {}
-        assignments = {}
-        try:
-            for part in self.store.rows(board):
-                if part["lcsc"] or not part["footprint"] or not part["value"]:
-                    continue
-                footprint = find_component(board, part["reference"])
-                if (
-                    footprint is None
-                    or (
-                        getattr(self, "_legacy_migration_blocked_ids", ())
-                        and footprint.uuid in self._legacy_migration_blocked_ids
-                    )
-                    or footprint.default.exclude_from_bom
-                    or footprint.default.exclude_from_pos
-                    or footprint.default.dnp
-                ):
-                    continue
-                key = (part["footprint"], part["value"])
-                if key not in part_preferences:
-                    part_preferences[key] = self.library.get_part_preference(*key)
-                if lcsc := part_preferences[key]:
-                    occupied = occupied_assignment(footprint)
-                    if occupied:
-                        self.logger.info(
-                            "Skipped part preference for %s: field %r already contains %r.",
-                            part["reference"],
-                            *occupied,
-                        )
-                    else:
-                        assignments[part["reference"]] = lcsc
-            assigned = self._apply_lcsc_assignments(assignments, notify=False)
-        except sqlite3.Error as error:
-            self.logger.warning(
-                "Unable to fill assignments from part preferences: %s", error
-            )
-            return
-        if assigned:
-            self.logger.info(
-                "Filled %d empty LCSC assignment(s) from part preferences. "
-                "To disable, clear 'Parts preferences fill in empty LCSC assignments' "
-                "in Settings > Part preferences.",
-                len(assigned),
-            )
+        outcome = self.session.fill_empty_assignments(
+            skip=getattr(self, "_legacy_migration_blocked_ids", ())
+        )
+        self._show_assignments(outcome, notify=False)
 
     def _set_bom_estimator_board_count(self, value: int) -> None:
         """Persist board count and update estimate when value changed."""
@@ -2332,7 +2230,7 @@ class JLCPCBTools(wx.Frame):
         # still stands; otherwise stock concerns and the estimate share one.
         snapshot = getattr(self, "_activation_read", None)
         self._activation_read = None
-        if snapshot is not getattr(self, "_board_snapshot", None):
+        if snapshot is not self.session.board:
             snapshot = None
         with self._reading_once(snapshot):
             self.recompute_stock_concerns()
@@ -2610,7 +2508,7 @@ class JLCPCBTools(wx.Frame):
         after the window is activated gives it, and later rebuilds and
         actions do not repeat it.
         """
-        snapshot = getattr(self, "_board_snapshot", None)
+        snapshot = self.session.board
         if snapshot is None or getattr(self, "_repeated_fields_noted", False):
             return
         self._repeated_fields_noted = True
@@ -2758,79 +2656,44 @@ class JLCPCBTools(wx.Frame):
         self._toggle_exclusions(bom=False, pos=True)
 
     def _toggle_exclusions(self, *, bom: bool, pos: bool) -> None:
-        """Change each selected native footprint's flags as one reversible batch."""
-        if self.store is None:
-            return
-        try:
-            board = self._read_board()
-        except BoardChanged as error:
-            self._set_project_storage_error(error)
-            return
-        selected = []
+        """Change each selected footprint's flags as one reversible batch."""
         selections = self.footprint_list.GetSelections()
-        for item in selections:
-            reference = self.partlist_data_model.get_reference(item)
-            footprint = find_component(board, reference)
-            if footprint is not None:
-                selected.append((item, footprint))
-        live = self._legacy_footprints(footprint.key for _item, footprint in selected)
-        edits = []
-        for _item, footprint in selected:
-            changes = {}
-            if bom:
-                changes["exclude_from_bom"] = not footprint.default.exclude_from_bom
-            if pos:
-                changes["exclude_from_pos"] = not footprint.default.exclude_from_pos
-            edits.append((live[footprint.key], changes))
-        if not edits or not self._apply_board_change(
-            lambda: apply_board_part_edits(edits),
-            "change assembly exclusions",
-            needs_change=lambda: board_part_edits_needed(edits),
-        ):
+        references = [
+            self.partlist_data_model.get_reference(item) for item in selections
+        ]
+        outcome = self.session.toggle(references, bom=bom, pos=pos)
+        if not outcome.ok:
             return
-        for item, _footprint in selected:
-            if bom and pos:
-                self.partlist_data_model.toggle_bom_pos(item)
-            elif bom:
-                self.partlist_data_model.toggle_bom(item)
-            else:
-                self.partlist_data_model.toggle_pos(item)
+        # The rows show the flags the board now holds, as the outcome gives them.
+        updates = {update.reference: update for update in outcome.updates}
+        for item, reference in zip(selections, references):
+            if (update := updates.get(reference)) is not None:
+                self.partlist_data_model.set_bom_pos(
+                    item,
+                    exclude_from_bom=update.exclude_from_bom,
+                    exclude_from_pos=update.exclude_from_pos,
+                )
         wx.PostEvent(self, BomDataChangedEvent(source="toggle_exclusions"))
 
     def remove_lcsc_number(self, *_: object) -> None:
-        """Clear native assignments before changing displayed rows."""
+        """Clear the selected assignments on the board, then in the list."""
         if controller := getattr(self, "_variant_controller", None):
             return controller.remove()
-        if self.store is None:
-            return
-        try:
-            board = self._read_board()
-        except BoardChanged as error:
-            self._set_project_storage_error(error)
-            return
-        selected = []
         # wx selection items borrow storage from this native array. Keep it
-        # alive until the post-commit model updates have finished using them.
+        # alive until the model updates after the edit have finished using them.
         selections = self.footprint_list.GetSelections()
-        for item in selections:
-            ref = self.partlist_data_model.get_reference(item)
-            fp = find_component(board, ref)
-            if fp is None:
-                continue
-            selected.append((item, ref, fp))
-        if not selected:
+        references = [
+            self.partlist_data_model.get_reference(item) for item in selections
+        ]
+        outcome = self.session.clear(references)
+        self._log_messages(outcome.messages)
+        if not outcome.ok:
             return
-        live = self._legacy_footprints(fp.key for _, _, fp in selected)
-        edits = [(live[fp.key], {"lcsc": ""}) for _, _, fp in selected]
-        if not self._apply_board_change(
-            lambda: apply_board_part_edits(edits),
-            "clear LCSC assignments",
-            needs_change=lambda: board_part_edits_needed(edits),
-        ):
-            return
-        for item, _ref, _fp in selected:
-            self.partlist_data_model.remove_lcsc_number(item)
-        self.refresh_corrections([ref for _item, ref, _fp in selected])
+        changed = set(outcome.references)
+        for item, reference in zip(selections, references):
+            if reference in changed:
+                self.partlist_data_model.remove_lcsc_number(item)
+        self.refresh_corrections(outcome.references)
         wx.PostEvent(self, BomDataChangedEvent(source="remove_lcsc_number"))
 
     def select_alike_parts(self, *_: object) -> None:
@@ -3190,7 +3053,7 @@ class JLCPCBTools(wx.Frame):
                 )
             else:
                 self._legacy_board()
-                self._ordinary_generating = True
+                self.session.generating = True
                 output = self.run_generation_step(
                     "Preparing placement data",
                     self.fabrication.begin_ordinary_generation,
@@ -3322,7 +3185,7 @@ class JLCPCBTools(wx.Frame):
                 controller.end_generation()
             else:
                 self.fabrication.end_ordinary_generation()
-                self._ordinary_generating = False
+                self.session.generating = False
                 self.generate_button.Enable(True)
 
     def review_generation_findings(self, findings: Sequence[Finding]) -> bool:
@@ -3515,7 +3378,7 @@ class JLCPCBTools(wx.Frame):
                 f"Unable to save legacy migration audit: {self._legacy_audit_error}"
             )
         try:
-            plan, state, _footprints = self._legacy_migration_state()
+            plan, state, _board = self._legacy_migration_state()
         except (sqlite3.Error, OSError, ValueError, RuntimeError) as error:
             diagnostics.append(f"Unable to verify legacy recovery coverage: {error}")
             return diagnostics
@@ -3574,7 +3437,7 @@ class JLCPCBTools(wx.Frame):
 
             def sources_unchanged() -> bool:
                 self._legacy_board()
-                current_plan, current_state, _current_footprints = (
+                current_plan, current_state, _current_board = (
                     self._legacy_migration_state()
                 )
                 return (
@@ -3615,8 +3478,8 @@ class JLCPCBTools(wx.Frame):
                     and board_identity(self.pcbnew.GetBoard()) != identity
                 ):
                     raise BoardChanged(
-                        "The PCB was closed, replaced, or saved under another name. "
-                        "Reopen JLCPCB Tools before saving its schematic."
+                        f"{BOARD_REPLACED_REASON} Reopen JLCPCB Tools before saving "
+                        "its schematic."
                     )
 
             project_name = authenticated_project_name(
@@ -3858,19 +3721,11 @@ class JLCPCBTools(wx.Frame):
         """Remember the selected LCSC assignments as part preferences."""
         if controller := getattr(self, "_variant_controller", None):
             return controller.save_preferences()
-        if self.store is None:
-            return
-        preferences = []
-        try:
-            self._read_board()
-            for item in self.footprint_list.GetSelections():
-                reference = self.partlist_data_model.get_reference(item)
-                if part := self.store.get_part(reference):
-                    preferences.append((part["footprint"], part["value"], part["lcsc"]))
-        except BoardChanged as error:
-            self._set_project_storage_error(error)
-            return
-        self._save_part_preferences(preferences)
+        references = [
+            self.partlist_data_model.get_reference(item)
+            for item in self.footprint_list.GetSelections()
+        ]
+        self._log_messages(self.session.save_preferences(references).messages)
 
     def apply_selected_part_preferences(self, *_: object) -> None:
         """Apply matching part preferences to the selected rows."""
@@ -3878,29 +3733,11 @@ class JLCPCBTools(wx.Frame):
             return
         if controller := getattr(self, "_variant_controller", None):
             return controller.apply_preferences()
-        assignments = {}
-        try:
-            self._read_board()
-            for item in self.footprint_list.GetSelections():
-                reference = self.partlist_data_model.get_reference(item)
-                part = self.store.get_part(reference)
-                if part is None:
-                    continue
-                footprint, value = part["footprint"], part["value"]
-                if footprint and value:
-                    if preference := self.library.get_part_preference(footprint, value):
-                        assignments[reference] = preference
-            updated_references = self._apply_lcsc_assignments(assignments)
-        except BoardChanged as error:
-            self._set_project_storage_error(error)
-            return
-        except sqlite3.Error as error:
-            self.logger.warning("Unable to apply part preferences: %s", error)
-            return
-        if updated_references:
-            self.logger.info(
-                "Applied part preferences to %d assignment(s).", len(updated_references)
-            )
+        references = [
+            self.partlist_data_model.get_reference(item)
+            for item in self.footprint_list.GetSelections()
+        ]
+        self._show_assignments(self.session.apply_preferences(references))
 
     def enter_part_lcsc(self, *_: object) -> None:
         """Assign a typed LCSC number, including one the catalog does not list."""
@@ -3939,23 +3776,13 @@ class JLCPCBTools(wx.Frame):
     def manual_lcsc_details(self, lcsc: str) -> Optional[dict[str, Any]]:
         """Return catalog details to assign a typed number with, or None to cancel.
 
-        The catalog lists only JLC's assembly library, yet JLC also assembles
-        LCSC-only parts it buys in through pre-order or global sourcing, and a
-        catalog can be older than the part. A number it does not list is asked
-        about once. With no catalog there is nothing to check, so no question;
-        the same holds while Update library rewrites the catalog in place.
+        A number the catalog does not list is asked about once.
         """
-        if not self.is_catalog_available() or self.library.is_download_running():
-            return {}
-        try:
-            details = self._catalog_get_part_details(lcsc, strict=True)
-        except (sqlite3.Error, OSError) as error:
-            self.logger.warning(
-                "Unable to look up %s in the parts catalog: %s", lcsc, error
-            )
+        typed: Optional[TypedPart] = self.session.check_typed_part(lcsc)
+        if typed is None:
             return None
-        if details:
-            return details
+        if not typed.unlisted:
+            return typed.details
         with wx.MessageDialog(
             self,
             f"{lcsc} isn't in the downloaded JLC parts library. JLC can still "

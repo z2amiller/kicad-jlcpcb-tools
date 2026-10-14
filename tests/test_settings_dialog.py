@@ -20,7 +20,7 @@ import pytest
 from .stock_test_support import board_row, stock_modules
 from .test_settings_defaults import plugin_dir, shipped_defaults
 from .test_settings_persistence import JLCPCBTools, mainwindow
-from .wx_harness import load, module, package_stubs, wx_stubs
+from .wx_harness import attach_session, load, module, package_stubs, wx_stubs
 
 _PACKAGE = "settings_dialog_tests"
 
@@ -345,7 +345,7 @@ def test_a_stored_tent_vias_choice_survives_saving_another_setting(
     stored = shipped_defaults()
     stored["gerber"]["tented_vias"] = tented
     plugin_dir(tmp_path, shipped_defaults(), stored)
-    window = object.__new__(JLCPCBTools)
+    window = attach_session(object.__new__(JLCPCBTools))
     window.window = object()
     window.scale_factor = 1.0
     window.library = types.SimpleNamespace(datadir="/data")
@@ -520,7 +520,7 @@ def test_simplify_stock_event_updates_display_persists_and_reopens(
     """A real checkbox event changes the real model and survives dialog reopening."""
     monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
     with stock_modules() as modules:
-        parent = object.__new__(JLCPCBTools)
+        parent = attach_session(object.__new__(JLCPCBTools))
         parent.window = object()
         parent.scale_factor = 1.0
         parent.settings = _settings(not enabled)
@@ -569,7 +569,7 @@ def test_bom_manufacturer_columns_default_off_then_save_and_reopen(
 
     def open_window() -> Any:
         """Reload the settings as a freshly opened main window does."""
-        window = object.__new__(JLCPCBTools)
+        window = attach_session(object.__new__(JLCPCBTools))
         window.window = object()
         window.scale_factor = 1.0
         window.library = types.SimpleNamespace(datadir="/data")

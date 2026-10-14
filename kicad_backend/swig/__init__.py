@@ -94,3 +94,16 @@ class SwigBackend:
         except Exception as error:
             _LOGGER.warning("Unable to redraw the PCB after %s: %s", label, error)
         return snapshot
+
+    def legacy_variant_edit(
+        self, apply: Callable[[], None], needed: Callable[[], bool]
+    ) -> None:
+        """Run a design-variant edit inside KiCad's action wrapper when it changes anything.
+
+        Transitional: variant edits still go through the variant adapter, and
+        reach the wrapper here until they move behind ``apply``.
+        """
+        if self._commit is None or not needed():
+            apply()
+        else:
+            self._commit(apply)
