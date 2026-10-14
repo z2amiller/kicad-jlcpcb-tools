@@ -12,7 +12,7 @@ import pytest
 
 from dataview_highlight import simplify_footprint_name
 
-from .wx_harness import load_mainwindow, wx_stubs
+from .wx_harness import attach_session, load_mainwindow, wx_stubs
 
 # The harness stubs simplify_footprint_name as identity; use the real one so the
 # assembled keyword is what the selector would actually receive.
@@ -39,7 +39,7 @@ def _window(rows):
     ``_part_selector`` is pre-set so ``select_part`` re-targets the open dialog
     instead of constructing one, which is the branch that needs no GUI.
     """
-    window = JLCPCBTools.__new__(JLCPCBTools)
+    window = attach_session(JLCPCBTools.__new__(JLCPCBTools))
     items = list(range(len(rows)))
     window.footprint_list = MagicMock()
     window.footprint_list.GetSelections.return_value = items

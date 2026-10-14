@@ -27,7 +27,7 @@ make_window = support.make_window
 
 
 def test_native_refresh_failure_still_publishes_successful_assignment(
-    make_window: Callable[..., Any], mainwindow: Any
+    make_window: Callable[..., Any], mainwindow: Any, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A redraw failure cannot turn a completed native edit into a stale GUI choice."""
     window = make_window()
@@ -44,7 +44,7 @@ def test_native_refresh_failure_still_publishes_successful_assignment(
     window.start_assembly_enrichment.assert_called_once_with(["R1"])
     mainwindow.wx.PostEvent.assert_called_once()
     assert window._project_storage_unavailable is False
-    assert "native redraw failed" in str(window.logger.warning.call_args_list)
+    assert "after apply LCSC assignments: native redraw failed" in caplog.text
 
 
 def test_board_replacement_after_assignment_disables_stale_feedback(

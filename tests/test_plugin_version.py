@@ -98,7 +98,7 @@ def test_package_launch_checks_version_before_loading_window(
         if supported:
             assert window.call_count == 2
             assert window.call_args.args == (None,)
-            assert callable(window.call_args.kwargs["board_action"])
+            assert callable(window.call_args.kwargs["commit"])
             assert window.return_value.Center.call_count == 2
             assert window.return_value.Show.call_count == 2
             wx["wx"].MessageBox.assert_not_called()

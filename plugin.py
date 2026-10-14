@@ -58,7 +58,7 @@ class JLCPCBPlugin(pcbnew.ActionPlugin):
             context = (frames[0], self._actions.board_id())
             with self._actions.opening():
                 dialog = JLCPCBTools(
-                    None, board_action=partial(self._actions.run, context=context)
+                    None, commit=partial(self._actions.run, context=context)
                 )
                 dialog.Center()
                 dialog.Show()

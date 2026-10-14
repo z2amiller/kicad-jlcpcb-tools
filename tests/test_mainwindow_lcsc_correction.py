@@ -82,8 +82,8 @@ def _window_with_part(runtime: SimpleNamespace, lcsc: str) -> tuple[Any, Footpri
     board = Board([footprint])
     board.filename = window.pcbnew.GetBoard().GetFileName()
     window.pcbnew = swig_doubles.editor(board)
-    window.backend = runtime.mainwindow.SwigBackend(window.pcbnew)
-    window._board_identity = runtime.mainwindow.board_identity(board)
+    window.session.backend = runtime.mainwindow.SwigBackend(window.pcbnew)
+    window.session.board_token = runtime.mainwindow.board_identity(board)
     # The refreshed cell, not the remembered preference, is what is under test.
     window.settings = {"part_preferences": {"remember_lcsc_assignments": False}}
 

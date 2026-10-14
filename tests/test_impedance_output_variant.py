@@ -162,12 +162,14 @@ def test_variant_review_rejects_invalid_live_board_before_copying(
     parent = harness.parent
     parent._legacy_board = MethodType(runtime.JLCPCBTools._legacy_board, parent)
     parent._variant_mode = True
-    parent._board_identity = runtime.board_identity(state.live)
+    parent.session = SimpleNamespace(
+        board_token=runtime.board_identity(state.live), reliable=True
+    )
     if failure == "replaced":
         prior_board = SimpleNamespace(GetFileName=state.live.GetFileName)
-        parent._board_identity = runtime.board_identity(prior_board)
+        parent.session.board_token = runtime.board_identity(prior_board)
     else:
-        parent._board_unreliable = True
+        parent.session.reliable = False
 
     controls.on_configure(None)
 

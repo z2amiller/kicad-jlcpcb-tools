@@ -22,7 +22,12 @@ from tests.fabrication_test_support import Point, make_fabrication, read_cpl
 from tests.modal_test_support import ModalDialog
 from tests.test_corrections_import_export import install_manager_controls
 from tests.test_mainwindow_empty_zone_warning import _make_window
-from tests.wx_harness import load_correction_modules, mainwindow_stubs, wx_stubs
+from tests.wx_harness import (
+    attach_session,
+    load_correction_modules,
+    mainwindow_stubs,
+    wx_stubs,
+)
 
 
 @pytest.fixture
@@ -99,7 +104,7 @@ class StatusLabel:
 
 def _population_window(runtime: SimpleNamespace, library: Any = None) -> Any:
     """Supply controls and board records while preserving real window methods."""
-    window = object.__new__(runtime.mainwindow.JLCPCBTools)
+    window = attach_session(object.__new__(runtime.mainwindow.JLCPCBTools))
     window._project_storage_unavailable = False
     window._part_preferences_applied_on_open = False
     window.project_storage_status = MagicMock()
@@ -139,7 +144,7 @@ def _population_window(runtime: SimpleNamespace, library: Any = None) -> Any:
     fake = importlib.import_module(
         f"{runtime.mainwindow.__package__}.kicad_backend.fake"
     )
-    window.backend = SimpleNamespace(
+    window.session.backend = SimpleNamespace(
         snapshot=lambda: fake.FakeBackend(
             fake.component(row["reference"]) for row in window.store.read_all()
         ).snapshot()

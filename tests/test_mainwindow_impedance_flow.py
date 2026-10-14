@@ -570,6 +570,7 @@ def test_parts_store_initialization_preserves_assignment_migration(
         project_path=str(tmp_path),
         fabrication=object(),
         _set_project_storage_error=MagicMock(),
+        session=SimpleNamespace(reliable=True),
         _migrate_legacy_assignments=MagicMock(),
         _maybe_show_schematic_storage_notice=MagicMock(),
         _initialize_catalog_parts=MagicMock(),
@@ -627,6 +628,7 @@ def test_feature_database_failure_keeps_parts_initialization_available(
         project_path=str(tmp_path),
         fabrication=object(),
         _set_project_storage_error=MagicMock(),
+        session=SimpleNamespace(reliable=True),
         _migrate_legacy_assignments=MagicMock(),
         _maybe_show_schematic_storage_notice=MagicMock(),
         _initialize_catalog_parts=MagicMock(),
@@ -662,6 +664,7 @@ def test_variant_store_attaches_impedance_before_controller_startup(
         project_path=str(tmp_path),
         fabrication=object(),
         _set_project_storage_error=MagicMock(),
+        session=SimpleNamespace(reliable=True),
         _migrate_legacy_assignments=MagicMock(),
         _maybe_show_schematic_storage_notice=MagicMock(),
         _initialize_catalog_parts=MagicMock(),
@@ -714,6 +717,7 @@ def test_variant_store_recovery_reattaches_disabled_impedance_controls(
         _variant_controller=controller,
         project_path=str(tmp_path),
         _set_project_storage_error=MagicMock(),
+        session=SimpleNamespace(reliable=True),
         _migrate_legacy_assignments=MagicMock(),
         _maybe_show_schematic_storage_notice=MagicMock(),
         _impedance=SimpleNamespace(attach_store=MagicMock()),
@@ -743,7 +747,7 @@ def _storage_window(runtime: Any, tmp_path: Path) -> SimpleNamespace:
     board = SimpleNamespace(GetFileName=lambda: str(tmp_path / "board.kicad_pcb"))
     window = SimpleNamespace(
         _variant_mode=False,
-        _board_unreliable=False,
+        session=SimpleNamespace(reliable=True),
         project_path=str(tmp_path),
         fabrication=object(),
         pcbnew=SimpleNamespace(GetBoard=lambda: board),
@@ -803,14 +807,14 @@ def test_unreliable_migration_never_reattaches_impedance(
 
     def failed_migration() -> None:
         """Reflect the native failure state that the migration handler preserves."""
-        window._board_unreliable = True
+        window.session.reliable = False
         window._set_project_storage_error(RuntimeError("native edit could not restore"))
 
     window._migrate_legacy_assignments.side_effect = failed_migration
 
     runtime.JLCPCBTools.init_store(window)
 
-    assert window._board_unreliable and window._project_storage_unavailable
+    assert not window.session.reliable and window._project_storage_unavailable
     assert window.store is None
     window._impedance.attach_store.assert_not_called()
     window._impedance.checkbox.Enable.assert_called_once_with(False)

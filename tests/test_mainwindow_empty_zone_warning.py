@@ -90,6 +90,7 @@ def _make_window(
     window = SimpleNamespace(
         _project_storage_unavailable=False,
         _legacy_board=MagicMock(return_value=SimpleNamespace()),
+        session=SimpleNamespace(board_token=None, reliable=True, generating=False),
         generate_button=MagicMock(),
         reset_gauge=MagicMock(),
         settings=settings,
