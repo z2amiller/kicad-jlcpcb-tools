@@ -22,6 +22,8 @@ _HIGHLIGHT_FG = (180, 120, 0)
 _HIGHLIGHT_FG_SELECTED = (255, 215, 64)
 _MIN_HIGHLIGHT_TERM_LENGTH = 2
 _HIGHLIGHT_VALUE_SEPARATOR = "\x1f"
+_DIGITS = frozenset("0123456789")
+_NUMBER_CHARS = _DIGITS | {"."}
 
 # Package families the catalog actually uses, as
 #
@@ -131,8 +133,17 @@ def normalize_highlight_terms(query: str) -> list[str]:
     return terms
 
 
-def find_highlight_spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
-    """Return merged `(start, end)` spans for all term matches in `text`."""
+def find_highlight_spans(
+    text: str, terms: list[str], *, whole_values: bool = False
+) -> list[tuple[int, int]]:
+    """Return merged `(start, end)` spans for all term matches in `text`.
+
+    With `whole_values`, a term that starts with a digit only matches where no
+    digit or point comes before it, the rule the catalog search holds a whole
+    value to, so a board value of 4k7 does not light the end of 14.7kΩ.  The
+    part selector leaves it off: there a match shows why its substring search
+    returned the row.
+    """
     if not text or not terms:
         return []
 
@@ -140,11 +151,17 @@ def find_highlight_spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
 
     for term in terms:
+        bounded = whole_values and term[:1] in _DIGITS
         start = 0
         while True:
             match_start = lowered_text.find(term, start)
             if match_start == -1:
                 break
+            preceding = lowered_text[match_start - 1 : match_start]
+            if bounded and preceding in _NUMBER_CHARS:
+                # A later match may begin inside this one.
+                start = match_start + 1
+                continue
             match_end = match_start + len(term)
             spans.append((match_start, match_end))
             start = match_end
@@ -473,7 +490,7 @@ if wx is not None and dv is not None:  # pragma: no branch
             spans = (
                 self._query_cache.get_spans(text)
                 if self._value_decoder is None
-                else find_highlight_spans(text, terms)
+                else find_highlight_spans(text, terms, whole_values=True)
             )
             text_height = dc.GetTextExtent("Hg")[1]
             x = rect.x + 4

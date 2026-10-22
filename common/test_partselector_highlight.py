@@ -149,9 +149,21 @@ def test_expand_value_catalog_spelling_highlights_the_params_text():
     assert find_highlight_spans(text, terms) == [(0, 5)]
 
 
-def test_expand_value_skips_a_catalog_spelling_differing_only_in_case():
-    """The highlighter folds case, so 10K needs no separate 10kΩ term."""
-    assert expand_value("R2", "10K") == ["10K", "10KΩ"]
+def test_whole_values_refuse_a_digit_or_point_before_a_value():
+    """A board value does not light the end of a different value."""
+    terms = normalize_highlight_terms(" ".join(expand_value("R1", "4k7")))
+    assert find_highlight_spans("14.7kΩ ±1%", terms) == [(1, 6)]
+    assert find_highlight_spans("14.7kΩ ±1%", terms, whole_values=True) == []
+    assert find_highlight_spans("4.7kΩ ±1%", terms, whole_values=True) == [(0, 5)]
+    terms = normalize_highlight_terms(" ".join(expand_value("R2", "0R2")))
+    assert find_highlight_spans("200mΩ (0.2Ω)", terms, whole_values=True) == [(0, 5)]
+
+
+def test_whole_values_keep_package_terms_and_later_matches():
+    """Only digit-led terms are bounded, and a refused match does not end the scan."""
+    assert find_highlight_spans("10kΩ 0603", ["0603"], whole_values=True) == [(5, 9)]
+    assert find_highlight_spans("SOT-23-5", ["sot-23"], whole_values=True) == [(0, 6)]
+    assert find_highlight_spans("21k1k1", ["1k1"], whole_values=True) == [(3, 6)]
 
 
 def test_expand_value_leaves_values_without_a_quantity_alone():
