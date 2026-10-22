@@ -1,5 +1,8 @@
 """Tests for reusable dataview highlighting helpers."""
 
+import pytest
+
+import dataview_highlight
 from dataview_highlight import (
     HighlightQueryCache,
     decode_highlighted_value,
@@ -11,6 +14,7 @@ from dataview_highlight import (
     normalize_highlight_terms,
     simplify_footprint_name,
 )
+from tests.native_wx_support import run_native
 
 
 def test_normalize_highlight_terms_deduplicates_casefolded_terms():
@@ -81,12 +85,12 @@ def test_highlight_query_cache_clear_resets_all_state():
 
 
 def test_encode_decode_highlighted_value_round_trip():
-    """Packed cell values preserve display text and normalized highlight terms."""
-    encoded = encode_highlighted_value("10kΩ 1% 0603", ["10kΩ", "0603"])
+    """Packed cell values preserve display text and highlight terms as written."""
+    encoded = encode_highlighted_value("10kΩ 1% 0603", ["10kΩ", "0603", "10KΩ"])
 
     assert decode_highlighted_value(encoded) == (
         "10kΩ 1% 0603",
-        ["10kω", "0603"],
+        ["10kΩ", "0603"],
     )
 
 
@@ -166,6 +170,90 @@ def test_whole_values_refuse_a_digit_or_point_before_a_value():
     assert find_highlight_spans("4.7kΩ ±1%", terms, whole_values=True) == [(0, 5)]
     terms = normalize_highlight_terms(" ".join(expand_value("R2", "0R2")))
     assert find_highlight_spans("200mΩ (0.2Ω)", terms, whole_values=True) == [(0, 5)]
+
+
+def _params_spans(reference, value, params):
+    """Return the highlighted text of params the way the footprint list finds it."""
+    packed = encode_highlighted_value(params, expand_value(reference, value))
+    text, terms = decode_highlighted_value(packed)
+    return [text[a:b] for a, b in find_highlight_spans(text, terms, whole_values=True)]
+
+
+def test_whole_values_keep_milli_and_mega_apart():
+    """A value written with its unit lights only its own prefix case."""
+    assert _params_spans("R1", "0.1", "100MΩ ±1%") == []
+    assert _params_spans("R1", "0R1", "100MΩ ±1%") == []
+    assert _params_spans("R1", "1M0", "1mΩ (0.001Ω) ±1%") == []
+    assert _params_spans("R1", "1M5", "1.5mΩ (0.0015Ω)") == []
+    assert _params_spans("R1", "0.1", "100mΩ (0.1Ω) ±1%") == ["100mΩ"]
+    assert _params_spans("R1", "4M7", "4.7MΩ ±1%") == ["4.7MΩ"]
+
+
+def test_whole_values_leave_a_bare_prefix_case_blind():
+    """A board 1m means 1MΩ often enough that it still lights a megohm part."""
+    assert _params_spans("R1", "1m", "1MΩ ±1%") == ["1M"]
+    assert find_highlight_spans("1kΩ", ["1KΩ"], whole_values=True) == [(0, 3)]
+
+
+def test_part_selector_spans_still_ignore_prefix_case():
+    """Without whole values a match ignores case throughout, as the search does."""
+    assert find_highlight_spans("100MΩ", ["100mω"]) == [(0, 5)]
+
+
+def test_thermistor_keeps_its_bare_code():
+    """A thermistor's params show its part number, where its code is the match."""
+    assert "103" in expand_value("TH1", "103")
+    assert _params_spans("TH1", "103", "NCP18XH103F03RB 0603") == ["103"]
+
+
+@pytest.mark.native_wx
+def test_params_renderer_lights_the_board_value_and_not_its_neighbours():
+    """The footprint list's params cell holds its board value to a whole value."""
+    pytest.importorskip("wx")
+    drawn = []
+
+    class RecordingDC:
+        """Record each painted run and its colour, with fixed text metrics."""
+
+        colour = None
+
+        def SetTextForeground(self, colour):
+            self.colour = colour
+
+        def SetBackgroundMode(self, _mode):
+            pass
+
+        def GetTextExtent(self, text):
+            return 7 * len(text), 12
+
+        def SetClippingRegion(self, _rect):
+            pass
+
+        def DestroyClippingRegion(self):
+            pass
+
+        def DrawText(self, text, _x, _y):
+            drawn.append((text, self.colour))
+
+    def exercise(_frame, wx):
+        plain = wx.SystemSettings.GetColour(wx.SYS_COLOUR_LISTBOXTEXT)
+        renderer = dataview_highlight.HighlightedTextRenderer(
+            value_decoder=decode_highlighted_value
+        )
+        for value, params, lit in (
+            ("4k7", "4.7kΩ ±1% 0603", ["4.7kΩ"]),
+            ("4k7", "14.7kΩ ±1% 0603", []),
+            ("0.1", "100MΩ ±1% 0603", []),
+        ):
+            drawn.clear()
+            renderer.SetValue(
+                encode_highlighted_value(params, expand_value("R1", value))
+            )
+            renderer.Render(wx.Rect(0, 0, 400, 20), RecordingDC(), 0)
+            assert "".join(text for text, _ in drawn) == params
+            assert [text for text, colour in drawn if colour != plain] == lit
+
+    run_native(exercise)
 
 
 def test_whole_values_keep_package_terms_and_later_matches():

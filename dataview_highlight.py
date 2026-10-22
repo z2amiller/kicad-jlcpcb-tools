@@ -13,9 +13,9 @@ except ImportError:  # pragma: no cover - test environments may not have wx
     dv = None  # type: ignore[assignment]
 
 try:
-    from .value_normalize import canonicalize, quantity_for_reference
+    from .value_normalize import canonicalize, quantity_for_reference, whole_value
 except ImportError:  # pragma: no cover - test import fallback
-    from value_normalize import canonicalize, quantity_for_reference
+    from value_normalize import canonicalize, quantity_for_reference, whole_value
 
 
 _HIGHLIGHT_FG = (180, 120, 0)
@@ -122,16 +122,26 @@ _FOOTPRINT_ALIAS_MAP.update(
 )
 
 
-def normalize_highlight_terms(query: str) -> list[str]:
-    """Split keyword query into normalized terms suitable for highlighting."""
-    terms = []
+def _split_terms(query: str) -> list[str]:
+    """Split a query into terms as written, dropping case-only duplicates."""
+    terms: list[str] = []
+    seen: set[str] = set()
     for raw_term in query.split():
         term = raw_term.strip().strip("%")
-        if term:
-            lowered = term.casefold()
-            if lowered not in terms:
-                terms.append(lowered)
+        if term and term.casefold() not in seen:
+            seen.add(term.casefold())
+            terms.append(term)
     return terms
+
+
+def normalize_highlight_terms(query: str) -> list[str]:
+    """Split keyword query into normalized terms suitable for highlighting."""
+    return [term.casefold() for term in _split_terms(query)]
+
+
+def _reads_milli_as_mega(term: str, matched: str) -> bool:
+    """Return whether a match puts M where the term has m, or m where it has M."""
+    return any(want != got for want, got in zip(term, matched) if want in "mM")
 
 
 def find_highlight_spans(
@@ -139,9 +149,11 @@ def find_highlight_spans(
 ) -> list[tuple[int, int]]:
     """Return merged `(start, end)` spans for all term matches in `text`.
 
-    With `whole_values`, a term that starts with a digit only matches where no
-    digit or point comes before it, the rule the catalog search holds a whole
-    value to, so a board value of 4k7 does not light the end of 14.7kΩ.  The
+    Matching ignores case.  With `whole_values`, a term that starts with a
+    digit is held to a value the way the catalog search holds one.  No digit
+    or point may come before it, so a board value of 4k7 does not light the
+    end of 14.7kΩ.  If it also spells out its unit, its m and M keep their
+    case, so 100mΩ does not light 100MΩ; a bare 1m still lights 1MΩ.  The
     part selector leaves it off: there a match shows why its substring search
     returned the row.
     """
@@ -152,18 +164,22 @@ def find_highlight_spans(
     spans: list[tuple[int, int]] = []
 
     for term in terms:
+        folded = term.casefold()
         bounded = whole_values and term[:1] in _DIGITS
+        exact_prefix = bounded and whole_value(term) is not None
         start = 0
         while True:
-            match_start = lowered_text.find(term, start)
+            match_start = lowered_text.find(folded, start)
             if match_start == -1:
                 break
+            match_end = match_start + len(folded)
             preceding = lowered_text[match_start - 1 : match_start]
-            if bounded and preceding in _NUMBER_CHARS:
+            if (bounded and preceding in _NUMBER_CHARS) or (
+                exact_prefix and _reads_milli_as_mega(term, text[match_start:match_end])
+            ):
                 # A later match may begin inside this one.
                 start = match_start + 1
                 continue
-            match_end = match_start + len(term)
             spans.append((match_start, match_end))
             start = match_end
 
@@ -206,7 +222,11 @@ def encode_highlighted_value(text: str, terms: list[str]) -> str:
 
 
 def decode_highlighted_value(value: str) -> tuple[str, list[str]]:
-    """Unpack display text and normalized highlight terms from a packed string."""
+    """Unpack display text and highlight terms from a packed string.
+
+    The terms keep their case, which find_highlight_spans needs to hold a
+    value's m and M apart.
+    """
     text = "" if value is None else str(value)
     if _HIGHLIGHT_VALUE_SEPARATOR not in text:
         return text, []
@@ -214,7 +234,7 @@ def decode_highlighted_value(value: str) -> tuple[str, list[str]]:
     parts = text.split(_HIGHLIGHT_VALUE_SEPARATOR)
     display_text = parts[0]
     raw_terms = " ".join(parts[1:])
-    return display_text, normalize_highlight_terms(raw_terms)
+    return display_text, _split_terms(raw_terms)
 
 
 def expand_value(reference: str, value: str) -> list[str]:
@@ -261,13 +281,16 @@ def expand_value(reference: str, value: str) -> list[str]:
 
     canonical = canonicalize(raw, quantity_for_reference(ref))
     if canonical is not None:
-        if _BARE_NUMBER_RE.fullmatch(raw):
+        if _BARE_NUMBER_RE.fullmatch(raw) and not upper_ref.startswith("TH"):
             # A bare 100 is a resistor's 100Ω, which the catalog always writes
-            # with its Ω.  Left in, it would light the start of 100kΩ.
+            # with its Ω.  Left in, it would light the start of 100kΩ.  A
+            # thermistor's params show its part number instead, where a code
+            # such as 103 is the thing to match.
             variants.remove(raw)
         variants.append(canonical)
 
-    # Highlighting folds case, so 10KΩ already covers the catalog's 10kΩ.
+    # Highlighting ignores case, so 10KΩ already covers the catalog's 10kΩ.
+    # Only m and M can matter, and canonicalize writes those as the board did.
     deduped = []
     for variant in variants:
         if variant.casefold() not in (kept.casefold() for kept in deduped):
