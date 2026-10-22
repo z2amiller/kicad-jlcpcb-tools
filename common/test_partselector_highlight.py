@@ -134,6 +134,32 @@ def test_expand_value_for_capacitor_without_suffix_adds_f_variants():
     assert expand_value("C13", "1µ") == ["1µ", "1u", "1µF", "1uF"]
 
 
+def test_expand_value_adds_the_catalog_spelling():
+    """A board value also highlights the spelling the catalog writes for it."""
+    assert "2.2nF" in expand_value("C1", "2n2")
+    assert "100nF" in expand_value("C2", "0.1uF")
+    assert "4.7kΩ" in expand_value("R1", "4k7")
+    assert "2.2uH" in expand_value("L1", "2u2")
+
+
+def test_expand_value_catalog_spelling_highlights_the_params_text():
+    """The catalog spelling reaches the rendered params through the cell codec."""
+    packed = encode_highlighted_value("2.2nF 50V", expand_value("C1", "2n2"))
+    text, terms = decode_highlighted_value(packed)
+    assert find_highlight_spans(text, terms) == [(0, 5)]
+
+
+def test_expand_value_skips_a_catalog_spelling_differing_only_in_case():
+    """The highlighter folds case, so 10K needs no separate 10kΩ term."""
+    assert expand_value("R2", "10K") == ["10K", "10KΩ"]
+
+
+def test_expand_value_leaves_values_without_a_quantity_alone():
+    """No catalog spelling is guessed for a reference that names no quantity."""
+    assert expand_value("D1", "1N4148") == ["1N4148"]
+    assert expand_value("U1", "2n2") == ["2n2"]
+
+
 def test_expand_footprint_adds_known_aliases():
     """Footprint aliases include known compatible package naming alternatives."""
     assert "SO-8" in expand_footprint("U1", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")

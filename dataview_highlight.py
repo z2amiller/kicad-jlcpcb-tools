@@ -12,6 +12,11 @@ except ImportError:  # pragma: no cover - test environments may not have wx
     wx = None  # type: ignore[assignment]
     dv = None  # type: ignore[assignment]
 
+try:
+    from .value_normalize import canonicalize, quantity_for_reference
+except ImportError:  # pragma: no cover - test import fallback
+    from value_normalize import canonicalize, quantity_for_reference
+
 
 _HIGHLIGHT_FG = (180, 120, 0)
 _HIGHLIGHT_FG_SELECTED = (255, 215, 64)
@@ -201,6 +206,9 @@ def expand_value(reference: str, value: str) -> list[str]:
     `390R` can also match `390Ω`, and `10K` can also match `10KΩ`.
     For capacitor references (`C*`), include `u`/`µ` interchangeable variants
     and optional `F`-suffixed forms.
+    Every value of a known quantity also gets the catalog's spelling, the one
+    the part selector's prefill searches for, so `2n2` matches `2.2nF`, `4k7`
+    matches `4.7kΩ` and `0.1uF` matches `100nF`.
     """
     raw = "" if value is None else str(value).strip()
     if not raw:
@@ -232,9 +240,14 @@ def expand_value(reference: str, value: str) -> list[str]:
             else:
                 variants.extend([raw, swapped, f"{raw}F", f"{swapped}F"])
 
+    canonical = canonicalize(raw, quantity_for_reference(ref))
+    if canonical is not None:
+        variants.append(canonical)
+
+    # Highlighting folds case, so 10KΩ already covers the catalog's 10kΩ.
     deduped = []
     for variant in variants:
-        if variant not in deduped:
+        if variant.casefold() not in (kept.casefold() for kept in deduped):
             deduped.append(variant)
     return deduped
 
