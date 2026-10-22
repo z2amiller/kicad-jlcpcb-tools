@@ -85,12 +85,12 @@ def test_highlight_query_cache_clear_resets_all_state():
 
 
 def test_encode_decode_highlighted_value_round_trip():
-    """Packed cell values preserve display text and highlight terms as written."""
-    encoded = encode_highlighted_value("10kΩ 1% 0603", ["10kΩ", "0603", "10KΩ"])
+    """Packed cell values preserve display text and normalized highlight terms."""
+    encoded = encode_highlighted_value("10kΩ 1% 0603", ["10kΩ", "0603"])
 
     assert decode_highlighted_value(encoded) == (
         "10kΩ 1% 0603",
-        ["10kΩ", "0603"],
+        ["10kω", "0603"],
     )
 
 
@@ -153,13 +153,15 @@ def test_expand_value_catalog_spelling_highlights_the_params_text():
     assert find_highlight_spans(text, terms, whole_values=True) == [(0, 5)]
 
 
-def test_expand_value_replaces_a_bare_resistance_with_its_catalog_spelling():
+def test_expand_value_gives_a_bare_resistance_its_ohm_sign():
     """A bare number lights its own value, not the start of a larger one."""
     assert expand_value("R1", "100") == ["100Ω"]
-    assert expand_value("R2", ".47") == ["470mΩ"]
+    assert expand_value("R2", ".47") == ["0.47Ω", "470mΩ"]
     terms = normalize_highlight_terms(" ".join(expand_value("R1", "100")))
     assert find_highlight_spans("100kΩ ±1%", terms, whole_values=True) == []
     assert find_highlight_spans("100Ω ±1%", terms, whole_values=True) == [(0, 4)]
+    assert _params_spans("R3", "0.1", "0.1Ω ±1% 0805") == ["0.1Ω"]
+    assert _params_spans("R3", "0.1", "100mΩ (0.1Ω) ±1%") == ["100mΩ", "0.1Ω"]
 
 
 def test_whole_values_refuse_a_digit_or_point_before_a_value():
@@ -172,32 +174,18 @@ def test_whole_values_refuse_a_digit_or_point_before_a_value():
     assert find_highlight_spans("200mΩ (0.2Ω)", terms, whole_values=True) == [(0, 5)]
 
 
+def test_whole_values_bound_a_value_written_with_a_leading_point():
+    """A board .1uF does not light the end of 10.1uF."""
+    assert find_highlight_spans("10.1uF 50V", [".1uf"], whole_values=True) == []
+    assert _params_spans("C1", ".1uF", "10.1uF 50V") == []
+    assert _params_spans("C1", ".1uF", "100nF 50V") == ["100nF"]
+
+
 def _params_spans(reference, value, params):
     """Return the highlighted text of params the way the footprint list finds it."""
     packed = encode_highlighted_value(params, expand_value(reference, value))
     text, terms = decode_highlighted_value(packed)
     return [text[a:b] for a, b in find_highlight_spans(text, terms, whole_values=True)]
-
-
-def test_whole_values_keep_milli_and_mega_apart():
-    """A value written with its unit lights only its own prefix case."""
-    assert _params_spans("R1", "0.1", "100MΩ ±1%") == []
-    assert _params_spans("R1", "0R1", "100MΩ ±1%") == []
-    assert _params_spans("R1", "1M0", "1mΩ (0.001Ω) ±1%") == []
-    assert _params_spans("R1", "1M5", "1.5mΩ (0.0015Ω)") == []
-    assert _params_spans("R1", "0.1", "100mΩ (0.1Ω) ±1%") == ["100mΩ"]
-    assert _params_spans("R1", "4M7", "4.7MΩ ±1%") == ["4.7MΩ"]
-
-
-def test_whole_values_leave_a_bare_prefix_case_blind():
-    """A board 1m means 1MΩ often enough that it still lights a megohm part."""
-    assert _params_spans("R1", "1m", "1MΩ ±1%") == ["1M"]
-    assert find_highlight_spans("1kΩ", ["1KΩ"], whole_values=True) == [(0, 3)]
-
-
-def test_part_selector_spans_still_ignore_prefix_case():
-    """Without whole values a match ignores case throughout, as the search does."""
-    assert find_highlight_spans("100MΩ", ["100mω"]) == [(0, 5)]
 
 
 def test_thermistor_keeps_its_bare_code():
@@ -243,7 +231,7 @@ def test_params_renderer_lights_the_board_value_and_not_its_neighbours():
         for value, params, lit in (
             ("4k7", "4.7kΩ ±1% 0603", ["4.7kΩ"]),
             ("4k7", "14.7kΩ ±1% 0603", []),
-            ("0.1", "100MΩ ±1% 0603", []),
+            ("100", "100kΩ ±1% 0603", []),
         ):
             drawn.clear()
             renderer.SetValue(
@@ -257,7 +245,7 @@ def test_params_renderer_lights_the_board_value_and_not_its_neighbours():
 
 
 def test_whole_values_keep_package_terms_and_later_matches():
-    """Only digit-led terms are bounded, and a refused match does not end the scan."""
+    """Only number-led terms are bounded, and a refused match does not end the scan."""
     assert find_highlight_spans("10kΩ 0603", ["0603"], whole_values=True) == [(5, 9)]
     assert find_highlight_spans("SOT-23-5", ["sot-23"], whole_values=True) == [(0, 6)]
     assert find_highlight_spans("21k1k1", ["1k1"], whole_values=True) == [(3, 6)]

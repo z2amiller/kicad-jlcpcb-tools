@@ -289,7 +289,7 @@ def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
     [
         ("4k7", "4.7kΩ ±1% 0603", ("4.7kΩ", "0603")),
         ("4k7", "14.7kΩ ±1% 0603", ("0603",)),
-        ("0.1", "100MΩ ±1% 0603", ("0603",)),
+        ("100", "100kΩ ±1% 0603", ("0603",)),
     ],
 )
 @pytest.mark.native_wx
