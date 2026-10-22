@@ -146,7 +146,16 @@ def test_expand_value_catalog_spelling_highlights_the_params_text():
     """The catalog spelling reaches the rendered params through the cell codec."""
     packed = encode_highlighted_value("2.2nF 50V", expand_value("C1", "2n2"))
     text, terms = decode_highlighted_value(packed)
-    assert find_highlight_spans(text, terms) == [(0, 5)]
+    assert find_highlight_spans(text, terms, whole_values=True) == [(0, 5)]
+
+
+def test_expand_value_replaces_a_bare_resistance_with_its_catalog_spelling():
+    """A bare number lights its own value, not the start of a larger one."""
+    assert expand_value("R1", "100") == ["100Ω"]
+    assert expand_value("R2", ".47") == ["470mΩ"]
+    terms = normalize_highlight_terms(" ".join(expand_value("R1", "100")))
+    assert find_highlight_spans("100kΩ ±1%", terms, whole_values=True) == []
+    assert find_highlight_spans("100Ω ±1%", terms, whole_values=True) == [(0, 4)]
 
 
 def test_whole_values_refuse_a_digit_or_point_before_a_value():
@@ -170,6 +179,7 @@ def test_expand_value_leaves_values_without_a_quantity_alone():
     """No catalog spelling is guessed for a reference that names no quantity."""
     assert expand_value("D1", "1N4148") == ["1N4148"]
     assert expand_value("U1", "2n2") == ["2n2"]
+    assert expand_value("U2", "555") == ["555"]
 
 
 def test_expand_footprint_adds_known_aliases():

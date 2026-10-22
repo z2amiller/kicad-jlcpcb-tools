@@ -24,6 +24,7 @@ _MIN_HIGHLIGHT_TERM_LENGTH = 2
 _HIGHLIGHT_VALUE_SEPARATOR = "\x1f"
 _DIGITS = frozenset("0123456789")
 _NUMBER_CHARS = _DIGITS | {"."}
+_BARE_NUMBER_RE = re.compile(r"[0-9]*\.?[0-9]+")
 
 # Package families the catalog actually uses, as
 #
@@ -225,7 +226,8 @@ def expand_value(reference: str, value: str) -> list[str]:
     and optional `F`-suffixed forms.
     Every value of a known quantity also gets the catalog's spelling, the one
     the part selector's prefill searches for, so `2n2` matches `2.2nF`, `4k7`
-    matches `4.7kΩ` and `0.1uF` matches `100nF`.
+    matches `4.7kΩ` and `0.1uF` matches `100nF`.  A bare number is replaced by
+    that spelling rather than joined by it: `100` matches `100Ω`, not `100kΩ`.
     """
     raw = "" if value is None else str(value).strip()
     if not raw:
@@ -259,6 +261,10 @@ def expand_value(reference: str, value: str) -> list[str]:
 
     canonical = canonicalize(raw, quantity_for_reference(ref))
     if canonical is not None:
+        if _BARE_NUMBER_RE.fullmatch(raw):
+            # A bare 100 is a resistor's 100Ω, which the catalog always writes
+            # with its Ω.  Left in, it would light the start of 100kΩ.
+            variants.remove(raw)
         variants.append(canonical)
 
     # Highlighting folds case, so 10KΩ already covers the catalog's 10kΩ.
