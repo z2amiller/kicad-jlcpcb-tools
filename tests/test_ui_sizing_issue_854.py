@@ -613,6 +613,7 @@ def test_partselector_dialog_unconstrained_label_and_input_heights(
         Panel=_Panel,
         BoxSizer=_Sizer,
         StaticBoxSizer=_Sizer,
+        Platform="__WXGTK__",
         Size=_Size,
         Display=_Display,
         DefaultPosition=(-1, -1),
