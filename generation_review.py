@@ -12,6 +12,8 @@ from dataclasses import dataclass
 import enum
 import logging
 
+from .copper_zones import EmptyCopperZone
+
 
 class Severity(enum.IntEnum):
     """How much a finding matters, most severe first."""
@@ -91,21 +93,23 @@ def placeholder_findings(count: int) -> list[Finding]:
     return [Finding(Severity.WARNING, "Order number", title, _PLACEHOLDER_DETAIL)]
 
 
-def empty_zone_findings(pours: Sequence[str]) -> list[Finding]:
-    """Flag each copper zone layer that holds no filled copper.
-
-    Each entry names a zone's net and layer, such as "GND on B.Cu".
-    """
-    return [
-        Finding(
-            Severity.ERROR,
-            "Copper zones",
-            f"Copper zone {pour} has no fill",
-            "This zone contains no filled copper. "
-            "Plotting now ships the board without that copper.",
+def empty_zone_findings(pours: Sequence[EmptyCopperZone]) -> list[Finding]:
+    """Flag missing copper using the native item type copied during preparation."""
+    findings = []
+    for pour in pours:
+        teardrop = pour.is_teardrop is True
+        kind = "Generated teardrop" if teardrop else "Copper zone"
+        subject = "This generated teardrop" if teardrop else "This zone"
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "Copper zones",
+                f"{kind} {pour.label} has no fill",
+                f"{subject} contains no filled copper. "
+                "Plotting now ships the board without that copper.",
+            )
         )
-        for pour in pours
-    ]
+    return findings
 
 
 def drc_findings(count: int, messages: Sequence[str]) -> list[Finding]:

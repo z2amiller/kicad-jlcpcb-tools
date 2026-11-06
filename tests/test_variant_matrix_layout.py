@@ -239,13 +239,32 @@ def test_native_text_cache_and_font_dpi_invalidation(
 
 
 @pytest.mark.parametrize("narrow", [False, True])
+@pytest.mark.parametrize(
+    "footprint,highlighted_terms",
+    [
+        ("Resistor_SMD:R_0603_1608Metric", ("0603", "10kΩ")),
+        ("Resistor_SMD:R_0603", ("0603", "10kΩ")),
+        ("Custom:R_Custom", ("10kΩ",)),
+    ],
+)
 @pytest.mark.native_wx
 def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
-    matrix: Any, modules: tuple[ModuleType, ModuleType], narrow: bool
+    matrix: Any,
+    modules: tuple[ModuleType, ModuleType],
+    narrow: bool,
+    footprint: str,
+    highlighted_terms: tuple[str, ...],
 ) -> None:
     source = "fi ffi AVAV prefix " * 10 + "0603 10kΩ"
     model = sample_model(
         modules[1],
+        # Canonical and abbreviated chip names both identify the package size.
+        # A custom name still matches the resistor's value without inventing a size.
+        changes={
+            (row, variant): {"footprint": footprint, "footprint_field": footprint}
+            for row in range(3)
+            for variant in ("", "A", "B")
+        },
         catalog={
             (row, variant): {"params": source}
             for row in range(3)
@@ -260,7 +279,7 @@ def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
         width = 100 if narrow else dc.GetTextExtent(source)[0] + h.view.FromDIP(20)
         painted = paint_cell(h, 0, col, width=width)
         baseline, *colored = painted.of("DrawText")
-        assert len(colored) == 2
+        assert len(colored) == len(highlighted_terms)
         assert all(
             item["args"] == baseline["args"] and item["size"] == baseline["size"]
             for item in colored
@@ -268,7 +287,7 @@ def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
         text, x, y = baseline["args"]
         assert text.startswith("…") is narrow
         dc.SetFont(h.view.GetDefaultCellFont().Scaled(0.8 if narrow else 1))
-        for item, term in zip(colored, ("0603", "10kΩ")):
+        for item, term in zip(colored, highlighted_terms):
             left, right = text.index(term), text.index(term) + len(term)
             # The tokens have whitespace boundaries. Independent prefix
             # measurements include ligatures in the preceding text without
@@ -280,6 +299,47 @@ def test_parameter_colors_keep_one_native_glyph_layout_and_exclude_ellipsis(
             assert clip[2] == right_width - left_width
             assert clip[0] >= x + (dc.GetTextExtent("…")[0] if narrow else 0)
             assert clip[0] + clip[2] <= x + baseline["extent"][0]
+
+    matrix(check, model=model)
+
+
+@pytest.mark.parametrize(
+    "value,params,lit",
+    [
+        ("4k7", "4.7kΩ ±1% 0603", ("4.7kΩ", "0603")),
+        ("4k7", "14.7kΩ ±1% 0603", ("0603",)),
+        ("100", "100kΩ ±1% 0603", ("0603",)),
+    ],
+)
+@pytest.mark.native_wx
+def test_parameter_colors_light_the_board_value_and_not_its_neighbours(
+    matrix: Any,
+    modules: tuple[ModuleType, ModuleType],
+    value: str,
+    params: str,
+    lit: tuple[str, ...],
+) -> None:
+    variants = ("", "A", "B")
+    model = sample_model(
+        modules[1],
+        changes={(0, variant): {"value": value} for variant in variants},
+        catalog={(0, variant): {"params": params} for variant in variants},
+    )
+
+    def check(h: Any) -> None:
+        col = model.column_for("A", "params")
+        dc = h.wx.ClientDC(h.view)
+        dc.SetFont(h.view.GetDefaultCellFont())
+        width = dc.GetTextExtent(params)[0] + h.view.FromDIP(20)
+        painted = paint_cell(h, 0, col, width=width)
+        baseline, *colored = painted.of("DrawText")
+        text, x, _y = baseline["args"]
+        assert text == params
+        assert len(colored) == len(lit)
+        for item, term in zip(colored, lit):
+            left = text.index(term)
+            left_width = dc.GetTextExtent(text[:left])[0] if left else 0
+            assert item["clip"][-4] == x + left_width
 
     matrix(check, model=model)
 
