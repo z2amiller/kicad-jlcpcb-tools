@@ -76,6 +76,16 @@ def typed_lcsc_offer(
     return lcsc, f"{lcsc} isn't in the JLC library. Assign it anyway", {}
 
 
+def set_read_only_hint(combo: wx.ComboBox, hint: str) -> None:
+    """Show a hint on a read-only combo where the platform can.
+
+    wxGTK shows it. wxMSW builds a read-only combo without an edit control, so
+    the hint has nowhere to go, and wxMSW asserts on the attempt.
+    """
+    if wx.Platform != "__WXMSW__":
+        combo.SetHint(hint)
+
+
 class PartSelectorDialog(wx.Dialog):
     """The part selector window."""
 
@@ -231,7 +241,7 @@ class PartSelectorDialog(wx.Dialog):
             choices=parent.library.categories if parent.is_catalog_available() else [],
             style=wx.CB_READONLY,
         )
-        self.category.SetHint("e.g. Resistors")
+        set_read_only_hint(self.category, "e.g. Resistors")
 
         part_no_label = wx.StaticText(
             self,
@@ -279,7 +289,7 @@ class PartSelectorDialog(wx.Dialog):
             HighResWxSize(parent.window, wx.Size(200, -1)),
             style=wx.CB_READONLY,
         )
-        self.subcategory.SetHint("e.g. Variable Resistors")
+        set_read_only_hint(self.subcategory, "e.g. Variable Resistors")
 
         basic_label = wx.StaticText(
             self,
