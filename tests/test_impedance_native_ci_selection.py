@@ -34,6 +34,7 @@ FIXTURE_CASES = {
     "tests/test_copper_zones.py::test_native_metadata_survives_saved_board_reopening": 2,
     "tests/test_copper_zones.py::test_native_completed_empty_teardrop_is_logged_after_real_fabrication_fill": 1,
     "tests/test_copper_zones.py::test_native_empty_teardrop_reporting_reads_changed_flags_without_refilling": 1,
+    "tests/test_jlcfootprint_live_reader_native.py": 3,
 }
 
 

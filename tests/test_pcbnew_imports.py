@@ -17,11 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 # The plugin's entry point imports pcbnew for good.
 _PERMANENT = ("plugin.py",)
 # Its entry in pyproject.toml's TID251 exemptions, with the tests' and the
-# development tool that builds a gate board in KiCad's own Python, which is never
-# shipped.
+# development tools that build a gate board and check the live reader against it
+# in KiCad's own Python, which are never shipped.
 _PERMANENT_EXEMPTIONS = {
     "plugin.py",
     "tests/**",
+    "tools/jlcfootprint/check_live_adapter.py",
     "tools/jlcfootprint/make_corner_case_board.py",
 }
 # Imports by name not yet behind the backend, by module, with their count.

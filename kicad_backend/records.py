@@ -1,8 +1,15 @@
 """Immutable facts about the open board, the same whichever backend read them.
 
 Records hold KiCad's raw facts only, and only the facts the plugin reads:
-field text, the assembly flags, the side and the pads' kinds. Interpreting
-them (assignment aliases, LCSC numbers) is the job of shared code.
+field text, the assembly flags, the side, and where KiCad has each footprint,
+its pads and its courtyard on the board. Interpreting them (assignment
+aliases, LCSC numbers, a pad's place within its footprint) is the job of
+shared code.
+
+Lengths are KiCad's own integer nanometres and angles degrees, both as KiCad
+reports them on the board: a footprint's placement is not taken off its pads,
+and a bottom-side footprint's pads and courtyard stay mirrored, as KiCad
+stores them.
 """
 
 from collections.abc import Iterable, Mapping
@@ -28,10 +35,28 @@ class FieldRecord:
 
 @dataclass(frozen=True)
 class PadRecord:
-    """One footprint pad."""
+    """One footprint pad, where KiCad has it on the board."""
 
     kind: str  # "pth" | "smd" | "conn" | "npth"
     has_hole: bool
+    number: str  # "" for an unnumbered pad
+    position_nm: tuple[int, int]  # the pad's centre
+    size_nm: tuple[int, int]  # its own width and height, before its angle
+    orientation_deg: float  # its angle on the board
+    # "circle" | "rect" | "oval" | "trapezoid" | "roundrect" | "chamfered_rect"
+    # | "custom"; a custom pad's size is only its anchor's
+    shape: str
+    pin_function: str  # the schematic pin's name KiCad stored, "" for none
+    on_copper: bool  # False for an aperture on no copper layer, such as paste only
+
+
+@dataclass(frozen=True)
+class CourtyardShape:
+    """One shape drawn on a footprint's courtyard layer."""
+
+    # x0, y0, x1, y1 as KiCad reports the shape's box, its stroke included
+    bbox_nm: tuple[int, int, int, int]
+    stroke_nm: int  # the line's width
 
 
 @dataclass(frozen=True)
@@ -101,20 +126,24 @@ def component_state(
 
 @dataclass(frozen=True)
 class ComponentRecord:
-    """One footprint: identity, side, pads and its state in each variant."""
+    """One footprint: identity, placement, pads, courtyard and its state in each variant."""
 
     uuid: str
     reference: str
     footprint_lib_id: str  # "Lib:Name"
     schematic_path: str  # the symbol's KIID path as KiCad reports it
     side: str  # "top" | "bottom"
+    position_nm: tuple[int, int]  # the footprint's anchor
+    orientation_deg: float  # its angle on the board
     pads: tuple[PadRecord, ...]
+    courtyard: tuple[CourtyardShape, ...]  # drawn on the courtyard layers, in order
     states: Mapping[str, ComponentState]  # "" is Default; one entry per variant
     key: str = ""  # unique in its snapshot; see footprint_keys
 
     def __post_init__(self) -> None:
-        """Freeze the pads and states; a footprint's key is its UUID by default."""
+        """Freeze the pads, courtyard and states; a footprint's key is its UUID by default."""
         object.__setattr__(self, "pads", tuple(self.pads))
+        object.__setattr__(self, "courtyard", tuple(self.courtyard))
         object.__setattr__(self, "states", MappingProxyType(dict(self.states)))
         if not self.key:
             object.__setattr__(self, "key", self.uuid)

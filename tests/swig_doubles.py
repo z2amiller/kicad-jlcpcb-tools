@@ -12,6 +12,19 @@ from uuid import NAMESPACE_URL, uuid5
 
 # PAD_ATTRIB values: PTH=0, SMD=1, CONN=2, NPTH=3.
 PAD_ATTRIBUTES = {"pth": 0, "smd": 1, "conn": 2, "npth": 3}
+# PAD_SHAPE values.
+PAD_SHAPES = {
+    "circle": 0,
+    "rect": 1,
+    "oval": 2,
+    "trapezoid": 3,
+    "roundrect": 4,
+    "chamfered_rect": 5,
+    "custom": 6,
+}
+# Two layer IDs standing for the courtyards, with KiCad's own names for them.
+LAYER_NAMES = {29: "B.Courtyard", 31: "F.Courtyard", 0: "F.Cu", 2: "B.Cu"}
+F_COURTYARD = 31
 
 
 def point(x: int, y: int) -> SimpleNamespace:
@@ -43,10 +56,23 @@ class Field:
 
 
 class Pad:
-    """A pad by number and kind."""
+    """A pad by number and kind, where it is on the board, its size, shape and pin."""
 
-    def __init__(self, number: str = "1", kind: str = "smd") -> None:
+    def __init__(
+        self,
+        number: str = "1",
+        kind: str = "smd",
+        *,
+        position: tuple[int, int] = (0, 0),
+        size: tuple[int, int] = (1_000_000, 1_000_000),
+        orientation: float = 0.0,
+        shape: str = "rect",
+        pin_function: str = "",
+        on_copper: bool = True,
+    ) -> None:
         self.number, self.kind = number, kind
+        self.position, self.size, self.orientation = position, size, orientation
+        self.shape, self.pin_function, self.on_copper = shape, pin_function, on_copper
 
     def GetAttribute(self) -> int:
         """Return KiCad's PAD_ATTRIB value."""
@@ -55,6 +81,86 @@ class Pad:
     def HasHole(self) -> bool:
         """Return whether the pad is drilled."""
         return self.kind in {"pth", "npth"}
+
+    def GetNumber(self) -> str:
+        """Return the pad number."""
+        return self.number
+
+    def GetPosition(self) -> SimpleNamespace:
+        """Return the pad's centre on the board."""
+        return point(*self.position)
+
+    def GetSize(self) -> SimpleNamespace:
+        """Return the pad's width and height."""
+        return point(*self.size)
+
+    def GetOrientation(self) -> SimpleNamespace:
+        """Return the pad's angle on the board."""
+        return SimpleNamespace(AsDegrees=lambda: self.orientation)
+
+    def GetShape(self) -> int:
+        """Return KiCad's PAD_SHAPE value."""
+        return PAD_SHAPES[self.shape]
+
+    def GetPinFunction(self) -> str:
+        """Return the schematic pin's name."""
+        return self.pin_function
+
+    def IsOnCopperLayer(self) -> bool:
+        """Return whether the pad has copper."""
+        return self.on_copper
+
+
+class Text:
+    """A text on a layer: a graphic item with no stroke width."""
+
+    def __init__(self, layer: int = F_COURTYARD) -> None:
+        self.layer = layer
+
+    def GetLayer(self) -> int:
+        """Return the layer ID."""
+        return self.layer
+
+    def GetClass(self) -> str:
+        """Return KiCad's class name for a footprint text."""
+        return "PCB_TEXT"
+
+
+class Shape:
+    """A drawn shape on a layer: its box on the board, stroke included, and stroke width."""
+
+    def __init__(
+        self,
+        box: tuple[int, int, int, int],
+        *,
+        width: int = 50_000,
+        layer: int = F_COURTYARD,
+        kicad_class: str = "PCB_SHAPE",
+    ) -> None:
+        self.box, self.width, self.layer = box, width, layer
+        self.kicad_class = kicad_class
+
+    def GetLayer(self) -> int:
+        """Return the layer ID."""
+        return self.layer
+
+    def GetClass(self) -> str:
+        """Return KiCad's class name for a drawn shape (KiCad 7's is MGRAPHIC)."""
+        return self.kicad_class
+
+    def GetWidth(self) -> int:
+        """Return the stroke width."""
+        return self.width
+
+    def GetBoundingBox(self) -> SimpleNamespace:
+        """Return the box, stroke included."""
+        left, top, right, bottom = self.box
+        return SimpleNamespace(
+            GetLeft=lambda: left,
+            GetTop=lambda: top,
+            GetRight=lambda: right,
+            GetBottom=lambda: bottom,
+        )
 
 
 class Footprint:
@@ -73,6 +179,7 @@ class Footprint:
         position: tuple[int, int] = (0, 0),
         orientation: float = 0.0,
         pads: Iterable[Pad] = (),
+        shapes: Iterable[Shape] = (),
         uuid: Optional[str] = None,  # noqa: UP045
         path: str = "",
     ) -> None:
@@ -81,6 +188,7 @@ class Footprint:
         self.attributes, self.dnp, self.flipped = attributes, dnp, flipped
         self.position, self.orientation = position, orientation
         self.pads = list(pads)
+        self.shapes = list(shapes)
         self.uuid = uuid or str(uuid5(NAMESPACE_URL, f"swig-double:{reference}"))
         self.path = path
         self.modified = False
@@ -163,6 +271,10 @@ class Footprint:
         """Return the pads."""
         return list(self.pads)
 
+    def GraphicalItems(self) -> list[Shape]:
+        """Return the drawn shapes."""
+        return list(self.shapes)
+
     def SetModified(self) -> None:
         """Record an edit."""
         self.modified = True
@@ -189,6 +301,11 @@ class Board:
     def GetFileName(self) -> str:
         """Return the board file."""
         return self.filename
+
+    @staticmethod
+    def GetStandardLayerName(layer: int) -> str:
+        """Return KiCad's own name for a layer."""
+        return LAYER_NAMES.get(layer, f"User.{layer}")
 
     def GetFootprints(self) -> list[Footprint]:
         """Return the footprints in board order."""

@@ -17,6 +17,8 @@ class KiCad7(Dialect):
     builtin_fields = ("Reference", "Value")
     holds_dnp = False
     keeps_repeated_fields = False
+    # A footprint's drawings are FP_SHAPE objects, whose class name is MGRAPHIC.
+    footprint_shape_class = "MGRAPHIC"
 
     def fields(self, footprint: Any) -> list[FieldRecord]:
         """Read Reference and Value, then the property map."""

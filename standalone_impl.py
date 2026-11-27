@@ -14,6 +14,24 @@ class Text_Stub:
         return self.text
 
 
+class Vector_Stub:
+    """Implementation of pcbnew.VECTOR2I."""
+
+    def __init__(self, x: int, y: int) -> None:
+        self.x, self.y = x, y
+
+
+class Angle_Stub:
+    """Implementation of pcbnew.EDA_ANGLE."""
+
+    def __init__(self, degrees: float) -> None:
+        self.degrees = degrees
+
+    def AsDegrees(self) -> float:
+        """Return the angle in degrees."""
+        return self.degrees
+
+
 class LIB_ID_Stub:
     """Implementation of pcbnew.LIB_ID."""
 
@@ -95,6 +113,18 @@ class Footprint_Stub:
     def Pads(self) -> list[object]:
         """Return the pads; the demo part has none."""
         return []
+
+    def GraphicalItems(self) -> list[object]:
+        """Return the drawn shapes; the demo part has none."""
+        return []
+
+    def GetPosition(self) -> Vector_Stub:
+        """Return the anchor on the board; the demo part sits at the origin."""
+        return Vector_Stub(0, 0)
+
+    def GetOrientation(self) -> Angle_Stub:
+        """Return the angle on the board; the demo part is not turned."""
+        return Angle_Stub(0.0)
 
     def GetAttributes(self) -> int:
         """Attributes."""

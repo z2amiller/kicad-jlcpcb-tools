@@ -197,7 +197,9 @@ def test_a_records_states_cannot_change_after_it_is_made(
 def test_fake_pad_holes_follow_their_kind(backend: SimpleNamespace) -> None:
     """Plated through and bare holes have holes; SMD and connector pads do not."""
     fake = backend.fake
-    assert fake.pad() == backend.records.PadRecord("smd", False)
+    assert fake.pad() == backend.records.PadRecord(
+        "smd", False, "", (0, 0), (1_000_000, 1_000_000), 0.0, "rect", "", True
+    )
     assert fake.pad("pth").has_hole and fake.pad("npth").has_hole
     assert not fake.pad("conn").has_hole
     assert fake.pad("smd", has_hole=True).has_hole

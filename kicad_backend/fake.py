@@ -13,6 +13,7 @@ from .records import (
     BoardInfo,
     BoardSnapshot,
     ComponentRecord,
+    CourtyardShape,
     FieldRecord,
     PadRecord,
     VariantDefinition,
@@ -31,9 +32,29 @@ def pad(
     kind: str = "smd",
     *,
     has_hole: Optional[bool] = None,  # noqa: UP045
+    number: str = "",
+    position_nm: tuple[int, int] = (0, 0),
+    size_nm: tuple[int, int] = (1_000_000, 1_000_000),
+    orientation_deg: float = 0.0,
+    shape: str = "rect",
+    pin_function: str = "",
+    on_copper: bool = True,
 ) -> PadRecord:
-    """Build a pad; plated and bare holes have holes unless ``has_hole`` says."""
-    return PadRecord(kind, kind in {"pth", "npth"} if has_hole is None else has_hole)
+    """Build a pad; plated and bare holes have holes unless ``has_hole`` says.
+
+    It is a 1 mm square on copper at the board's origin unless told otherwise.
+    """
+    return PadRecord(
+        kind,
+        kind in {"pth", "npth"} if has_hole is None else has_hole,
+        number,
+        position_nm,
+        size_nm,
+        orientation_deg,
+        shape,
+        pin_function,
+        on_copper,
+    )
 
 
 def component(
@@ -48,7 +69,10 @@ def component(
     exclude_from_pos: bool = False,
     schematic_path: str = "",
     side: str = "top",
+    position_nm: tuple[int, int] = (0, 0),
+    orientation_deg: float = 0.0,
     pads: Iterable[PadRecord] = (),
+    courtyard: Iterable[CourtyardShape] = (),
 ) -> ComponentRecord:
     """Build a footprint with Default only, fields in KiCad's order.
 
@@ -83,7 +107,10 @@ def component(
         footprint,
         schematic_path,
         side,
+        position_nm,
+        orientation_deg,
         tuple(pads),
+        tuple(courtyard),
         {"": state},
     )
 
