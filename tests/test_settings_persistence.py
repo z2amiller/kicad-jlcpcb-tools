@@ -11,7 +11,7 @@ from core import settings_persistence
 
 from .test_settings_defaults import plugin_dir, shipped_defaults
 from .variant_data_support import SavedNativeBoard, store_module_impl
-from .wx_harness import load_mainwindow, wx_stubs
+from .wx_harness import attach_session, load_mainwindow, wx_stubs
 
 mainwindow = load_mainwindow(
     "settings_persistence_tests",
@@ -31,7 +31,7 @@ def test_independent_windows_preserve_other_boards_variant_preferences(
     """A stale window must not erase another board's saved output or layout."""
     monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
     plugin_dir(tmp_path, shipped_defaults(), shipped_defaults())
-    first, second = (object.__new__(JLCPCBTools) for _ in range(2))
+    first, second = (attach_session(object.__new__(JLCPCBTools)) for _ in range(2))
     first.load_settings()
     second.load_settings()
     assert first.settings is not second.settings
@@ -51,7 +51,7 @@ def test_independent_windows_preserve_other_boards_variant_preferences(
         second.settings["general"]["simplify_stock"] = False
         second.save_settings()
 
-    reopened = object.__new__(JLCPCBTools)
+    reopened = attach_session(object.__new__(JLCPCBTools))
     reopened.load_settings()
     reopened_store = store_module_impl.VariantStore(
         reopened, str(tmp_path), SavedNativeBoard(tmp_path, "first")
@@ -70,7 +70,7 @@ def test_failed_variant_preference_save_preserves_window_and_disk(
     """Actual window/store saves publish neither memory nor bytes on failure."""
     monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
     plugin_dir(tmp_path, shipped_defaults(), shipped_defaults())
-    window = object.__new__(JLCPCBTools)
+    window = attach_session(object.__new__(JLCPCBTools))
     window.load_settings()
     store = store_module_impl.VariantStore(
         window, str(tmp_path), SavedNativeBoard(tmp_path)
@@ -118,7 +118,7 @@ def saved_settings(
     monkeypatch.setattr(mainwindow, "PLUGIN_PATH", str(tmp_path))
     defaults = shipped_defaults()
     plugin_dir(tmp_path, defaults)
-    window = object.__new__(JLCPCBTools)
+    window = attach_session(object.__new__(JLCPCBTools))
     window.settings = {
         **defaults,
         "gerber": {**defaults["gerber"], "subtract_mask_from_silk": True},
@@ -313,7 +313,7 @@ def test_missing_settings_migrate_atomically_and_settle(
     assert sorted(f.name for f in path.parent.iterdir()) == expected_files
     assert len(replacements) == (0 if previous == expected else 1)
     settled, replacement_count = path.read_bytes(), len(replacements)
-    reopened = object.__new__(JLCPCBTools)
+    reopened = attach_session(object.__new__(JLCPCBTools))
     reopened.load_settings()
     assert reopened.settings == expected
     assert path.read_bytes() == settled
@@ -358,12 +358,12 @@ def test_failed_settings_migration_preserves_file_and_retries(
         else:
             failure_patch.setattr(settings_persistence.os, "replace", fail_replace)
         with pytest.raises(OSError, match="migration"):
-            object.__new__(JLCPCBTools).load_settings()
+            attach_session(object.__new__(JLCPCBTools)).load_settings()
         assert path.read_bytes() == original
         assert sorted(f.name for f in path.parent.iterdir()) == PLUGIN_SETTINGS_FILES
 
     expected = {**previous, section: {**previous[section], missing: True}}
-    reopened = object.__new__(JLCPCBTools)
+    reopened = attach_session(object.__new__(JLCPCBTools))
     reopened.load_settings()
     assert reopened.settings == expected
     assert json.loads(path.read_text(encoding="utf-8")) == expected

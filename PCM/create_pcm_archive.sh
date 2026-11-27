@@ -34,7 +34,7 @@ for file in VERSION LICENSE default_settings.json ./*.py ./*.png; do
 done
 
 echo "Copy directories"
-for dir in icons lib common dblib core bom_estimation enrichment variant kicad_backend impedance grid_helpers; do
+for dir in icons lib common dblib core bom_estimation enrichment variant kicad_backend impedance grid_helpers app; do
 	cp -R "$dir" "$PLUGINS_DIR"
 done
 
@@ -44,7 +44,7 @@ cp scripts/example_post_generate_git_checkpoint.sh "$PLUGINS_DIR/scripts"
 
 echo "Prune tests and caches from packaged plugin"
 find "$PLUGINS_DIR" -type d \( -name 'tests' -o -name 'test' -o -name '__pycache__' -o -name '.pytest_cache' -o -name '.ruff_cache' -o -name '.mypy_cache' \) -prune -exec rm -rf {} +
-find "$PLUGINS_DIR" -type f \( -name 'test_*.py' -o -name '*_test.py' -o -name 'conftest.py' -o -name 'pytest.ini' -o -name '*.pyc' -o -name '*.pyo' -o -name '.DS_Store' \) -delete
+find "$PLUGINS_DIR" -type f \( -name 'test_*.py' -o -name '*_test.py' -o -name 'conftest.py' -o -name 'pytest.ini' -o -name '*.pyc' -o -name '*.pyo' -o -name '.DS_Store' -o -name 'ruff.toml' \) -delete
 
 cp PCM/icon.png "$RESOURCES_DIR"
 cp PCM/metadata.template.json "$METADATA_FILE"

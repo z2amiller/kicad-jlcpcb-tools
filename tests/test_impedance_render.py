@@ -38,7 +38,6 @@ from impedance.render import (
 )
 from tests.test_impedance_controls import harness as _capture_harness
 from tests.test_impedance_text_context import Footprint, NativeText
-from tests.wx_harness import load_siblings, wx_stubs
 
 capture_harness = _capture_harness
 
@@ -651,19 +650,14 @@ def metadata_snapshot(board: FakeBoard) -> BoardSnapshot:
 def nonplotted_metadata_edits(
     footprint: MetadataFootprint, board: FakeBoard
 ) -> Iterator[None]:
-    """Exercise real toggles and stateful native-style metadata/drawing edits."""
-    with load_siblings(
-        "_impedance_metadata_toggle_tests", ("footprint_helpers",), wx_stubs()
-    ) as loaded:
-        helpers = loaded["footprint_helpers"]
-        for toggle in (
-            helpers.toggle_exclude_from_bom,
-            helpers.toggle_exclude_from_pos,
-        ):
-            assert toggle(footprint) is True
-            yield
-            assert toggle(footprint) is False
-            yield
+    """Toggle exclusions, then make stateful native-style metadata/drawing edits."""
+    for flag in (8, 4):  # FP_EXCLUDE_FROM_BOM, FP_EXCLUDE_FROM_POS_FILES
+        footprint.SetAttributes(footprint.GetAttributes() ^ flag)
+        assert footprint.GetAttributes() & flag
+        yield
+        footprint.SetAttributes(footprint.GetAttributes() ^ flag)
+        assert not footprint.GetAttributes() & flag
+        yield
     footprint.description = "Updated unconsumed description"
     yield
     footprint.keywords = "Updated unconsumed keywords"

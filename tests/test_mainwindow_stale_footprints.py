@@ -88,4 +88,6 @@ def test_toggle_handlers_skip_stale_refs_and_continue_live_refs(
     part = window.store.get_part("R2")
     assert bool(part["exclude_from_bom"]) == expected_bom
     assert bool(part["exclude_from_pos"]) == expected_pos
-    getattr(window.partlist_data_model, handler_name).assert_called_once_with("R2")
+    window.partlist_data_model.set_bom_pos.assert_called_once_with(
+        "R2", exclude_from_bom=expected_bom, exclude_from_pos=expected_pos
+    )

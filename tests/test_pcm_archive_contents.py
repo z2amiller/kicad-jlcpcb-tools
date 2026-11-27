@@ -48,6 +48,7 @@ def pcm_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "kicad_backend",
         "impedance",
         "grid_helpers",
+        "app",
     ):
         shutil.copytree(
             _ROOT / directory,
@@ -108,7 +109,8 @@ def test_pcm_archive_excludes_development_infrastructure(pcm_archive: Path) -> N
         path = PurePosixPath(name)
         if (
             prohibited_directories.intersection(path.parts)
-            or path.name in {"conftest.py", "pytest.ini", ".DS_Store", "AGENTS.md"}
+            or path.name
+            in {"conftest.py", "pytest.ini", ".DS_Store", "AGENTS.md", "ruff.toml"}
             or path.match("test_*.py")
             or path.match("*_test.py")
             or path.suffix in {".pyc", ".pyo"}
@@ -140,6 +142,7 @@ def test_pcm_archive_retains_runtime_resources_and_licenses(pcm_archive: Path) -
         "fabrication_archive.py",
         "kicad_backend/__init__.py",
         "kicad_backend/swig/read.py",
+        "app/session.py",
         "impedance/jlcpcb_calculator.py",
         "impedance/_vendor/__init__.py",
         "grid_helpers/__init__.py",

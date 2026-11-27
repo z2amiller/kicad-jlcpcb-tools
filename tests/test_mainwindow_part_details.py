@@ -6,7 +6,7 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from .wx_harness import load_mainwindow, wx_stubs
+from .wx_harness import attach_session, load_mainwindow, wx_stubs
 
 _ids = count(1)
 mainwindow = load_mainwindow(
@@ -23,7 +23,7 @@ def _window(
     monkeypatch: pytest.MonkeyPatch, codes: list[Optional[str]]
 ) -> tuple[JLCPCBTools, Mock, list[Mock]]:
     """Capture dialogs while exercising the real handler and display helper."""
-    window = object.__new__(JLCPCBTools)
+    window = attach_session(object.__new__(JLCPCBTools))
     window.footprint_list = Mock(spec_set=["GetSelections"])
     window.footprint_list.GetSelections.return_value = list(range(len(codes)))
     window.partlist_data_model = Mock(spec_set=["get_lcsc", "get_footprint"])
