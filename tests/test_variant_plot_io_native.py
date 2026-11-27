@@ -71,6 +71,7 @@ def test_native_temporary_board_save_load_and_ownership(
         snapshot, name = session.begin_generation()
         exporter.begin_generation(snapshot, name, (), session.validate_generation)
         staging = Path(exporter._generation.directory.name)
+        plot_source = staging / "plot-source.kicad_pcb"
         try:
             if case == "lifetime":
                 clone = exporter._get_plot_board()
@@ -92,7 +93,10 @@ def test_native_temporary_board_save_load_and_ownership(
                 if case == "save-directory":
                     (staging / "plot-source.kicad_pcb").mkdir()
                 elif case == "save-readonly":
-                    staging.chmod(0o500)
+                    # A read-only file blocks the write on POSIX and Windows
+                    # alike; Windows ignores a directory's read-only bit.
+                    plot_source.touch()
+                    plot_source.chmod(0o400)
                 elif case == "publication-save-directory":
                     exporter._get_plot_board()
                     (staging / "validation-source.kicad_pcb").mkdir()
@@ -119,8 +123,6 @@ def test_native_temporary_board_save_load_and_ownership(
                     else:
                         exporter._get_plot_board()
         finally:
-            if case == "save-readonly":
-                staging.chmod(0o700)
             exporter.abort_generation()
             session.end_generation()
         gc.collect()
@@ -259,7 +261,9 @@ def test_native_copy_preserves_fonts_layers_and_groups(
     saved = source.read_bytes()
     blocked = tmp_path / "not-a-file"
     blocked.mkdir()
-    with pytest.raises(IsADirectoryError):
+    # POSIX reports writing to a directory as IsADirectoryError, Windows as
+    # PermissionError; callers catch OSError.
+    with pytest.raises(OSError):
         exporter._serialize_board(blocked)
     assert exporter._board_content() == before
     target = tmp_path / "copy.kicad_pcb"
