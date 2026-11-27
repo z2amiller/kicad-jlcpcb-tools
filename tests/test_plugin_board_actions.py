@@ -127,13 +127,17 @@ def harness() -> Iterator[Any]:
     """Load the real action plugin against isolated stateful framework boundaries."""
     editor = Editor()
     windows: list[Any] = []
-    state = SimpleNamespace(editor=editor, windows=windows, autofill=None)
+    state = SimpleNamespace(
+        editor=editor, windows=windows, autofill=None, open_failure=None, messages=[]
+    )
 
     class ActionPlugin:
         def __init__(self) -> None:
             self.defaults()
 
     def make_window(parent: Any, **kwargs: Any) -> Any:
+        if state.open_failure is not None:
+            raise state.open_failure
         window = SimpleNamespace(
             board_action=kwargs.get("board_action", lambda action: action()),
             Center=lambda: None,
@@ -162,6 +166,9 @@ def harness() -> Iterator[Any]:
             CommandEvent=lambda event_type, item_id: SimpleNamespace(
                 event_type=event_type, item_id=item_id
             ),
+            MessageBox=lambda text, *_args: state.messages.append(text),
+            OK=4,
+            ICON_ERROR=512,
         ),
         f"{package}.mainwindow": module(
             f"{package}.mainwindow", JLCPCBTools=make_window
@@ -304,6 +311,30 @@ def test_native_pointer_identifies_new_wrapper_of_same_native_board(
     assert harness.editor.board.fields["R1"] == "C800"
 
 
+def test_a_write_asked_for_while_another_is_dispatched_is_refused(
+    harness: Any,
+) -> None:
+    """A second write cannot replace one queued for KiCad's wrapper."""
+    action = open_window(harness)
+    dispatch = harness.editor.ProcessEvent
+    refused: list[BaseException] = []
+
+    def interrupt_then_dispatch(event: Any) -> bool:
+        try:
+            action(lambda: harness.editor.board.fields.update(R2="C999"))
+        except RuntimeError as error:
+            refused.append(error)
+        return dispatch(event)
+
+    harness.editor.ProcessEvent = interrupt_then_dispatch
+    action(lambda: harness.editor.board.fields.update(R1="C300"))
+
+    assert [str(error) for error in refused] == [
+        "A JLCPCB Tools board edit is already running"
+    ]
+    assert harness.editor.board.fields == {"R1": "C300", "R2": "C200"}
+
+
 def test_context_is_rechecked_inside_native_callback(harness: Any) -> None:
     """Never apply a queued callback if the board changed during native dispatch."""
     action = open_window(harness)
@@ -342,6 +373,61 @@ def test_failed_event_dispatch_does_not_leave_a_pending_edit(harness: Any) -> No
     harness.editor.ProcessEvent = dispatch
     action(lambda: called.append(True))
     assert called == [True]
+
+
+@pytest.mark.parametrize("failure", ["raised", "unhandled"])
+def test_a_failed_dispatch_leaves_no_write_for_the_next_opening(
+    harness: Any, failure: str
+) -> None:
+    """Opening the plugin again opens a window; the refused write stays undone."""
+    action = open_window(harness)
+    editor = harness.editor
+    dispatch = editor.ProcessEvent
+    if failure == "raised":
+
+        def fail_dispatch(event: Any) -> bool:
+            raise RuntimeError("native event failure")
+
+        editor.ProcessEvent = fail_dispatch
+    else:
+        editor.consume_event = False
+    called: list[bool] = []
+    with pytest.raises(RuntimeError):
+        action(lambda: called.append(True))
+    editor.ProcessEvent = dispatch
+    editor.consume_event = True
+
+    editor.native_run()
+
+    assert called == []
+    assert len(harness.windows) == 2
+
+
+def test_a_write_while_opening_outside_kicads_wrapper_is_refused(
+    harness: Any,
+) -> None:
+    """A window opened by a Run() KiCad did not wrap cannot write as it opens."""
+    harness.autofill = lambda: harness.editor.board.fields.update(R1="C400")
+
+    harness.editor.plugin.Run()
+
+    assert harness.editor.board.fields["R1"] == "C100"
+    assert harness.messages == ["KiCad did not enter its native action wrapper"]
+
+
+def test_a_window_that_fails_to_open_leaves_other_windows_writing(
+    harness: Any,
+) -> None:
+    """A failed opening ends with it, so an open window's writes are dispatched."""
+    action = open_window(harness)
+    harness.open_failure = ValueError("Save the PCB before opening the JLCPCB plugin.")
+    harness.editor.native_run()
+    assert harness.messages == ["Save the PCB before opening the JLCPCB plugin."]
+
+    action(lambda: harness.editor.board.fields.update(R1="C300"))
+
+    assert harness.editor.board.fields["R1"] == "C300"
+    assert harness.editor.events == [71]
 
 
 def test_python_only_menu_handler_cannot_bypass_native_transaction(
