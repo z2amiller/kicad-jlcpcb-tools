@@ -18,6 +18,7 @@ Everything here is plain Python 3.9, so it runs inside KiCad's own interpreter. 
 | `fit.py` | Pad pairing, the placement, the fit grades, JLC's package origin and the courtyard overhang |
 | `resolver.py` | One part's verdict: its rotation, fit and polarity |
 | `resolving.py` | The resolver called on a parsed EasyEDA record |
+| `kicad_adapter.py` | A live board's `kicad_backend` records read into `BoardPart`s: the resolver's inputs, the LCSC number and the verdict key |
 | `easyeda_client.py` | The EasyEDA Pro client: the batch lookup, the footprint and symbol documents, the backoff |
 | `worker.py` | The background fetch thread: two paced queues and a breaker |
 | `cache.py` | The global cache of EasyEDA's answers |
@@ -102,7 +103,9 @@ When any of this fails, no terminal is named. The footprint's body outline (Pro 
 
 ## Reading KiCad files
 
-The plugin reads a board through pcbnew. The development tools and the tests read KiCad files from plain Python instead: `boardfile.py` parses the footprints of a `.kicad_pcb` or `.kicad_mod` file into their pads (in the footprint's own frame, with the placed rotation taken off), pin functions, LCSC field and courtyard box. The LCSC field is read as the plugin reads a footprint's default assignment, `part_assignments.resolve_assignment` (`boardfile.lcsc_assignment`, and a test holds the two together): only part-number field names count (LCSC, JLC or JLCPCB, with an optional Part, Part Number, PN, Code or the like), the number is upper-cased, and two fields naming different numbers are a conflict, read as no number. The pads are the soldered ones, the same set the plugin keeps when it reads a board through pcbnew: every copper pad that is not an NPTH hole, numbered or not. A paste-only aperture is left out. The alignment pairs pads by name, so an unnumbered pad only counts in the pad-box centre. That centre is taken from the pads' positions and sizes, so it is the centre of pcbnew's pad bounding box except where the copper is not the pad's size at its position: a custom pad's extra primitives, copper offset from its drill, or a pad turned off the 90-degree grid. Over KiCad 10's library the pad sets agree on every footprint, and the centres on all but 385 of the 15,113 footprints with soldered pads: 358 with custom pads, 11 with offset copper, 2 with both and 14 with pads at other angles. The largest difference is 2.25 mm.
+The plugin reads the open board through `kicad_backend`, whose records hold each footprint's placement, pads and courtyard as KiCad reports them on the board, in nanometres. `kicad_adapter.py` reads the records its caller passes (which footprints count is the caller's; the plugin's parts list shows those whose reference `board_parts.is_listed` accepts) into one `BoardPart` each: its reference, LCSC number, footprint name, side and placed rotation, its soldered pads in the footprint's own frame, its courtyard box and its verdict key (see the verdict store below). The pads are turned back by the footprint's angle and rounded to whole nanometres, as pcbnew rounds its own footprint-relative positions, so a footprint turned by a multiple of 90 degrees keys exactly as it does unturned. KiCad stores a bottom-side footprint's pads mirrored, so they are mirrored back. The courtyard is the box of the courtyard shapes' centrelines, taken back into the footprint frame. The records give each shape's box on the board, not its points, so a footprint placed off a multiple of 90 degrees reads a courtyard on the large side (at 45 degrees a 2.96 × 1.46 mm C_0603 courtyard reads 4.42 × 4.42 mm), and an arc reads its whole sweep where `boardfile` reads its three points; a larger courtyard only hides the body caveat. The module reads the records by their attributes and imports nothing from the plugin, so its tests build records of their own, and `lcsc_of` lets a caller read part numbers its own way.
+
+The development tools and the tests read KiCad files from plain Python instead: `boardfile.py` parses the footprints of a `.kicad_pcb` or `.kicad_mod` file into their pads (in the footprint's own frame, with the placed rotation taken off), pin functions, LCSC field and courtyard box. The LCSC field is read as the plugin reads a footprint's default assignment, `part_assignments.resolve_assignment` (`boardfile.lcsc_assignment`, and a test holds the two together): only part-number field names count (LCSC, JLC or JLCPCB, with an optional Part, Part Number, PN, Code or the like), the number is upper-cased, and two fields naming different numbers are a conflict, read as no number. The pads are the soldered ones, the same set `kicad_adapter` keeps from the live board's records: every copper pad that is not an NPTH hole, numbered or not. A paste-only aperture is left out. The alignment pairs pads by name, so an unnumbered pad only counts in the pad-box centre. That centre is taken from the pads' positions and sizes, so it is the centre of pcbnew's pad bounding box except where the copper is not the pad's size at its position: a custom pad's extra primitives, copper offset from its drill, or a pad turned off the 90-degree grid. Over KiCad 10's library the pad sets agree on every footprint, and the centres on all but 385 of the 15,113 footprints with soldered pads: 358 with custom pads, 11 with offset copper, 2 with both and 14 with pads at other angles. The largest difference is 2.25 mm.
 
 `tools/jlcfootprint/kicad_library.py` reads a named KiCad library footprint for the tests. It uses the snapshot recorded under `tests/fixtures/jlcfootprint/kicad/` when there is one, so the tests see the same pads on every machine and run without KiCad. `tools/jlcfootprint/snapshot_kicad_footprints.py` records the snapshots from an installed KiCad, and `test_jlcfootprint_snapshots.py` compares them with the installed library where there is one.
 
@@ -190,6 +193,14 @@ python3 $T/validate_board.py $B/pin_functions_and_marks/pin_functions_and_marks.
 
 All 47 parts on the corner-case board agree, from the classic answers and from the Pro host's, with the same report; on the second board all 16 agree. `tests/test_jlcfootprint_gate.py` runs the same comparisons in the test suite, compares each report with the committed one byte for byte, and pins a few of the verdicts.
 
+**The live reader.** A live board is read through `kicad_backend` and `kicad_adapter`, not through `boardfile`, so `tools/jlcfootprint/check_live_adapter.py` holds the two readers to each other on the gate boards. Run with KiCad's own Python, it loads a board with pcbnew, reads it through the SWIG backend and `kicad_adapter`, and compares every footprint with `boardfile`'s reading (it is for boards placed on quarter turns, as the gate boards are): the LCSC number, side, placed rotation, footprint name and value, the pads (positions and sizes to 0.1 µm, angles modulo 180, pin functions), the courtyard box and the verdict key, and, for every part with a recorded answer, the status, fit, rotation and package origin the resolver returns from each. Any difference exits 1. On both boards every footprint agrees. `tests/test_jlcfootprint_live_reader_native.py` runs the same comparison in the native KiCad test lanes.
+
+```bash
+KPY=/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
+$KPY $T/check_live_adapter.py $B/corner_case/corner_case.kicad_pcb
+$KPY $T/check_live_adapter.py $B/pin_functions_and_marks/pin_functions_and_marks.kicad_pcb --pro-fixtures $FX/easyeda_pro
+```
+
 ## Fetching from EasyEDA
 
 `easyeda_client.EasyEdaClient` makes the requests and `worker.FetchWorker` paces them on one daemon thread. Neither decides what to fetch: a caller queues LCSC numbers and uuids and handles each answer.
@@ -230,7 +241,6 @@ All 47 parts on the corner-case board agree, from the classic answers and from t
 
 The package arrives in parts. Still to come:
 
-- **The live reader**: a board's footprints read through `kicad_backend` into the resolver's inputs.
 - **The CPL path**: CPL rotations from the check, behind a setting that is off by default.
 - **The UI**: a JLC column with a hover, a detail dialog with a pad overlay, overrides and actions.
 - **Variant boards**: the check on boards with KiCad design variants.

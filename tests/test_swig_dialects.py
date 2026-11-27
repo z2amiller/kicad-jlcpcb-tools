@@ -87,11 +87,16 @@ def _probe(pcbnew: Any) -> dict[str, Any]:
     else:
         held = [str(twice.GetProperties()["Twice"])]
 
+    # KiCad 7 draws a footprint's shapes as FP_SHAPE, later KiCads as PCB_SHAPE.
+    drawn = getattr(pcbnew, "FP_SHAPE", None) or pcbnew.PCB_SHAPE
+    shape_class = str(drawn(pcbnew.FOOTPRINT(pcbnew.BOARD())).GetClass())
+
     return {
         "major": int(str(pcbnew.Version()).split(".", 1)[0]),
         "builtin_fields": builtin,
         "holds_dnp": holds_dnp,
         "keeps_repeated_fields": held == ["first", "second"],
+        "footprint_shape_class": shape_class,
     }
 
 

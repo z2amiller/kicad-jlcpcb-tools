@@ -72,16 +72,61 @@ def _footprint(pcbnew: Any, dialect: Any, board: Any, part: Part) -> Any:
         pad.SetNumber(spec.number)
         pad.SetAttribute(getattr(pcbnew, attribute))
         pad.SetShape(pcbnew.PAD_SHAPE_RECT)
-        size = pcbnew.VECTOR2I(mm(1.0), mm(1.0))
+        size = pcbnew.VECTOR2I(mm(spec.size[0]), mm(spec.size[1]))
         pad.SetSize(size)
         if drilled:
             pad.SetDrillSize(
                 size if spec.kind == "npth" else pcbnew.VECTOR2I(mm(0.8), mm(0.8))
             )
         pad.SetLayerSet(getattr(pcbnew.PAD, mask)())
+        # The footprint is still at the origin and unturned, so the board
+        # position is the footprint-frame one.
+        pad.SetPosition(pcbnew.VECTOR2I(mm(spec.at[0]), mm(spec.at[1])))
+        pad.SetOrientation(pcbnew.EDA_ANGLE(spec.angle, pcbnew.DEGREES_T))
+        pad.SetPinFunction(spec.pin_function)
+        _keep_local(pad)
         footprint.Add(pad)
+    if part.courtyard:
+        _add_courtyard(pcbnew, footprint, part)
+    # Placing the footprint moves and turns what it holds, as the editor does.
+    footprint.SetOrientation(pcbnew.EDA_ANGLE(part.angle, pcbnew.DEGREES_T))
+    footprint.SetPosition(pcbnew.VECTOR2I(mm(part.at[0]), mm(part.at[1])))
     board.Add(footprint)
     return footprint
+
+
+def _add_courtyard(pcbnew: Any, footprint: Any, part: Part) -> None:
+    """Draw the part's courtyard rectangle on F.CrtYd, in the footprint frame."""
+    mm = pcbnew.FromMM
+    # KiCad 7 draws a footprint's graphics as FP_SHAPE.
+    shape = getattr(pcbnew, "FP_SHAPE", pcbnew.PCB_SHAPE)(footprint)
+    shape.SetShape(pcbnew.SHAPE_T_RECT)
+    x0, y0, x1, y1 = part.courtyard
+    shape.SetStart(pcbnew.VECTOR2I(mm(x0), mm(y0)))
+    shape.SetEnd(pcbnew.VECTOR2I(mm(x1), mm(y1)))
+    shape.SetLayer(pcbnew.F_CrtYd)
+    shape.SetWidth(mm(part.courtyard_stroke))
+    _keep_local(shape)
+    footprint.Add(shape)
+    # A text on the courtyard layer, which bounds no courtyard. KiCad 7 draws a
+    # footprint's texts as FP_TEXT.
+    text = getattr(pcbnew, "FP_TEXT", pcbnew.PCB_TEXT)(footprint)
+    text.SetText("note")
+    text.SetLayer(pcbnew.F_CrtYd)
+    _keep_local(text)
+    footprint.Add(text)
+
+
+def _keep_local(item: Any) -> None:
+    """Record an item's place in its footprint where KiCad keeps it apart.
+
+    KiCad 7 keeps each pad's and shape's footprint-frame position beside its
+    board one and redraws from it when the footprint moves; later KiCads work
+    the footprint frame out from the board position.
+    """
+    keep = getattr(item, "SetLocalCoord", None)
+    if callable(keep):
+        keep()
 
 
 def swig_board(

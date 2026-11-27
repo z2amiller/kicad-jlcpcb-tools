@@ -10,3 +10,4 @@ class KiCad9(Dialect):
     builtin_fields = ("Reference", "Value", "Datasheet", "Description")
     holds_dnp = True
     keeps_repeated_fields = True
+    footprint_shape_class = "PCB_SHAPE"

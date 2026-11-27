@@ -86,6 +86,47 @@ def test_side_and_pads_read_back(board: MakeBoard) -> None:
     assert chip.pads == ()
 
 
+def test_placement_pads_and_courtyard_read_back_on_the_board(board: MakeBoard) -> None:
+    """Where KiCad has a turned footprint, its pads and its courtyard on the board.
+
+    J1's anchor is at (10, 20) mm and it is turned 90 degrees, which on KiCad's
+    Y-down canvas takes the footprint's +X to the board's -Y: pad 1 at (1, 0)
+    lands at (10, 19), pad 2 at (0, 0.5) at (10.5, 20).
+    """
+    pads = (
+        PadSpec("1", "smd", at=(1.0, 0.0), size=(1.0, 0.5), pin_function="A"),
+        PadSpec("2", "pth", at=(0.0, 0.5), size=(1.2, 1.2), angle=30.0),
+    )
+    part = Part(
+        "J1", pads=pads, at=(10.0, 20.0), angle=90.0, courtyard=(-2.0, -1.0, 2.0, 1.0)
+    )
+    (connector,) = board([part]).backend.snapshot().components
+    mm = 1_000_000
+
+    assert connector.position_nm == (10 * mm, 20 * mm)
+    assert connector.orientation_deg == 90.0
+    assert [
+        (
+            pad.number,
+            pad.position_nm,
+            pad.size_nm,
+            round(pad.orientation_deg, 9),
+            pad.shape,
+            pad.pin_function,
+            pad.on_copper,
+        )
+        for pad in connector.pads
+    ] == [
+        ("1", (10 * mm, 19 * mm), (mm, mm // 2), 90.0, "rect", "A", True),
+        ("2", (10_500_000, 20 * mm), (1_200_000, 1_200_000), 120.0, "rect", "", True),
+    ]
+    # The rectangle's 4 x 2 mm turns to 2 x 4 mm about (10, 20); the box
+    # holds half the 0.05 mm stroke on every side.
+    assert [(shape.bbox_nm, shape.stroke_nm) for shape in connector.courtyard] == [
+        ((8_975_000, 17_975_000, 11_025_000, 22_025_000), 50_000)
+    ]
+
+
 def test_references_may_repeat(board: MakeBoard) -> None:
     """Footprints sharing a reference stay distinct, in board order, by UUID."""
     snapshot = board(

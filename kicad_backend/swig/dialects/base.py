@@ -20,12 +20,15 @@ class Dialect:
     - ``holds_dnp``: whether a footprint has a DNP flag.
     - ``keeps_repeated_fields``: whether a footprint keeps two fields with
       one name.
+    - ``footprint_shape_class``: the class name (``GetClass``) a line, arc,
+      circle, rectangle or polygon drawn in a footprint reports.
     """
 
     major: int
     builtin_fields: tuple[str, ...]
     holds_dnp: bool
     keeps_repeated_fields: bool
+    footprint_shape_class: str
 
     def fields(self, footprint: Any) -> list[FieldRecord]:
         """Read a footprint's fields in KiCad's order, every one of them.

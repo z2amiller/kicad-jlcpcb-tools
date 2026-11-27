@@ -36,6 +36,7 @@ def backend_modules() -> Iterator[SimpleNamespace]:
         (
             "kicad_backend",
             "kicad_backend.fake",
+            "kicad_backend.records",
             "kicad_backend.swig",
             "kicad_backend.swig.dialects",
         ),
@@ -44,6 +45,7 @@ def backend_modules() -> Iterator[SimpleNamespace]:
         yield SimpleNamespace(
             api=modules["kicad_backend"],
             fake=modules["kicad_backend.fake"],
+            records=modules["kicad_backend.records"],
             swig=modules["kicad_backend.swig"],
             dialects=modules["kicad_backend.swig.dialects"],
         )

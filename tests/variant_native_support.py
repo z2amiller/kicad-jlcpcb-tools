@@ -134,6 +134,9 @@ class Footprint:
     def Pads(self) -> list[Any]:
         return [swig_doubles.Pad(str(number)) for number in (1, 2)]
 
+    def GraphicalItems(self) -> list[Any]:
+        return []
+
     def GetAttributes(self) -> int:
         return self.attributes
 

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from .swig_doubles import Board, Field, Footprint, Pad, editor
+from .swig_doubles import Board, Field, Footprint, Pad, Shape, Text, editor
 from .wx_harness import load_siblings
 
 
@@ -173,3 +173,43 @@ def test_kicad7_footprints_read_their_property_maps(swig: SimpleNamespace) -> No
         ("MPN", "RC0603"),
     ]
     assert record.default.dnp is False
+
+
+def test_a_courtyard_holds_only_the_drawn_shapes(swig: SimpleNamespace) -> None:
+    """A text on a courtyard layer is skipped, and a shape off it is not read."""
+    footprint = Footprint(
+        "U1",
+        shapes=[
+            Shape((0, 0, 2_000_000, 1_000_000)),
+            Text(),
+            Shape((0, 0, 9_000_000, 9_000_000), layer=0),
+        ],
+    )
+    (component,) = swig.backend(editor(Board([footprint]))).snapshot().components
+    assert [(shape.bbox_nm, shape.stroke_nm) for shape in component.courtyard] == [
+        ((0, 0, 2_000_000, 1_000_000), 50_000)
+    ]
+
+
+def test_kicad7_reads_its_courtyard_shapes_by_their_own_class(
+    swig: SimpleNamespace,
+) -> None:
+    """KiCad 7's footprint shapes report MGRAPHIC; a PCB_SHAPE name would skip them all."""
+    footprint = _KiCad7Footprint({})
+    footprint.shapes = [Shape((0, 0, 2_000_000, 1_000_000), kicad_class="MGRAPHIC")]
+    (component,) = (
+        swig.backend(editor(Board([footprint]), "7.0.11")).snapshot().components
+    )
+    assert [shape.bbox_nm for shape in component.courtyard] == [
+        (0, 0, 2_000_000, 1_000_000)
+    ]
+
+
+def test_a_pad_shape_kicad_adds_later_reads_as_unnamed(swig: SimpleNamespace) -> None:
+    """A PAD_SHAPE value past the known ones reads as "" rather than failing the snapshot."""
+    pad = Pad("1")
+    pad.GetShape = lambda: 42
+    (component,) = (
+        swig.backend(editor(Board([Footprint("R1", pads=[pad])]))).snapshot().components
+    )
+    assert component.pads[0].shape == ""
